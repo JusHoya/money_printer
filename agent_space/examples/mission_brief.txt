@@ -1,0 +1,69 @@
+PRD: Orbital Lead Newsletter - Agentic Automation
+1. Project Overview
+Title: The Orbital Lead Objective: A high-signal, technical newsletter for aerospace professionals covering GNC, Astrodynamics, Hypersonics, and Frontier Tech (AI, Fusion). Cadence: Monday, Wednesday, Friday. Review Date: Sundays (Weekly Batch). Platforms: Substack (Primary), LinkedIn & X (Growth).
+
+2. Agent Architecture (The "Orbital Crew")
+A. Research Agent ("The Scout")
+
+• Sources: ArXiv (Astrophysics/Engineering), SpaceNews, NASA/ESA press releases, IEEE Xplore, specialized RSS feeds.
+
+• Logic: Filter for "high technical depth." Avoid generic mainstream "space" news. Look for new GN&C algorithms, fusion milestones, and hypersonic flight data.
+
+• Output: Curated list of 5–10 "Stories of Interest" with source links and a 2-sentence technical "Why it matters" summary.
+
+B. Technical Writing Agent ("The SME")
+
+• Persona: Spacecraft GNC Systems Engineer with 15+ years experience. Professional, analytical, and slightly visionary.
+
+• Task: Transform "Scout" notes into long-form Substack posts.
+
+• Format: Deep-dive (Monday), Quick Hits/Events (Wednesday), Breakthrough Analysis (Friday).
+
+• Constraint: Must use correct nomenclature (e.g., ECI vs ECEF, 6-DOF, Monte Carlo, specific impulse).
+
+C. Marketing Agent ("The Growth Lead")
+
+• Task: Repurpose the newsletter into platform-specific hooks.
+
+• X (Twitter): Creates a "Thread" (10-12 posts) based on the Monday deep-dive.
+
+• LinkedIn: Creates a "Professional Insight" post (300-500 words) focusing on industry impact.
+
+D. Publishing Agent ("The Connector")
+
+• Task: Interface with Substack, X, and LinkedIn APIs.
+
+• Human-in-the-Loop: Sends a notification to the user on Sunday with a link to the "Weekly Review" (Notion/Airtable).
+
+E. Orchestration Agent ("The Flight Director")
+
+• Task: The master controller. Triggers "The Scout" on Thursdays, "The SME" on Fridays, and "The Growth Lead" on Saturdays.
+
+• Error Handling: If an agent fails or output is low quality, it re-runs the prompt or alerts the user.
+
+3. Weekly Workflow
+1. Thu-Fri: Scout & SME generate the three drafts for the coming week.
+
+2. Sat: Growth Lead generates social assets.
+
+3. Sun (10:00 AM): Orchestrator sends a "Ready for Review" notification.
+
+4. Sun (Evening): User approves/edits in Notion.
+
+5. Mon/Wed/Fri: Publishing Agent pushes to Substack, X, and LinkedIn.
+
+4. Tech Stack & Minimum Viable Automation (MVA)
+• Agent Framework: CrewAI or LangChain (Python-based).
+
+• LLM: GPT-4o or Claude 3.5 Sonnet (for technical writing).
+
+• Review Layer: Notion API (Agents write to Notion, user edits there).
+
+• Scheduling: Make.com or Zapier.
+
+• Distribution: Hypefury (X/LinkedIn) + Substack API.
+
+5. Compliance & Security
+• Strict Filter: Do not ingest or output data related to active ITAR-restricted military programs.
+
+• Verification: All technical claims must be cross-referenced with public-domain citations.

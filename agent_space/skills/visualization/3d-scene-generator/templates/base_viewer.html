@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hoya Box | 3D Sim Viewer</title>
+    <style>
+        body { margin: 0; background-color: #000; color: #00ff00; font-family: 'Courier New', Courier, monospace; overflow: hidden; }
+        #hud { position: absolute; top: 10px; left: 10px; pointer-events: none; border: 1px solid #00ff00; padding: 10px; background: rgba(0, 20, 0, 0.7); }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <div>OBJECTIVE: {{objective}}</div>
+        <div>TIME: <span id="time-val">0.00</span>s</div>
+        <div>ALTITUDE: <span id="alt-val">0</span>m</div>
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- SIMULATION DATA ---
+        const simData = {{sim_data}};
+        let currentFrame = 0;
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        const gridHelper = new THREE.GridHelper(100, 100, 0x004400, 0x002200);
+        scene.add(gridHelper);
+
+        const light = new THREE.PointLight(0xffffff, 100, 1000);
+        light.position.set(50, 50, 50);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        // --- ACTOR ---
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshPhongMaterial({ color: 0x00ff00, wireframe: true });
+        const actor = new THREE.Mesh(geometry, material);
+        scene.add(actor);
+
+        camera.position.set(5, 5, 5);
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (currentFrame < simData.length) {
+                const state = simData[currentFrame];
+                actor.position.set(state.x, state.y, state.z);
+                if (state.rotation) {
+                    actor.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+                }
+                
+                document.getElementById('time-val').innerText = state.time.toFixed(2);
+                document.getElementById('alt-val').innerText = state.y.toFixed(0);
+                
+                currentFrame++;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>

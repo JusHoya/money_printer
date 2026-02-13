@@ -1,0 +1,29 @@
+{
+  "mission_id": "mission-001-fix-settlement",
+  "objective": "Fix settlement logic and update documentation",
+  "roster": [
+    { "agent_id": "code-architect", "role": "Execution", "status": "Busy" },
+    { "agent_id": "technical-writer", "role": "Documentation", "status": "Pending" },
+    { "agent_id": "cli-devops", "role": "QA", "status": "Pending" }
+  ],
+  "phases": [
+    {
+      "phase_name": "Phase 1: Engine Core Repair",
+      "steps": [
+        { "step_id": 1, "action": "Refactor MatchingEngine", "assigned_to": "code-architect" }
+      ]
+    },
+    {
+      "phase_name": "Phase 2: Laboratory Modernization",
+      "steps": [
+        { "step_id": 2, "action": "Refactor lab.py", "assigned_to": "code-architect" }
+      ]
+    },
+    {
+      "phase_name": "Phase 3: Documentation & Polish",
+      "steps": [
+        { "step_id": 3, "action": "Update README.md", "assigned_to": "technical-writer" }
+      ]
+    }
+  ]
+}

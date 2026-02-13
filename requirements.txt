@@ -1,0 +1,11 @@
+# Requirements for Dashboard
+requests
+python-dotenv
+cryptography
+keyboard; platform_system=="Windows"
+
+# Requirements for ML
+scikit-learn
+joblib
+pandas
+numpy

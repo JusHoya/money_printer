@@ -1,0 +1,17 @@
+# Logs and Debug outputs
+*.log
+*_output.txt
+debug_*.txt
+experimental_log.txt
+final_test.log
+
+# Temporary CLI artifacts
+.gemini/commands/debug-*.toml
+.gemini/tmp
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
