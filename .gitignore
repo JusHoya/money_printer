@@ -1,0 +1,22 @@
+# Logs and Debug outputs
+*.log
+*_output.txt
+debug_*.txt
+experimental_log.txt
+final_test.log
+/logs
+
+# Temporary CLI artifacts
+.gemini/commands/debug-*.toml
+.gemini/tmp
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+Skippy_demo.txt
+kalshi_priv.key
+Kalshi_priv_key_1_readOnly.key
+
