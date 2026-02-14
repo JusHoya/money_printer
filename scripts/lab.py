@@ -1,26 +1,50 @@
+"""
+🧪 MONEY PRINTER LABORATORY (v2.0)
+The Scientific Method Pipeline for Trading Strategy Optimization.
+
+Modes:
+  --audit     : Comprehensive analysis of harvest logs (Accuracy, PnL, Coverage)
+  --optimize  : Genetic evolutionary grid search for V2 strategy parameters
+  --refine    : The Loop™ - Audits, checks threshold (default 80%), and auto-optimizes if needed.
+
+Usage:
+  python scripts/lab.py --audit
+  python scripts/lab.py --optimize [--strategy crypto|weather]
+  python scripts/lab.py --refine [--threshold 80]
+"""
+
 import os
+import sys
 import glob
+import json
+import itertools
+import argparse
 import pandas as pd
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Any
 
-from src.core.interfaces import MarketData, TradeSignal
+# Ensure project root is in path
+sys.path.append(os.getcwd())
+
+from src.core.interfaces import MarketData
 from src.core.matching_engine import SimulatedExchange
-from src.strategies.crypto_strategy import Crypto15mTrendStrategy, Crypto15mTrendStrategyV2
-from src.strategies.weather_strategy import WeatherArbitrageStrategy, WeatherArbitrageStrategyV2
-from src.strategies.bracket_strategy import BracketStrategy, WeatherBracketStrategy
+from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2
+from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
 from src.utils.logger import logger
 
-class ReplayProvider:
-    """
-    Feeds historical data from CSV logs into the strategy.
-    """
-    def __init__(self, log_dir="logs"):
+# --- CONFIGURATION ---
+LOG_DIR = "logs"
+AUDIT_REPORT_FILE = os.path.join(LOG_DIR, "audit_report.json")
+OPTIMAL_PARAMS_FILE = os.path.join(LOG_DIR, "optimal_params.json")
+
+class Lab:
+    def __init__(self):
         self.data = []
-        self._load_data(log_dir)
+        self._load_data()
         
-    def _load_data(self, log_dir):
-        files = glob.glob(os.path.join(log_dir, "data_*.csv"))
+    def _load_data(self):
+        """Loads and merges all data logs."""
+        files = glob.glob(os.path.join(LOG_DIR, "data_*.csv"))
         if not files:
             print("❌ No log files found.")
             return
@@ -28,11 +52,20 @@ class ReplayProvider:
         df_list = []
         for f in files:
             try:
-                # Read only relevant cols to save memory
-                df = pd.read_csv(f)
-                if 'Type' in df.columns and 'MARKET_DATA' in df['Type'].values:
-                     df_list.append(df[df['Type'] == 'MARKET_DATA'])
-            except: pass
+                # Optimized load: only read needed columns
+                df = pd.read_csv(f, usecols=['Timestamp', 'Symbol', 'Price', 'Type', 'Bid', 'Ask'])
+                if 'MARKET_DATA' in df['Type'].values:
+                    df = df[df['Type'] == 'MARKET_DATA']
+                    df_list.append(df)
+            except ValueError:
+                 # Fallback if strict cols missing
+                try:
+                    df = pd.read_csv(f)
+                    if 'MARKET_DATA' in df['Type'].values:
+                        df = df[df['Type'] == 'MARKET_DATA']
+                        df_list.append(df)
+                except: pass
+            except Exception: pass
             
         if not df_list:
             print("❌ No MARKET_DATA found in logs.")
@@ -43,21 +76,37 @@ class ReplayProvider:
         full_df['Timestamp'] = pd.to_datetime(full_df['Timestamp'])
         full_df = full_df.sort_values('Timestamp')
         
-        # Convert to list of dicts for speed
         self.data = full_df.to_dict('records')
-        print(f"✅ Loaded {len(self.data)} data points.")
+        print(f"✅ Loaded {len(self.data):,} data points.")
 
-    def stream(self):
-        """Yields MarketData objects"""
+    def run_audit(self) -> Dict[str, Any]:
+        """
+        AUDIT MODE: Analyzes historical performance of CURRENT strategies on PAST data.
+        Returns report dict.
+        """
+        print("\n🔍 LAB: AUDIT REPORT")
+        print("====================")
+        
+        if not self.data: return {}
+
+        # Instantiate V2 Strategies
+        strategies = {
+            "Crypto V2": Crypto15mTrendStrategyV2(),
+            "Weather V2": WeatherArbitrageStrategyV2()
+        }
+        
+        results = {}
+        
+        # We need a shared OMS? No, separate OMS per strategy to isolate PnL
+        oms_instances = {name: SimulatedExchange() for name in strategies}
+        
+        count = 0
         for row in self.data:
-            # Reconstruct MarketData
-            # CSV Cols: Timestamp, Type, Symbol, Price, Bid, Ask, Extra
-            
             try:
                 price = float(row['Price'])
-                bid = float(row.get('Bid', 0.0))
-                ask = float(row.get('Ask', 0.0))
-                
+                bid = float(row.get('Bid', price)) if not pd.isna(row.get('Bid')) else price
+                ask = float(row.get('Ask', price)) if not pd.isna(row.get('Ask')) else price
+
                 md = MarketData(
                     symbol=row['Symbol'],
                     price=price,
@@ -65,309 +114,251 @@ class ReplayProvider:
                     ask=ask,
                     volume=0,
                     timestamp=row['Timestamp'],
-                    extra={'source': 'replay', 'close_time': None} 
-                    # Note: We might miss 'close_time' from CSV if not saved, 
-                    # which affects expiration logic.
-                )
-                yield md
-            except Exception as e:
-                continue
-
-def run_audit():
-    print("🧪 LAB: STRATEGY AUDIT (TREND CATCHER)")
-    print("=======================================")
-    
-    # 1. Setup Environment
-    provider = ReplayProvider()
-    if not provider.data: return
-
-    strategy = Crypto15mTrendStrategy()
-    oms = SimulatedExchange()
-    
-    print(f"🤖 Strategy: {strategy.name()}")
-    print("⏳ Running Replay...")
-    
-    # 2. Replay Loop
-    count = 0
-    signals = 0
-    
-    for md in provider.stream():
-        count += 1
-        
-        # A. Update OMS (Mark-to-Market)
-        # We need to map symbol types. If log has 'BTC-USD', we update 'BTC'.
-        if 'BTC' in md.symbol:
-            oms.update_market('BTC', md.price)
-            
-        # B. Strategy Analysis
-        # Trend Catcher works on 'BTC-USD' (Source data) to generate signals for 'KXBTC...'
-        # The logs might contain 'BTC-USD' rows.
-        
-        generated_signals = strategy.analyze(md)
-        
-        for sig in generated_signals:
-            signals += 1
-            # C. Execution (Mock)
-            # Create a fake ticker for the position since we might not have the real Kalshi ticker in history
-            ticker = sig.symbol
-            if "BTC-USD" in ticker:
-                 # Map to a synthetic ticker for tracking
-                 ticker = f"KXBTC-SIM-{count}"
-            
-            oms.open_position(
-                symbol=ticker,
-                side=sig.side,
-                entry_price=sig.limit_price,
-                quantity=sig.quantity,
-                stop_loss=getattr(sig, 'stop_loss', 0.0),
-                trailing_rules=getattr(sig, 'trailing_rules', None),
-                expiration_time=getattr(sig, 'expiration_time', None)
-            )
-            
-        if count % 1000 == 0:
-            print(f"   ... Processed {count} ticks | Open Positions: {len(oms.positions)}")
-
-    # 3. Final Report
-    stats = oms.get_stats()
-    print("\n📊 AUDIT RESULTS")
-    print("----------------")
-    print(f"Total Signals: {signals}")
-    print(f"Realized PnL: ${stats['realized']:.2f}")
-    print(f"Open PnL:     ${stats['unrealized']:.2f}")
-    
-    # Win Rate Calc
-    wins = len([t for t in oms.closed_trades if t['pnl'] > 0])
-    losses = len([t for t in oms.closed_trades if t['pnl'] <= 0])
-    total = wins + losses
-    
-    if total > 0:
-        wr = (wins / total) * 100
-        print(f"Win Rate:     {wr:.1f}% ({wins} W / {losses} L)")
-    else:
-        print("Win Rate:     N/A (No closed trades)")
-
-import itertools
-
-def run_optimization():
-    print("🧬 LAB: EVOLUTIONARY OPTIMIZATION")
-    print("===================================")
-    
-    provider = ReplayProvider()
-    if not provider.data: return
-    
-    # 1. Define Search Space
-    print("⚙️  Defining Gene Pool...")
-    param_grid = {
-        'bull_trigger': [0.55, 0.60, 0.65],
-        'bear_trigger': [0.45, 0.40, 0.35],
-        'confirmation_delay': [60, 120, 180],
-        # 'stop_loss_buffer': [0.10, 0.15] # Keep simple for now
-    }
-    
-    keys = list(param_grid.keys())
-    combinations = list(itertools.product(*param_grid.values()))
-    
-    print(f"🧪 Testing {len(combinations)} Genomes against {len(provider.data)} historical ticks.")
-    print("   (This may take a moment... or a coffee break)")
-    
-    results = []
-    
-    for idx, combo in enumerate(combinations):
-        # Unpack params
-        params = dict(zip(keys, combo))
-        
-        # Instantiate Strategy with these params
-        strategy = Crypto15mTrendStrategy(
-            bull_trigger=params['bull_trigger'],
-            bear_trigger=params['bear_trigger'],
-            confirmation_delay=params['confirmation_delay']
-        )
-        
-        # Run Quick Simulation (Silent Mode)
-        oms = SimulatedExchange()
-        
-        # Reset provider stream? No, ReplayProvider needs a reset method or we re-stream list
-        # Since we loaded data into self.data (list), we can just iterate self.data
-        
-        # Optimization: We assume provider.data is sorted
-        # State tracking per run
-        count = 0
-        for row in provider.data: # accessing internal list directly for speed
-            # Reconstruct minimal MD
-            try:
-                md = MarketData(
-                    symbol=row['Symbol'],
-                    price=float(row['Price']),
-                    bid=float(row.get('Bid', 0.0)),
-                    ask=float(row.get('Ask', 0.0)),
-                    volume=0,
-                    timestamp=row['Timestamp'],
-                    extra={'source': 'replay', 'close_time': None}
+                    extra={'source': 'audit'}
                 )
             except: continue
 
-            # Update OMS
-            if 'BTC' in md.symbol: oms.update_market('BTC', md.price)
-            
-            # Analyze
-            sigs = strategy.analyze(md)
-            for s in sigs:
-                ticker = s.symbol if "BTC-USD" not in s.symbol else f"KXBTC-SIM-{count}"
-                oms.open_position(ticker, s.side, s.limit_price, s.quantity, s.stop_loss, s.trailing_rules)
-            count += 1
-            
-        # Grade Performance
-        stats = oms.get_stats()
-        realized = stats['realized']
-        unrealized = stats['unrealized']
-        total_pnl = realized + unrealized
-        
-        wins = len([t for t in oms.closed_trades if t['pnl'] > 0])
-        total_trades = len(oms.closed_trades) + len(oms.positions)
-        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
-        
-        # Score = PnL (Primary) + WinRate tiebreaker
-        results.append({
-            'params': params,
-            'pnl': total_pnl,
-            'trades': total_trades,
-            'win_rate': win_rate
-        })
-        
-        if idx % 5 == 0:
-            print(f"   🧬 Genome {idx+1}/{len(combinations)}: PnL ${total_pnl:.2f} ({win_rate:.1f}%)")
-
-    # Sort by PnL
-    results.sort(key=lambda x: x['pnl'], reverse=True)
-    
-    best = results[0]
-    print("\n🏆 DOMINANT SPECIES DISCOVERED")
-    print("------------------------------")
-    print(f"Best PnL:      ${best['pnl']:.2f}")
-    print(f"Win Rate:      {best['win_rate']:.1f}% ({best['trades']} trades)")
-    print("Optimal Parameters:")
-    for k, v in best['params'].items():
-        print(f"   • {k}: {v}")
-        
-    print("\n💡 Apply these settings to 'src/strategies/crypto_strategy.py' manually (for now).")
-
-def run_v2_comparison():
-    """
-    Compare V1 vs V2 strategies head-to-head on historical data.
-    """
-    print("=" * 60)
-    print("🧪 LAB: V1 vs V2 STRATEGY COMPARISON")
-    print("=" * 60)
-    
-    # 1. Setup
-    provider = ReplayProvider()
-    if not provider.data:
-        print("❌ No data to replay.")
-        return
-    
-    # Define strategies to compare (disable confirmation_delay for backtesting)
-    strategies = {
-        "Crypto V1 (Trend Catcher)": Crypto15mTrendStrategy(confirmation_delay=0),
-        "Crypto V2 (Trend + RSI/MACD)": Crypto15mTrendStrategyV2(confirmation_delay=0),
-    }
-    
-    results = {}
-    
-    for name, strategy in strategies.items():
-        print(f"\n🤖 Testing: {name}")
-        print("-" * 40)
-        
-        oms = SimulatedExchange()
-        count = 0
-        signals = 0
-        
-        # Replay data
-        for row in provider.data:
-            try:
-                price = float(row['Price'])
-                # For contract symbols, Price IS the bid/ask
-                # If Bid/Ask columns not in CSV, use Price
-                bid = float(row.get('Bid', price)) if 'Bid' in row and row['Bid'] else price
-                ask = float(row.get('Ask', price)) if 'Ask' in row and row['Ask'] else price
+            # Route to correct strategy
+            for name, strategy in strategies.items():
+                # Filter for strategy relevance
+                is_crypto = "BTC" in md.symbol or "ETH" in md.symbol
+                is_weather = "HIGH" in md.symbol or "LOW" in md.symbol or "RAIN" in md.symbol
                 
-                md = MarketData(
-                    symbol=row['Symbol'],
-                    price=price,
-                    bid=bid,
-                    ask=ask,
-                    volume=0,
-                    timestamp=row['Timestamp'],
-                    extra={'source': 'replay', 'close_time': None}
-                )
-            except:
-                continue
-            
-            # Update OMS
-            if 'BTC' in md.symbol:
-                oms.update_market('BTC', md.price)
-            
-            # Analyze
-            sigs = strategy.analyze(md)
-            for s in sigs:
-                signals += 1
-                ticker = s.symbol if "BTC-USD" not in s.symbol else f"KXBTC-SIM-{count}"
-                oms.open_position(
-                    ticker, s.side, s.limit_price, s.quantity,
-                    getattr(s, 'stop_loss', 0.0),
-                    getattr(s, 'trailing_rules', None),
-                    getattr(s, 'expiration_time', None)
-                )
+                if name == "Crypto V2" and is_crypto:
+                    oms = oms_instances[name]
+                    # Update OMS market price for tracking
+                    if "BTC" in md.symbol: oms.update_market('BTC', md.price)
+                    
+                    sigs = strategy.analyze(md)
+                    for s in sigs:
+                        ticker = s.symbol if "BTC-USD" not in s.symbol else f"KXBTC-AUDIT-{count}"
+                        oms.open_position(ticker, s.side, s.limit_price, s.quantity, 
+                                          getattr(s, 'stop_loss', 0), 
+                                          getattr(s, 'trailing_rules', None),
+                                          getattr(s, 'expiration_time', None))
+
+                elif name == "Weather V2" and is_weather:
+                    oms = oms_instances[name]
+                    # Weather doesn't need "update_market" global price usually, specific to contract
+                    # But we simulate fills
+                    sigs = strategy.analyze(md)
+                    for s in sigs:
+                        oms.open_position(s.symbol, s.side, s.limit_price, s.quantity,
+                                          getattr(s, 'stop_loss', 0),
+                                          getattr(s, 'trailing_rules', None),
+                                          getattr(s, 'expiration_time', None))
+                                          
             count += 1
+            
+        print(f"Processed {count} ticks.")
         
-        # Collect stats
-        stats = oms.get_stats()
-        wins = len([t for t in oms.closed_trades if t['pnl'] > 0])
-        total_trades = len(oms.closed_trades)
-        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
+        # Collate Results
+        print("\n📊 STRATEGY PERFORMANCE")
+        print(f"{'Strategy':<20} {'Win Rate':<10} {'PnL':<15} {'Trades':<10}")
+        print("-" * 60)
         
-        results[name] = {
-            'signals': signals,
-            'trades': total_trades,
-            'realized_pnl': stats['realized'],
-            'unrealized_pnl': stats['unrealized'],
-            'win_rate': win_rate,
-            'wins': wins,
-            'losses': total_trades - wins
+        for name, oms in oms_instances.items():
+            stats = oms.get_stats()
+            wins = len([t for t in oms.closed_trades if t['pnl'] > 0])
+            total_closed = len(oms.closed_trades)
+            win_rate = (wins / total_closed * 100) if total_closed > 0 else 0.0
+            total_pnl = stats['realized'] + stats['unrealized']
+            
+            results[name] = {
+                "win_rate": win_rate,
+                "pnl": total_pnl,
+                "trades": total_closed + len(oms.positions),
+                "closed": total_closed
+            }
+            
+            print(f"{name:<20} {win_rate:>5.1f}%    ${total_pnl:>10.2f}    {results[name]['trades']:>5}")
+
+        # Save Report
+        with open(AUDIT_REPORT_FILE, 'w') as f:
+            json.dump(results, f, indent=2)
+            
+        print(f"\n✅ Audit saved to {AUDIT_REPORT_FILE}")
+        return results
+
+    def run_optimization(self, target_strategy: str = "all"):
+        """
+        OPTIMIZE MODE: Grid search for best parameters.
+        """
+        print("\n🧬 LAB: EVOLUTIONARY OPTIMIZATION")
+        print("===================================")
+        
+        if not self.data: return
+
+        # Parameter Grids
+        # Crypto V2
+        crypto_grid = {
+            'bull_trigger': [0.55, 0.60, 0.65],
+            'bear_trigger': [0.45, 0.40, 0.35],
+            'confirmation_delay': [0, 60], # Reduced for speed
+            'mean_reversion_threshold': [0.03, 0.05]
         }
         
-        print(f"   Signals: {signals}")
-        print(f"   Closed Trades: {total_trades}")
-        print(f"   Realized PnL: ${stats['realized']:.2f}")
-        print(f"   Win Rate: {win_rate:.1f}%")
-    
-    # 2. Summary Table
-    print("\n" + "=" * 60)
-    print("📊 COMPARISON SUMMARY")
-    print("=" * 60)
-    print(f"{'Strategy':<30} {'Signals':<10} {'PnL':<12} {'Win Rate':<10}")
-    print("-" * 60)
-    
-    for name, stats in results.items():
-        pnl_str = f"${stats['realized_pnl']:+.2f}"
-        wr_str = f"{stats['win_rate']:.1f}%"
-        print(f"{name:<30} {stats['signals']:<10} {pnl_str:<12} {wr_str:<10}")
-    
-    # 3. Winner
-    print("\n🏆 VERDICT:")
-    best = max(results.items(), key=lambda x: x[1]['realized_pnl'])
-    print(f"   Best Strategy: {best[0]}")
-    print(f"   PnL: ${best[1]['realized_pnl']:.2f} ({best[1]['win_rate']:.1f}% win rate)")
+        # Weather V2
+        weather_grid = {
+            'threshold': [0.10, 0.15, 0.20],
+            'min_edge_degrees': [1.5, 2.0, 3.0]
+        }
+        
+        best_configs = {}
+        
+        strategies_to_test = []
+        if target_strategy in ["all", "crypto"]:
+            strategies_to_test.append(("Crypto V2", Crypto15mTrendStrategyV2, crypto_grid))
+        if target_strategy in ["all", "weather"]:
+            strategies_to_test.append(("Weather V2", WeatherArbitrageStrategyV2, weather_grid))
+            
+        for name, strat_class, grid in strategies_to_test:
+            print(f"\n⚙️  Optimizing {name}...")
+            keys = list(grid.keys())
+            combos = list(itertools.product(*grid.values()))
+            print(f"   Testing {len(combos)} genomes...")
+            
+            results = []
+            
+            for i, vals in enumerate(combos):
+                params = dict(zip(keys, vals))
+                
+                # Run Simulation
+                oms = SimulatedExchange()
+                strategy = strat_class(**params)
+                
+                count = 0 
+                
+                # Optimized loop: filter data beforehand? 
+                # For simplicity, we stream all, route relevance inside loop (slower but safer)
+                # Or pre-filter self.data for this strategy type to speed up
+                
+                # Pre-filter for speed
+                relevant_data = self.data # Default all
+                if name == "Crypto V2":
+                    relevant_data = [d for d in self.data if "BTC" in d['Symbol'] or "ETH" in d['Symbol']]
+                elif name == "Weather V2":
+                    relevant_data = [d for d in self.data if "HIGH" in d['Symbol'] or "LOW" in d['Symbol']]
+                
+                for row in relevant_data:
+                    try:
+                        md = MarketData(
+                            symbol=row['Symbol'],
+                            price=float(row['Price']),
+                            bid=float(row.get('Bid', row['Price'])),
+                            ask=float(row.get('Ask', row['Price'])),
+                            volume=0, timestamp=row['Timestamp'], extra={'source': 'opt'}
+                        )
+                    except: continue
+                    
+                    if name == "Crypto V2" and "BTC" in md.symbol:
+                        oms.update_market('BTC', md.price)
+                        
+                    sigs = strategy.analyze(md)
+                    for s in sigs:
+                        # Unique ID for simulation
+                        ticker = s.symbol if "BTC-USD" not in s.symbol else f"KXBTC-{i}-{count}"
+                        oms.open_position(ticker, s.side, s.limit_price, s.quantity,
+                                          getattr(s, 'stop_loss', 0),
+                                          getattr(s, 'trailing_rules', None),
+                                          getattr(s, 'expiration_time', None))
+                    count += 1
+                    
+                # Score
+                stats = oms.get_stats()
+                wins = len([t for t in oms.closed_trades if t['pnl'] > 0])
+                total_closed = len(oms.closed_trades)
+                win_rate = (wins / total_closed * 100) if total_closed > 0 else 0.0
+                total_pnl = stats['realized'] + stats['unrealized']
+                
+                # Composite Score (PnL weighted, Win Rate tiebreaker)
+                score = total_pnl + (win_rate * 0.1) 
+                
+                results.append({
+                    "params": params,
+                    "score": score,
+                    "pnl": total_pnl,
+                    "win_rate": win_rate,
+                    "trades": total_closed
+                })
+                
+                if (i+1) % 5 == 0:
+                    print(f"   Generating... {i+1}/{len(combos)}")
+
+            # Find Best
+            best = max(results, key=lambda x: x['score'])
+            best_configs[name] = best
+            
+            print(f"\n🏆 BEST {name} GENOME:")
+            print(f"   PnL: ${best['pnl']:.2f}")
+            print(f"   Win Rate: {best['win_rate']:.1f}% ({best['trades']} trades)")
+            print(f"   Params: {best['params']}")
+            
+        # Save Optimal Params
+        with open(OPTIMAL_PARAMS_FILE, 'w') as f:
+            json.dump(best_configs, f, indent=2)
+        print(f"\n✅ Optimization complete. Saved to {OPTIMAL_PARAMS_FILE}")
+
+    def run_refinement(self, threshold: float = 80.0):
+        """
+        REFINE MODE: The wrapper. 
+        1. Run Audit.
+        2. Check if any strategy < threshold.
+        3. If so, Optimize specific strategy.
+        """
+        print(f"\n🔧 LAB: REFINEMENT LOOP (Threshold: {threshold}%)")
+        print("==========================================")
+        
+        # 1. Audit
+        report = self.run_audit()
+        if not report: 
+            print("❌ Audit failed (no data?). Aborting.")
+            return
+
+        strategies_to_optimize = []
+        
+        for name, stats in report.items():
+            wr = stats['win_rate']
+            if wr < threshold:
+                print(f"⚠️  {name} Win Rate ({wr:.1f}%) is BELOW threshold ({threshold}%). Queuing optimization.")
+                strategies_to_optimize.append(name)
+            else:
+                print(f"✅ {name} Win Rate ({wr:.1f}%) is good.")
+                
+        if not strategies_to_optimize:
+            print("\n✨ All systems nominal. No refinement needed.")
+            return
+            
+        # 2. Optimize
+        print(f"\n🔄 initiating Optimization for: {', '.join(strategies_to_optimize)}")
+        
+        # Map friendly names to "crypto"/"weather" keys
+        for s_name in strategies_to_optimize:
+            target = "crypto" if "Crypto" in s_name else "weather"
+            self.run_optimization(target_strategy=target)
+            
+        print("\n✅ Refinement Cycle Complete.")
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "--optimize":
-        run_optimization()
-    elif len(sys.argv) > 1 and sys.argv[1] == "--compare":
-        run_v2_comparison()
-    elif len(sys.argv) > 1 and sys.argv[1] == "--audit":
-        run_audit()
+    parser = argparse.ArgumentParser(description="Money Printer Laboratory")
+    parser.add_argument("--audit", action="store_true", help="Run strategy audit")
+    parser.add_argument("--optimize", action="store_true", help="Run parameter optimization")
+    parser.add_argument("--refine", action="store_true", help="Run audit and optimize if needed")
+    parser.add_argument("--strategy", type=str, default="all", help="Target strategy for optimization (crypto/weather)")
+    parser.add_argument("--threshold", type=float, default=80.0, help="Win rate threshold for refinement")
+    
+    args = parser.parse_args()
+    
+    lab = Lab()
+    
+    if args.refine:
+        lab.run_refinement(threshold=args.threshold)
+    elif args.optimize:
+        lab.run_optimization(target_strategy=args.strategy)
+    elif args.audit:
+        lab.run_audit()
     else:
-        print("Usage: python scripts/lab.py [--audit | --optimize | --compare]")
-        print("Defaulting to AUDIT mode...")
-        run_audit()
+        # Default behavior
+        print("No mode selected. Defaulting to --audit")
+        lab.run_audit()
