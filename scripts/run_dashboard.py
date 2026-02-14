@@ -10,8 +10,8 @@ from src.visualization.dashboard import Dashboard
 from src.data.nws_provider import NWSProvider
 from src.data.coinbase_provider import CoinbaseProvider
 from src.data.kalshi_provider import KalshiProvider
-from src.strategies.weather_strategy import WeatherArbitrageStrategy
-from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, Crypto15mTrendStrategy
+from src.strategies.weather_strategy import WeatherArbitrageStrategy, WeatherArbitrageStrategyV2
+from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2
 from src.core.interfaces import TradeSignal
 from src.core.risk_manager import RiskManager
 from src.utils.system_utils import prevent_sleep
@@ -27,8 +27,8 @@ class OrchestratorEngine:
         self.risk_manager = RiskManager(starting_balance=100.0)
         
         self.strategies = {
-            "weather": WeatherArbitrageStrategy(),
-            "crypto": Crypto15mTrendStrategy(), # REPLACED ML WITH TREND CATCHER
+            "weather": WeatherArbitrageStrategyV2(), # UPGRADED TO V2
+            "crypto": Crypto15mTrendStrategyV2(),   # UPGRADED TO V2
             "crypto_hr": CryptoHourlyStrategy()
         }
         self.dashboard.active_strategies = list(self.strategies.keys())
@@ -340,16 +340,19 @@ class OrchestratorEngine:
                 if self._is_weather_slot_full(sig.symbol):
                     continue
 
-            # DYNAMIC SIZING
-            # Check Risk Manager for max budget
-            max_budget = self.risk_manager.balance * self.risk_manager.MAX_RISK_PER_TRADE_PCT
-            # Cap at $10 for now if balance is huge, or use risk calc
-            
-            # Calculate max qty we can afford
+
+            # DYNAMIC SIZING (FRACTIONAL KELLY)
             if sig.limit_price > 0:
-                affordable_qty = int(max_budget / sig.limit_price)
-                # Ensure at least 1 contract, but cap at requested qty
-                final_qty = max(1, min(sig.quantity, affordable_qty))
+                # Default confidence if not provided
+                conf = getattr(sig, 'confidence', 0.55)
+                if conf <= 0: conf = 0.55
+                
+                # Calculate optimal size (Risk Manager handles caps)
+                kelly_qty = self.risk_manager.calculate_kelly_size(conf, sig.limit_price)
+                
+                # Respect Signal's requested quantity if it's explicitly LOWER than Kelly (e.g. exit signal)
+                # But for entry, usually signal.qty is just a placeholder or max
+                final_qty = kelly_qty
                 
                 # Update signal
                 sig.quantity = final_qty

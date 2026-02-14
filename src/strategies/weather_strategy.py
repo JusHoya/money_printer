@@ -238,10 +238,29 @@ class WeatherArbitrageStrategyV2(Strategy):
                 ))
             return signals
 
+
         # --- INTRADAY VELOCITY CHECK ---
         if is_today and current_temp:
             velocity = self._calculate_temp_velocity(symbol, current_temp)
             
+            # YOGI BERRA LOGIC (End of Day Reality Check)
+            # "It ain't over till it's over"... but sometimes it IS over.
+            if hours_until_settlement < 1.0: # Last hour
+                # Max realistic temp rise in 1 hour is ~5-8 degrees? 
+                # Let's say 10 degrees to be safe.
+                max_rise = 10.0
+                projected_max = max(daily_max_obs or -999, current_temp + max_rise)
+                
+                # If even with a miracle rise, we are below strike (for Above contract)
+                if is_above_contract and projected_max < strike_val:
+                    if market_bid > 0.05:
+                        logger.info(f"[MeteorV2] ⚾ YOGI BERRA: Proj Max {projected_max:.1f} < Strike {strike_val}. SELL YES.")
+                        signals.append(TradeSignal(
+                             symbol=symbol, side="sell", quantity=100,
+                             limit_price=market_bid, confidence=0.99
+                        ))
+                        return signals
+
             if velocity is not None:
                 # High confidence short: temp dropping and already below strike
                 if is_above_contract and velocity < -1.0 and current_temp < (strike_val - 3):
@@ -262,6 +281,23 @@ class WeatherArbitrageStrategyV2(Strategy):
                             limit_price=market_ask, confidence=0.80
                         ))
                         return signals
+                        
+        # --- FADE THE LONGSHOT ---
+        # If market is pricing probability < 10%, and we agree (no strong signal), SELL into it.
+        # Shorting 'pennies' (selling at 0.05-0.10) for 10% yield.
+        # Risk: It hits. Payout 0.90 loss. Win 0.10. Odds 1:9.
+        # Needs high confidence.
+        if market_bid < 0.10 and market_bid > 0.02:
+             # Only fade if we have NO other signal and time is running out (< 4 hours)
+             if hours_until_settlement < 4.0 and not signals:
+                 # Check if we are comfortably safe
+                 # For Above contract: Current Temp < Strike - 5
+                 if is_above_contract and current_temp and current_temp < (strike_val - 5):
+                     logger.info(f"[MeteorV2] 📉 FADE LONGSHOT: Bid {market_bid:.2f} < 0.10. Selling pennies.")
+                     signals.append(TradeSignal(
+                         symbol=symbol, side="sell", quantity=20, # Small size
+                         limit_price=market_bid, confidence=0.7 
+                     ))
 
         # 5. Forecast-Based Logic with Bias Correction
         if not forecasts:

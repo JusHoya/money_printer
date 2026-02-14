@@ -75,6 +75,7 @@ class RiskManager:
         
         self._sync_balance()
 
+
     def _reset_daily_stats_if_needed(self):
         if date.today() > self.today:
             self.today = date.today()
@@ -84,6 +85,47 @@ class RiskManager:
             # Let's just update the baseline.
             self.starting_balance_day = self.balance 
             logger.info(f"[RiskManager] [NEW DAY] Daily PnL reset.")
+
+    def calculate_kelly_size(self, confidence: float, price: float) -> int:
+        """
+        Calculates the optimal position size (quantity) using Fractional Kelly Criterion.
+        
+        Formula: f* = p - q/b
+        where:
+          p = probability of win (confidence)
+          q = probability of loss (1 - p)
+          b = odds received (Profit / Risk) = (1.00 - price) / price
+          
+        Applies a 25% fraction (Safety) and a hard 5% Portfolio Cap.
+        """
+        if price <= 0 or price >= 1.0: return 0
+        
+        # 1. Calculate Odds (b)
+        # Risk = Price, Profit = 1.00 - Price
+        b = (1.0 - price) / price
+        
+        # 2. Kelly Fraction (f)
+        p = confidence
+        q = 1.0 - p
+        
+        # f = p - q/b
+        f = p - (q / b)
+        
+        # 3. Apply Fractional Multiplier (Safety)
+        # User Rule: Fractional Kelly (0.25x to 0.3x)
+        f_fractional = f * 0.25
+        
+        if f_fractional <= 0: return 0
+        
+        # 4. Apply Hard Cap (5% of Bankroll)
+        f_capped = min(f_fractional, self.MAX_RISK_PER_TRADE_PCT)
+        
+        # 5. Calculate Dollar Amount
+        allocation = self.balance * f_capped
+        
+        # 6. Convert to Quantity
+        quantity = int(allocation / price)
+        return max(1, quantity)
 
     def get_current_exposure(self, category: Optional[str] = None) -> float:
         """
@@ -118,9 +160,11 @@ class RiskManager:
             return False
             
         # 2. Position Sizing
+        # NOTE: Kelly sizing ensures we maximize growth, but we double check strict limit here.
         max_trade_size = self.balance * self.MAX_RISK_PER_TRADE_PCT
-        if proposed_cost > max_trade_size:
+        if proposed_cost > max_trade_size + 1.0: # Allow $1 rounding buffer
             logger.warning(f"[Risk] [REJECT] Position Size Too Large (${proposed_cost:.2f} > ${max_trade_size:.2f})")
+            # In simulation, we might prefer to CLAMP instead of reject, but Orchestrator handles clamping now.
             return False
             
         # 3. Drawdown Limit (Kill Switch)

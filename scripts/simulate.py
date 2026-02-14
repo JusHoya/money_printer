@@ -43,7 +43,8 @@ def run_simulation(strategy_name, days, optimize, use_live=False):
 
     # Strategy Selection Factory
     if strategy_name.lower() == 'weather':
-        strategy = WeatherArbitrageStrategy()
+        from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
+        strategy = WeatherArbitrageStrategyV2()
         if use_live:
             user_agent = os.getenv("NWS_USER_AGENT", "(MoneyPrinter, test@example.com)")
             station = os.getenv("NWS_STATION_ID", "KJFK")
@@ -52,8 +53,8 @@ def run_simulation(strategy_name, days, optimize, use_live=False):
             providers = [MockNWSProvider()]
             
     elif strategy_name.lower() == 'crypto':
-        from src.strategies.crypto_strategy import CryptoArbitrageStrategy
-        strategy = CryptoArbitrageStrategy()
+        from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2
+        strategy = Crypto15mTrendStrategyV2()
         if use_live:
             from src.data.coinbase_provider import CoinbaseProvider
             # Default to BTC-USD

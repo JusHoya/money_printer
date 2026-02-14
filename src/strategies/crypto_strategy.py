@@ -246,11 +246,52 @@ class Crypto15mTrendStrategyV2(Strategy):
         extra = market_data.extra
         now = market_data.timestamp or datetime.now()
         
+
         # Update price history
         price_to_monitor = market_data.ask
         self.price_history.append(price_to_monitor)
         prices = list(self.price_history)
         
+        # 0.5. Strike Arbitrage (The "Strike" Arb)
+        # Check if market pricing is dislocated from Spot Reality
+        if "KXBTC" in market_data.symbol:
+            try:
+                # Extract Strike from Ticker (Heuristic based on SimulatedExchange logic)
+                parts = market_data.symbol.split('-')
+                strike_str = parts[-1]
+                # Assuming standard Kalshi ticker format where non-B prefix means "Above"/"High"
+                strike_val = float(re.sub(r'[A-Za-z]', '', strike_str))
+                
+                # Get Underlying Spot Price (Coinbase) directly if available in extra, else use current market price proxy?
+                # market_data.price is Spot from Coinbase in run_dashboard.py
+                spot_price = market_data.price 
+                
+                decision_buffer = 25.0 # $25 separation triggers heavy confidence
+                
+                # Case A: Spot is clearly ABOVE Strike (Reality = YES)
+                if spot_price > (strike_val + decision_buffer):
+                    # Value should be high (~0.99). If Ask is cheap, Buy.
+                    if market_data.ask < 0.85 and market_data.ask > 0.01:
+                         logger.info(f"[StrikeArb] 💎 ARB OPPORTUNITY: Spot ${spot_price:.2f} > Strike ${strike_val}. Ask ${market_data.ask:.2f}. BUY YES.")
+                         signals.append(TradeSignal(
+                             symbol=market_data.symbol, side="buy", quantity=10, 
+                             limit_price=market_data.ask, confidence=0.95
+                         ))
+                         return signals # Priority execution
+                         
+                # Case B: Spot is clearly BELOW Strike (Reality = NO)
+                elif spot_price < (strike_val - decision_buffer):
+                    # Value should be low (~0.01). If Bid is expensive, Sell.
+                    if market_data.bid > 0.15:
+                         logger.info(f"[StrikeArb] 💎 ARB OPPORTUNITY: Spot ${spot_price:.2f} < Strike ${strike_val}. Bid ${market_data.bid:.2f}. SELL YES.")
+                         signals.append(TradeSignal(
+                             symbol=market_data.symbol, side="sell", quantity=10, 
+                             limit_price=market_data.bid, confidence=0.95
+                         ))
+                         return signals # Priority execution
+            except Exception:
+                pass
+
         # 0. Delay Logic (Trend Confirmation)
         minutes_into_cycle = now.minute % 15
         if minutes_into_cycle == 0 and now.second < self.confirmation_delay:

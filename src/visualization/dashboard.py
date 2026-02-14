@@ -1,12 +1,13 @@
-"""
-Money Printer Dashboard 🖨️
-A simple, high-fidelity ASCII dashboard for monitoring trading bot status.
-"""
+
+# Money Printer Dashboard 🖨️
+# A simple, high-fidelity ASCII dashboard for monitoring trading bot status.
+
 import os
 import sys
 import time
 import csv
 from datetime import datetime
+from src.visualization.mascot import Mascot
 
 # Clear screen helper
 def clear_screen():
@@ -20,6 +21,10 @@ class Dashboard:
         self.logs = []
         self.alerts = []
         self.latest_prices = {}
+        
+        # Mascot
+        self.mascot = Mascot()
+        self.last_known_pnl = 0.0
         
         # Strategy Performance Tracking
         self.strategy_stats = {}  # {strategy_name: {signals, wins, losses, pnl}}
@@ -165,6 +170,16 @@ class Dashboard:
         print(f"=================================================================================")
         print(f"   MONEY PRINTER CONTROL CENTER 🖨️💵   |   Active: {str(datetime.now() - self.start_time).split('.')[0]}")
         print(f"=================================================================================")
+        
+        # Mascot Section
+        if risk_manager:
+            current_pnl = risk_manager.daily_pnl
+            pnl_change = current_pnl - self.last_known_pnl
+            self.last_known_pnl = current_pnl
+            
+            self.mascot.set_state(pnl_change, current_pnl)
+            frame = self.mascot.get_frame()
+            print(frame)
         
         # Portfolio Section (Enhanced)
         if risk_manager:
