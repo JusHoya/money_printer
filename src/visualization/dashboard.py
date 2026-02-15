@@ -177,7 +177,8 @@ class Dashboard:
             pnl_change = current_pnl - self.last_known_pnl
             self.last_known_pnl = current_pnl
             
-            self.mascot.set_state(pnl_change, current_pnl)
+            has_open = len(risk_manager.exchange.positions) > 0
+            self.mascot.set_state(pnl_change, current_pnl, has_open_trades=has_open)
             frame = self.mascot.get_frame()
             print(frame)
         

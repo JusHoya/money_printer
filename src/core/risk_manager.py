@@ -39,6 +39,9 @@ class RiskManager:
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
+        # Sync daily_pnl from exchange (source of truth) BEFORE recalculating balance
+        stats = self.exchange.get_stats()
+        self.daily_pnl = stats['realized']
         self._sync_balance()
         pnl = position.get('pnl', 0.0)
         logger.info(f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f}")
@@ -125,7 +128,8 @@ class RiskManager:
         
         # 6. Convert to Quantity
         quantity = int(allocation / price)
-        return max(1, quantity)
+        # Hard cap: Prevent runaway position growth
+        return max(1, min(quantity, 500))
 
     def get_current_exposure(self, category: Optional[str] = None) -> float:
         """

@@ -337,7 +337,8 @@ class SimulatedExchange:
             # Check Time Limit (Legacy fallback)
             age = (datetime.now() - pos['open_time']).total_seconds() / 60
             if age >= self.TIME_LIMIT_MIN:
-                self._close_position(pos, current_spot_price, reason="TIME_LIMIT")
+                # Use estimated option price, NOT raw spot price
+                self._close_position(pos, pos.get('current_price', pos['entry_price']), reason="TIME_LIMIT")
                 continue
 
             # Calculate Synthetic PnL
@@ -431,12 +432,18 @@ class SimulatedExchange:
     def _close_position(self, pos, final_spot_price, reason="MARKET"):
         """
         Simulates a closing trade.
+        
+        For BINARY SETTLEMENT (EXPIRATION, EARLY_SETTLEMENT):
+            final_spot_price = the underlying spot value (temp, BTC$)
+            exit_price is determined as 1.00 or 0.00 based on outcome.
+        
+        For NON-SETTLEMENT closes (TAKE_PROFIT, STOP_LOSS, TIME_LIMIT):
+            final_spot_price should be the ESTIMATED OPTION PRICE (0.00-1.00),
+            NOT the raw underlying spot price.
         """
         try:
             # Determine Exit Price Strategy
             is_binary_settlement = reason in ["EXPIRATION", "EARLY_SETTLEMENT"]
-            
-            exit_price = final_spot_price
             
             if is_binary_settlement:
                 # --- BINARY SETTLEMENT LOGIC (0.00 or 1.00) ---
@@ -459,6 +466,17 @@ class SimulatedExchange:
                         outcome_is_yes = False # Fail safe
                 
                 exit_price = 1.00 if outcome_is_yes else 0.00
+            else:
+                # --- NON-SETTLEMENT: Use estimated option price ---
+                # final_spot_price here should already BE the estimated price
+                # (passed from update_market using pos['current_price'])
+                exit_price = final_spot_price
+            
+            # --- SANITY CHECK: Binary options must be in [0.00, 1.00] ---
+            if exit_price > 1.0 or exit_price < 0.0:
+                logger.error(f"[OMS] SANITY FAIL: exit_price={exit_price:.4f} for {pos['symbol']} "
+                             f"(reason={reason}). Raw spot leaked! Clamping to entry_price.")
+                exit_price = pos['entry_price']  # Neutral close (no PnL)
             
             # --- CALCULATE PNL ---
             if pos['side'] == 'buy':

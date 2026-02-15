@@ -65,8 +65,8 @@ class TestPnLFlow(unittest.TestCase):
         self.rm.record_execution(50.0, "KXBTC-TEST-50000", "buy", 100, 0.50)
         pos = self.rm.exchange.positions[0]
         
-        # Close with profit (spot > strike)
-        self.rm.exchange._close_position(pos, 55000.0, reason="TEST_CLOSE")
+        # Close with profit (spot > strike) — use EXPIRATION for binary settlement
+        self.rm.exchange._close_position(pos, 55000.0, reason="EXPIRATION")
         
         # Sync stats
         self.rm.update_market_data("BTC", 55000.0)
@@ -156,24 +156,24 @@ class TestPnLFlow(unittest.TestCase):
         exchange.TAKE_PROFIT_PCT = 100.0
         exchange.STOP_LOSS_PCT = 100.0
         
-        # Open position on KXHIGH with strike 75
-        exchange.open_position("KXHIGH-TEST-75", "buy", 0.50, 100)
+        # Open position on KXHIGH with strike 75 (must contain city fragment for routing)
+        exchange.open_position("KXHIGHNY-TEST-75", "buy", 0.50, 100)
         
         # Test at strike (should be ~0.50)
-        exchange.update_market("TEMP_NYC", 75.0)
+        exchange.update_market("TEMP_KNYC", 75.0)
         pos = exchange.positions[0]
         self.assertAlmostEqual(pos['current_price'], 0.50, places=2)
         print(f"  At strike (75°F): {pos['current_price']:.4f}")
         
         # Test above strike by 5° (scale=10, diff=5, tanh(0.5)≈0.46)
         # probability_shift = 0.46 * 0.49 ≈ 0.23, price ≈ 0.73
-        exchange.update_market("TEMP_NYC", 80.0)
+        exchange.update_market("TEMP_KNYC", 80.0)
         self.assertGreater(pos['current_price'], 0.60)
         self.assertLess(pos['current_price'], 0.85)
         print(f"  Above strike (80°F): {pos['current_price']:.4f}")
         
         # Test far above strike (20°) - should approach 0.99
-        exchange.update_market("TEMP_NYC", 95.0)
+        exchange.update_market("TEMP_KNYC", 95.0)
         self.assertGreater(pos['current_price'], 0.90)
         print(f"  Far above strike (95°F): {pos['current_price']:.4f}")
         

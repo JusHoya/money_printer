@@ -42,21 +42,20 @@ class TestBalanceFlow(unittest.TestCase):
         self.rm.record_execution(50.0, "KXBTC-TEST-100", "buy", 100, 0.50)
         self.assertEqual(self.rm.balance, 50.0)
         
-        # Spot moves to 105 (+5%).
-        # Logic: (105-100)/100 = 0.05.
-        # Price Delta = 0.05 * 100 = 5.0? No, delta is roughly % * 100.
-        # 0.05 * 100 = +5.00 price increase? No, that's huge.
-        # In code: price_delta = diff_pct * 100.0
-        # If diff_pct is 0.05, delta is 5.0. 
-        # New Price = 0.50 + 5.0 = 5.50 -> Capped at 0.99.
-        # PnL = (0.99 - 0.50) * 100 = 49.0.
+        # Spot moves to 105 (+5 over strike of 100).
+        # With tanh formula: diff=5, scale=1000 (BTC), norm=0.005
+        # tanh(0.005) ≈ 0.005, shift = 0.005 * 0.49 ≈ 0.00245
+        # estimated_price ≈ 0.50 + 0.00245 = 0.50245
+        # PnL = (0.50245 - 0.50) * 100 ≈ 0.245
         
         self.rm.update_market_data("BTC", 105.0)
         
         print(f"Unrealized after move: {self.rm.unrealized_pnl}")
-        self.assertAlmostEqual(self.rm.unrealized_pnl, 49.0)
+        # Tanh formula produces a small shift for small BTC moves relative to scale=1000
+        self.assertGreater(self.rm.unrealized_pnl, 0.0)
+        self.assertLess(self.rm.unrealized_pnl, 1.0)
         
-        # Balance shouldn't change
+        # Balance shouldn't change (unrealized, not realized)
         self.assertEqual(self.rm.balance, 50.0)
 
     def test_loss_scenario(self):
@@ -93,10 +92,12 @@ class TestBalanceFlow(unittest.TestCase):
         print("\n--- Test 3: Double Counting on Sync ---")
         rm = RiskManager(starting_balance=100.0)
         
-        # 1. Gain $80 (as above)
+        # 1. Open and close a winning trade
         rm.record_execution(20.0, "KX-TEST-50", "buy", 100, 0.20)
         pos = rm.exchange.positions[0]
-        rm.exchange._close_position(pos, 60.0, "WIN_TEST")
+        # Use EXPIRATION so binary settlement (spot=60 > strike=50 → YES → exit=1.00)
+        # PnL = (1.00 - 0.20) * 100 = $80
+        rm.exchange._close_position(pos, 60.0, "EXPIRATION")
         rm.update_market_data("TEST", 60.0)
         
         self.assertEqual(rm.balance, 180.0)
@@ -105,13 +106,8 @@ class TestBalanceFlow(unittest.TestCase):
         # Suppose we sync and the Real Account says $180 (correct).
         rm.update_balance(180.0)
         
-        # update_balance sets starting_balance_day = 180.0.
-        # calls _sync_balance().
-        # daily_pnl is STILL $80 (from exchange).
-        # Exposure = 0.
-        
-        # New Balance = Start(180) + PnL(80) - Exp(0) = 260.
-        # WHOOPS. We just printed money.
+        # update_balance resets daily_pnl=0 and exchange.reset_stats().
+        # _sync_balance: balance = 180 + 0 - 0 = 180. Correct!
         print(f"Balance after Sync(180): {rm.balance}")
         self.assertEqual(rm.balance, 180.0, f"Balance Double Counted! Got {rm.balance}")
 
