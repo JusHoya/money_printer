@@ -9,3 +9,4 @@ scikit-learn
 joblib
 pandas
 numpy
+pillow
