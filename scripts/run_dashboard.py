@@ -67,13 +67,25 @@ class OrchestratorEngine:
         if not self.kalshi: return None
         
         try:
-            # 1. Fetch All Markets for Series (Client-side filtering)
-            params = {"series_ticker": series_base}
-            resp = self.kalshi.session.get(f"{self.kalshi.api_url}/markets", params=params)
-            if resp.status_code != 200: return None
-            
-            all_markets = resp.json().get('markets', [])
-            active_markets = [m for m in all_markets if m.get('status') == 'active']
+            # 1. Fetch markets with PAGINATION (Kalshi API does NOT support status filtering)
+            # High-volume series like KXBTC15M have 2000+ markets. The active one(s)
+            # can be on any page. We paginate until we find active markets or exhaust pages.
+            active_markets = []
+            cursor = None
+            for _ in range(5):  # Max 5 pages (~1000 markets) to prevent runaway
+                params = {"series_ticker": series_base, "limit": 200}
+                if cursor:
+                    params["cursor"] = cursor
+                resp = self.kalshi.session.get(f"{self.kalshi.api_url}/markets", params=params)
+                if resp.status_code != 200: break
+                data = resp.json()
+                page_markets = data.get('markets', [])
+                active_markets.extend([m for m in page_markets if m.get('status') == 'active'])
+                cursor = data.get('cursor')
+                if not cursor or not page_markets:
+                    break
+                if active_markets:
+                    break  # Found active markets, no need to keep paginating
             
             if not active_markets: return None
 
@@ -171,6 +183,7 @@ class OrchestratorEngine:
                     self.dashboard.update_price("BTC-USD (Coinbase)", btc_data.price)
                     
                     # Try to fetch Live Kalshi BTC Price (High Frequency 15M)
+                    btc_15m_resolved = False
                     if self.kalshi:
                         try:
                             # A. Resolve 15M Ticker (TIME priority)
@@ -184,6 +197,11 @@ class OrchestratorEngine:
                                     btc_data.ask = k_data_15.ask
                                     btc_data.symbol = btc_15m
                                     self.risk_manager.update_market_data(btc_15m, btc_data.price)
+                                    btc_15m_resolved = True
+                            else:
+                                # Ghost Ticker: No active KXBTC15M markets on Kalshi
+                                if ticks % 60 == 0:  # Log every ~5 min to avoid spam
+                                    logger.warning("[Dashboard] Ghost Ticker: No active KXBTC15M markets found. 15M strategy SKIPPED.")
                             
                             # B. Resolve HOURLY Ticker (TIME priority) - LIVE FEED ADDITION
                             btc_hr = self._resolve_smart_ticker("KXBTC", criteria="sentiment")
@@ -207,8 +225,11 @@ class OrchestratorEngine:
                         except Exception as e:
                             logger.error(f"Market Fetch Fail (BTC): {e}")
                     
-                    signals = self.strategies['crypto'].analyze(btc_data)
-                    self._process_signals(signals, strategy_name="Trend Catcher V1")
+                    # GATE: Only run 15M strategy if we have fused Kalshi option data
+                    # Without this, the strategy receives raw BTC spot ($69k) and compares against 0.55
+                    if btc_15m_resolved:
+                        signals = self.strategies['crypto'].analyze(btc_data)
+                        self._process_signals(signals, strategy_name="Trend Catcher V1")
                 else:
                     # Log failure occasionally
                     if ticks % 10 == 0:

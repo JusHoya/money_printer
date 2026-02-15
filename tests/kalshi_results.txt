@@ -1,0 +1,30 @@
+
+=== KXBTC15M ===
+  Total: 100, Active: 0, Initialized: 100
+  NO ACTIVE, but initialized:
+    KXBTC15M-26FEB160000-00 | exp=2026-02-23T05:00:00Z
+    KXBTC15M-26FEB152345-45 | exp=2026-02-23T04:45:00Z
+    KXBTC15M-26FEB152330-30 | exp=2026-02-23T04:30:00Z
+    KXBTC15M-26FEB152315-15 | exp=2026-02-23T04:15:00Z
+    KXBTC15M-26FEB152300-00 | exp=2026-02-23T04:00:00Z
+
+=== KXBTC15MIN ===
+  Total: 0, Active: 0, Initialized: 0
+
+=== KXBTCSHORT ===
+  Total: 0, Active: 0, Initialized: 0
+
+=== KXBTC ===
+  Total: 100, Active: 0, Initialized: 100
+  NO ACTIVE, but initialized:
+    KXBTC-26FEB1600-T78749.99 | exp=2026-02-23T05:00:00Z
+    KXBTC-26FEB1600-T60500 | exp=2026-02-23T05:00:00Z
+    KXBTC-26FEB1600-B78625 | exp=2026-02-23T05:00:00Z
+    KXBTC-26FEB1600-B78375 | exp=2026-02-23T05:00:00Z
+    KXBTC-26FEB1600-B78125 | exp=2026-02-23T05:00:00Z
+
+=== KXBTCHOURLY ===
+  Total: 0, Active: 0, Initialized: 0
+
+=== BROAD SEARCH: ticker_contains 'BTC' ===
+  Active BTC markets found: 0

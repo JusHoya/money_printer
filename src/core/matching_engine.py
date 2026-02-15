@@ -413,15 +413,15 @@ class SimulatedExchange:
                     elif pos['side'] == 'sell' and estimated_price >= pos['stop_loss']: hit = True
                     
                     if hit:
-                        self._close_position(pos, current_spot_price, reason=f"STOP_LOSS_PRICE ({pos['stop_loss']})")
+                        self._close_position(pos, estimated_price, reason=f"STOP_LOSS_PRICE ({pos['stop_loss']})")
                         continue
                             
                 # Fallback: PCT Based Stops
                 pnl_pct = pos['pnl'] / (pos['entry_price'] * pos['quantity']) if pos['entry_price'] > 0 else 0
                 if pnl_pct >= self.TAKE_PROFIT_PCT:
-                    self._close_position(pos, current_spot_price, reason="TAKE_PROFIT")
+                    self._close_position(pos, estimated_price, reason="TAKE_PROFIT")
                 elif pnl_pct <= -self.STOP_LOSS_PCT and pos['stop_loss'] == 0:
-                    self._close_position(pos, current_spot_price, reason="STOP_LOSS_PCT")
+                    self._close_position(pos, estimated_price, reason="STOP_LOSS_PCT")
                         
             except Exception as e:
                 logger.error(f"[OMS] PnL calculation error for {pos['symbol']}: {e}")

@@ -82,3 +82,9 @@ For tasks involving multiple files or agents:
 *   **TDD Mandate**: Critical logic, especially mathematical models, must follow the **Red-Green-Refactor** cycle. Use the `tdd-methodologist` skill.
 *   **Boundary Analysis**: Always test edge cases (`NaN`, `Inf`, `0`, negative values) for physical models.
 
+## 11. Prediction Market / Kalshi API Standards
+*   **Paginated Queries**: The Kalshi `/markets` API does NOT support `status` as a query parameter. High-volume series (e.g., KXBTC15M) accumulate 2000+ markets; ALWAYS use cursor-based pagination with client-side `status == 'active'` filtering.
+*   **Price Domain Isolation**: Option prices (`0.00-1.00`) and underlying asset prices (e.g., `$69,000` BTC) are **separate domains**. NEVER use the underlying spot price for option trade exits (TP/SL). Always use `estimated_price`.
+*   **Strategy Gating**: Strategy `.analyze()` calls MUST be gated behind successful Kalshi market resolution. Raw spot data without fused Kalshi bid/ask produces false signals.
+*   **Strategy Overhaul Protocol**: When modifying or replacing trading strategies, run the **Strategy Overhaul Checklist** (defined in `skills/finance/algo-trading-architect/SKILL.md`) before deploying.
+
