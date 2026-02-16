@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Dict, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from src.utils.logger import logger
 
 @dataclass
@@ -35,7 +35,9 @@ class RiskManager:
         self.MAX_RISK_PER_TRADE_PCT = 0.05 
         self.MAX_DAILY_DRAWDOWN_PCT = 0.10 
         self.MAX_PORTFOLIO_EXPOSURE_PCT = 0.50 # Max 50% of funds active at once
-        self.MIN_TRADE_INTERVAL_SEC = 5 # Reduced to 5s for Ravenous Mode 
+        self.MIN_TRADE_INTERVAL_SEC = 30 # Increased from 5s to prevent limit cycles
+        self.LOSS_COOLDOWN_SEC = 120  # 2-minute cooldown per symbol after a loss
+        self.loss_cooldown = {}  # symbol_prefix -> cooldown_until datetime
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
@@ -45,6 +47,15 @@ class RiskManager:
         self._sync_balance()
         pnl = position.get('pnl', 0.0)
         logger.info(f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f}")
+        
+        # Per-symbol loss cooldown to prevent re-entry after stop-loss
+        if pnl < 0:
+            symbol = position.get('symbol', '')
+            # Extract series prefix (e.g. KXBTC15M from KXBTC15M-26FEB151330-30)
+            prefix = symbol.split('-')[0] if '-' in symbol else symbol
+            cooldown_until = datetime.now() + timedelta(seconds=self.LOSS_COOLDOWN_SEC)
+            self.loss_cooldown[prefix] = cooldown_until
+            logger.info(f"[Risk] ⚠️ Loss Cooldown: {prefix} locked until {cooldown_until.strftime('%H:%M:%S')}")
 
     def _sync_balance(self):
         """
@@ -199,6 +210,14 @@ class RiskManager:
         if seconds_since_last < self.MIN_TRADE_INTERVAL_SEC:
             logger.info(f"[Risk] [WAIT] Rate Limit ({seconds_since_last:.1f}s < {self.MIN_TRADE_INTERVAL_SEC}s)")
             return False
+        
+        # 7. Per-Symbol Loss Cooldown
+        # Caller should pass symbol in category or we check generically
+        # Clean expired cooldowns
+        now = datetime.now()
+        expired = [k for k, v in self.loss_cooldown.items() if now >= v]
+        for k in expired:
+            del self.loss_cooldown[k]
             
         return True
 

@@ -2,8 +2,14 @@
 *.log
 *_output.txt
 debug_*.txt
+debug*.txt
+*output*.txt
+*_results.txt
+test_*.txt
+test_*_*.txt
 experimental_log.txt
 final_test.log
+/test/*.txt
 /logs
 
 # Temporary CLI artifacts

@@ -160,14 +160,16 @@ class Crypto15mTrendStrategyV2(Strategy):
     """
     
     def __init__(self, 
-                 bull_trigger: float = 0.55,
-                 bear_trigger: float = 0.45,
+                 bull_trigger: float = 0.60,
+                 bear_trigger: float = 0.40,
                  stop_loss_buffer: float = 0.10,
                  trailing_trigger_delta: float = 0.15,
                  trailing_stop_delta: float = 0.05,
                  confirmation_delay: int = 120,
                  enable_mean_reversion: bool = True,
-                 mean_reversion_threshold: float = 0.03):
+                 mean_reversion_threshold: float = 0.08,
+                 trend_confirm_ticks: int = 3,
+                 cooldown_seconds: int = 300):
         
         self.last_price = 0.50
         self.price_history = deque(maxlen=50)  # Store last 50 prices for indicators
@@ -180,9 +182,18 @@ class Crypto15mTrendStrategyV2(Strategy):
         self.trailing_stop_delta = trailing_stop_delta
         self.confirmation_delay = confirmation_delay
         
+        # N-Tick Trend Confirmation (anti-noise)
+        self.trend_confirm_ticks = trend_confirm_ticks
+        self.consecutive_above = 0  # Ticks consecutively above bull_trigger
+        self.consecutive_below = 0  # Ticks consecutively below bear_trigger
+        
+        # Post-Trade Cooldown (anti-limit-cycle)
+        self.cooldown_seconds = cooldown_seconds
+        self.cooldown_until = datetime.min
+        
         # Mean Reversion Parameters
         self.enable_mean_reversion = enable_mean_reversion
-        self.mean_reversion_threshold = mean_reversion_threshold  # 3% deviation from mean
+        self.mean_reversion_threshold = mean_reversion_threshold  # 8% deviation from mean
         
         # Momentum Confirmation
         self.momentum = MomentumConfirmation()
@@ -195,8 +206,14 @@ class Crypto15mTrendStrategyV2(Strategy):
         """
         Generate mean reversion signals for ranging markets.
         Only active when price is between bear_trigger and bull_trigger.
+        Requires 30+ sample history and 8%+ deviation from mean.
         """
-        if len(self.price_history) < 20:
+        if len(self.price_history) < 30:
+            return None
+        
+        # Respect cooldown
+        now = market_data.timestamp or datetime.now()
+        if now < self.cooldown_until:
             return None
         
         prices = list(self.price_history)
@@ -292,19 +309,35 @@ class Crypto15mTrendStrategyV2(Strategy):
             except Exception:
                 pass
 
-        # 0. Delay Logic (Trend Confirmation)
+        # 0. Delay Logic (Trend Confirmation at cycle start)
         minutes_into_cycle = now.minute % 15
         if minutes_into_cycle == 0 and now.second < self.confirmation_delay:
             return []
         
+        # 0.5. Post-Trade Cooldown (anti-limit-cycle)
+        if now < self.cooldown_until:
+            return []
+        
         close_time = extra.get('close_time')
         
-        # 1. BULL BREAKOUT with Momentum Confirmation
-        if price_to_monitor > self.bull_trigger and self.last_price <= self.bull_trigger:
+        # --- N-Tick Trend Confirmation Counters ---
+        if price_to_monitor > self.bull_trigger:
+            self.consecutive_above += 1
+            self.consecutive_below = 0
+        elif price_to_monitor < self.bear_trigger:
+            self.consecutive_below += 1
+            self.consecutive_above = 0
+        else:
+            # Price is in dead zone — reset both counters
+            self.consecutive_above = 0
+            self.consecutive_below = 0
+        
+        # 1. BULL BREAKOUT with N-Tick + Momentum Confirmation
+        if self.consecutive_above >= self.trend_confirm_ticks:
             confirmed, reason, strength = self.momentum.should_confirm_buy(prices)
             
             if confirmed:
-                logger.info(f"[TrendV2] 🚀 BULL BREAKOUT: {price_to_monitor:.2f} > {self.bull_trigger} | {reason}")
+                logger.info(f"[TrendV2] 🚀 BULL BREAKOUT: {price_to_monitor:.2f} > {self.bull_trigger} ({self.consecutive_above} ticks) | {reason}")
                 base_qty = 10
                 qty = int(base_qty * (0.5 + strength * 0.5))  # Scale 5-10 based on strength
                 
@@ -321,15 +354,19 @@ class Crypto15mTrendStrategyV2(Strategy):
                 sig.trailing_rules = {'trigger': trig_price, 'new_sl': new_sl}
                 if close_time: sig.expiration_time = close_time
                 signals.append(sig)
+                
+                # Activate cooldown & reset counter after signal
+                self.cooldown_until = now + timedelta(seconds=self.cooldown_seconds)
+                self.consecutive_above = 0
             else:
                 logger.info(f"[TrendV2] ⚠️ BULL REJECTED: {reason}")
                 
-        # 2. BEAR BREAKOUT with Momentum Confirmation
-        elif price_to_monitor < self.bear_trigger and self.last_price >= self.bear_trigger:
+        # 2. BEAR BREAKOUT with N-Tick + Momentum Confirmation
+        elif self.consecutive_below >= self.trend_confirm_ticks:
             confirmed, reason, strength = self.momentum.should_confirm_sell(prices)
             
             if confirmed:
-                logger.info(f"[TrendV2] 📉 BEAR BREAKOUT: {price_to_monitor:.2f} < {self.bear_trigger} | {reason}")
+                logger.info(f"[TrendV2] 📉 BEAR BREAKOUT: {price_to_monitor:.2f} < {self.bear_trigger} ({self.consecutive_below} ticks) | {reason}")
                 base_qty = 10
                 qty = int(base_qty * (0.5 + strength * 0.5))
                 
@@ -346,6 +383,10 @@ class Crypto15mTrendStrategyV2(Strategy):
                 sig.trailing_rules = {'trigger': trig_price, 'new_sl': new_sl}
                 if close_time: sig.expiration_time = close_time
                 signals.append(sig)
+                
+                # Activate cooldown & reset counter after signal
+                self.cooldown_until = now + timedelta(seconds=self.cooldown_seconds)
+                self.consecutive_below = 0
             else:
                 logger.info(f"[TrendV2] ⚠️ BEAR REJECTED: {reason}")
         
@@ -355,6 +396,8 @@ class Crypto15mTrendStrategyV2(Strategy):
             if mr_signal:
                 if close_time: mr_signal.expiration_time = close_time
                 signals.append(mr_signal)
+                # Cooldown after MR signal too
+                self.cooldown_until = now + timedelta(seconds=self.cooldown_seconds)
         
         # Update State
         self.last_price = price_to_monitor

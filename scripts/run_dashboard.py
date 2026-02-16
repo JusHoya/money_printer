@@ -203,16 +203,20 @@ class OrchestratorEngine:
                                 if ticks % 60 == 0:  # Log every ~5 min to avoid spam
                                     logger.warning("[Dashboard] Ghost Ticker: No active KXBTC15M markets found. 15M strategy SKIPPED.")
                             
-                            # B. Resolve HOURLY Ticker (TIME priority) - LIVE FEED ADDITION
-                            btc_hr = self._resolve_smart_ticker("KXBTC", criteria="sentiment")
+                            # B. Resolve HOURLY Ticker (TIME priority) - LIVE FEED
+                            # Try KXBTCHOURLY series first, then fallback to KXBTC
+                            btc_hr = None
+                            for hourly_series in ["KXBTCHOURLY", "KXBTC"]:
+                                btc_hr = self._resolve_smart_ticker(hourly_series, criteria="time")
+                                if btc_hr:
+                                    break
+                            
                             if btc_hr:
                                 k_data_hr = self.kalshi.fetch_latest(btc_hr)
                                 if k_data_hr:
-                                    # logger.info(f"[Dashboard] Hourly Feed: {btc_hr} @ {k_data_hr.bid}")
                                     self.dashboard.update_price(f"{btc_hr} (1h)", k_data_hr.bid)
                                     
                                     # Create specific data object for Hourly Strategy
-                                    # We need a COPY or new instance to avoid messing up the 15m data
                                     btc_data_hr = copy.deepcopy(btc_data)
                                     btc_data_hr.bid = k_data_hr.bid
                                     btc_data_hr.ask = k_data_hr.ask
@@ -221,6 +225,9 @@ class OrchestratorEngine:
                                     # Run Hourly Strategy
                                     hr_signals = self.strategies['crypto_hr'].analyze(btc_data_hr)
                                     self._process_signals(hr_signals, strategy_name="Crypto Hourly")
+                            else:
+                                if ticks % 60 == 0:
+                                    logger.warning("[Dashboard] Ghost Ticker: No active KXBTCHOURLY or KXBTC hourly markets found.")
                         
                         except Exception as e:
                             logger.error(f"Market Fetch Fail (BTC): {e}")
