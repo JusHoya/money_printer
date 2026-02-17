@@ -66,6 +66,61 @@ class OrchestratorEngine:
 
         if not self.kalshi: return None
         
+        # --- SPECIAL CASE: KXBTCHOURLY (V1 Discovery) ---
+        if series_base == "KXBTCHOURLY":
+             try:
+                 # Use the special V1 probe method we added to KalshiProvider
+                 v1_markets = self.kalshi.fetch_btc_hourly_markets()
+                 if v1_markets:
+                     # 1. Group by Expiration (Find Soonest)
+                     # Sort by close_time (ISO string)
+                     # Filter out any that might have slipped through (just to be safe)
+                     future_markets = v1_markets # Already filtered by provider
+                     
+                     if not future_markets: return None
+                     
+                     # Sort by time first
+                     future_markets.sort(key=lambda x: x.extra.get('close_time', '9999'))
+                     
+                     # Get the soonest close time
+                     soonest_time = future_markets[0].extra.get('close_time')
+                     
+                     # Filter for only this hour's markets
+                     this_hour_markets = [m for m in future_markets if m.extra.get('close_time') == soonest_time]
+                     
+                     # 2. Find ATM Strike
+                     # Get current Spot Price
+                     spot_price = 50000.0 # Fallback
+                     try:
+                         cb_data = self.coinbase.fetch_latest()
+                         if cb_data: spot_price = cb_data.price
+                     except: pass
+                     
+                     def get_strike_diff(m):
+                         try:
+                             # Format: ...-T60999.99
+                             strike_part = m.symbol.split('-')[-1]
+                             strike_val = float(re.sub(r'[A-Za-z]', '', strike_part))
+                             return abs(strike_val - spot_price)
+                         except:
+                             return 999999.0
+                             
+                     # Sort by proximity to spot
+                     this_hour_markets.sort(key=get_strike_diff)
+                     
+                     best = this_hour_markets[0].symbol
+                     
+                     # Cache slightly longer since we did a heavy V1 scan? 
+                     # Actually V1 scan is expensive (12 requests). We should cache this for maybe 5 mins?
+                     # Existing cache is 60s. That's OK.
+                     
+                     self.ticker_cache[series_base] = {'ticker': best, 'time': time.time()}
+                     logger.info(f"[Dashboard] Smart Resolve {series_base} -> {best} (ATM Strike @ {spot_price})")
+                     return best
+             except Exception as e:
+                 logger.error(f"V1 Discovery Failed: {e}")
+                 pass
+        
         try:
             # 1. Fetch markets with PAGINATION (Kalshi API does NOT support status filtering)
             # High-volume series like KXBTC15M have 2000+ markets. The active one(s)

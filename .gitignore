@@ -9,7 +9,8 @@ test_*.txt
 test_*_*.txt
 experimental_log.txt
 final_test.log
-/test/*.txt
+/tests/*.txt
+/tests/*.json
 /logs
 
 # Temporary CLI artifacts

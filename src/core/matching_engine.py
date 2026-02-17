@@ -330,7 +330,12 @@ class SimulatedExchange:
                     self._close_position(pos, current_spot_price, reason="EXPIRATION")
                     continue
 
-            if target_fragment not in pos['symbol']: continue
+            if target_fragment not in pos['symbol']: 
+                # Special Case: BTC matches kxbtcd (case mismatch / alias)
+                if target_fragment == "BTC" and "kxbtcd" in pos['symbol']:
+                    pass
+                else: 
+                    continue
             if update_type == "PRECIP" and "PRECIP" not in pos['symbol']: continue
             if update_type == "TEMP" and "TEMP" not in pos['symbol'] and "KXHIGH" not in pos['symbol']: continue
 
@@ -348,8 +353,8 @@ class SimulatedExchange:
                 # --- CASE 1: PRECIPITATION ---
                 if "PRECIP" in pos['symbol']:
                     estimated_price = current_spot_price
-                # --- CASE 2: STRIKE BASED (KXHIGH, KXBTC) ---
-                elif "KXHIGH" in pos['symbol'] or "KXBTC" in pos['symbol']:
+                # --- CASE 2: STRIKE BASED (KXHIGH, KXBTC, kxbtcd) ---
+                elif "KXHIGH" in pos['symbol'] or "KXBTC" in pos['symbol'] or "kxbtcd" in pos['symbol']:
                     try:
                         parts = pos['symbol'].split('-')
                         strike_str = parts[-1]

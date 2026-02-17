@@ -7,6 +7,7 @@ import joblib
 import pandas as pd
 from src.utils.logger import logger
 from collections import deque
+import re
 
 
 # ==============================================================================
@@ -271,11 +272,12 @@ class Crypto15mTrendStrategyV2(Strategy):
         
         # 0.5. Strike Arbitrage (The "Strike" Arb)
         # Check if market pricing is dislocated from Spot Reality
-        if "KXBTC" in market_data.symbol:
+        if "KXBTC" in market_data.symbol or "kxbtcd" in market_data.symbol:
             try:
                 # Extract Strike from Ticker (Heuristic based on SimulatedExchange logic)
+                # Supports both KXBTC-YYMONDD-HH00-Txxxxx and kxbtcd-YYMMMDDHH-Txxxxx
                 parts = market_data.symbol.split('-')
-                strike_str = parts[-1]
+                strike_str = parts[-1] 
                 # Assuming standard Kalshi ticker format where non-B prefix means "Above"/"High"
                 strike_val = float(re.sub(r'[A-Za-z]', '', strike_str))
                 
@@ -543,9 +545,10 @@ class CryptoHourlyStrategy(Strategy):
         self.price_history = [x for x in self.price_history if x[0] > cutoff]
         
         # Valid Market Check (Must be KXBTC Hourly)
-        # Ticker format: KXBTC-YYMONDD-HH00-Txxxxx
+        # Valid Market Check (Must be KXBTC Hourly)
+        # Ticker format: KXBTC-YYMONDD-HH00-Txxxxx OR kxbtcd-YYMMMDDHH-Txxxxx
         symbol = market_data.symbol
-        if "KXBTC" not in symbol or "15M" in symbol: 
+        if ("KXBTC" not in symbol and "kxbtcd" not in symbol) or "15M" in symbol: 
             return [] # Wrong feed
             
         # Extract Strike
@@ -696,14 +699,19 @@ class CryptoArbitrageStrategy(Strategy):
             target_time = now.replace(minute=next_interval_min, second=0)
         time_str_15m = target_time.strftime("%H%M")
         
-        # 2. Hourly Real (KXBTC)
-        # Production Series: KXBTC or KXBTC15M
-        # Format: KXBTC-YYMONDD-HH00
+        # 2. Hourly Real (KXBTC / kxbtcd)
+        # Production Series: KXBTC (Legacy) or kxbtcd (New)
+        # New Format: kxbtcd-YYMMMDDHH
         next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0)
-        date_str = next_hour.strftime("%y%b%d").upper() 
-        hour_str = next_hour.strftime("%H00")
         
-        real_ticker_base = f"KXBTC-{date_str}-{hour_str}"
+        # We need to construct the NEW format as it's likely the only one working?
+        # kxbtcd-26feb1623
+        yy = next_hour.strftime("%y")
+        mmm = next_hour.strftime("%b").lower()
+        dd = next_hour.strftime("%d")
+        hh = next_hour.strftime("%H")
+        
+        real_ticker_base = f"kxbtcd-{yy}{mmm}{dd}{hh}"
         
         strike_price = round(spot_price / 100) * 100
         

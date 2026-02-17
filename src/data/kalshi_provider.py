@@ -3,7 +3,7 @@ import json
 import base64
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -17,6 +17,7 @@ class KalshiProvider(DataProvider):
     """
     
     PUBLIC_API_URL = "https://api.elections.kalshi.com/trade-api/v2"
+    V1_API_URL = "https://api.elections.kalshi.com/v1"
     
     def __init__(self, key_id: str = None, private_key_path: str = None, api_url: str = None, read_only: bool = False):
         self.key_id = key_id
@@ -190,3 +191,92 @@ class KalshiProvider(DataProvider):
         except Exception as e:
             logger.error(f"[KalshiProvider] Fetch Error for {symbol}: {e}")
             return None
+
+    def fetch_btc_hourly_markets(self) -> List[MarketData]:
+        """
+        Special discovery for BTC Hourly markets which are hidden from V2 endpoint.
+        Uses V1 Event API to probe for active hourly events.
+        """
+        markets = []
+        now = datetime.now()
+        
+        # Candidate hours: Current hour + next 12 hours
+        candidates = []
+        for i in range(12):
+            t = now + timedelta(hours=i)
+            # Format: KXBTCD-YYMMMDDHH (e.g. 26FEB1717)
+            # Year: 26 (2-digit)
+            yy = t.strftime("%y")
+            # Month: FEB (3-char upper)
+            mmm = t.strftime("%b").upper()
+            # Day: 17 (2-digit)
+            dd = t.strftime("%d")
+            # Hour: 17 (24-hour)
+            hh = t.strftime("%H")
+            
+            ticker = f"KXBTCD-{yy}{mmm}{dd}{hh}"
+            candidates.append(ticker)
+            
+        logger.info(f"[KalshiProvider] Probing {len(candidates)} candidate BTC hourly events...")
+        
+        for event_ticker in candidates:
+            try:
+                # Probe V1
+                url = f"{self.V1_API_URL}/series/KXBTCD/events/{event_ticker}"
+                resp = self.session.get(url, timeout=2) # Fast timeout
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    event = data.get('event', {})
+                    raw_markets = event.get('markets', [])
+                    
+                    if raw_markets:
+                        # logger.info(f"[KalshiProvider] FOUND {event_ticker}: {len(raw_markets)} markets")
+                        
+                        for m in raw_markets:
+                            # Check Expiration (Filter out past markets)
+                            close_str = m.get('close_date')
+                            if close_str:
+                                try:
+                                    # Handle ISO with Z
+                                    # 2026-02-17T05:00:00Z
+                                    # We use naive now() for simplicity if system is local, but API is UTC.
+                                    # Better to convert everything to UTC aware.
+                                    close_dt = datetime.fromisoformat(close_str.replace('Z', '+00:00'))
+                                    now_utc = datetime.now().astimezone()
+                                    
+                                    # Buffer: If closed within last 1 minute, consider closed.
+                                    if close_dt <= now_utc:
+                                        # logger.debug(f"Skipping expired market: {m.get('ticker_name')} (Closed {close_str})")
+                                        continue
+                                except Exception:
+                                    pass
+
+                            # Map V1 JSON to MarketData
+                            symbol = m.get('ticker_name')
+                            # Handle weird V1 keys
+                            bid = float(m.get('yes_bid', 0)) / 100.0
+                            ask = float(m.get('yes_ask', 0)) / 100.0
+                            last = float(m.get('last_price', 0)) / 100.0
+                            
+                            md = MarketData(
+                                symbol=symbol,
+                                timestamp=datetime.now(),
+                                price=last,
+                                volume=m.get('volume', 0),
+                                bid=bid,
+                                ask=ask,
+                                extra={
+                                    "status": m.get('status'),
+                                    "close_time": m.get('close_date'),
+                                    "source": "v1_discovery",
+                                    "strike_type": m.get('strike_type'),
+                                    "sub_title": m.get('sub_title')
+                                }
+                            )
+                            markets.append(md)
+            except Exception as e:
+                # logger.debug(f"Probe failed for {event_ticker}: {e}")
+                pass
+                
+        return markets
