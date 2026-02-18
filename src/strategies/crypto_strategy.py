@@ -289,8 +289,12 @@ class Crypto15mTrendStrategyV2(Strategy):
                 
                 # Case A: Spot is clearly ABOVE Strike (Reality = YES)
                 if spot_price > (strike_val + decision_buffer):
+                    # SAFETY: Ensure Strike is realistic for BTC (e.g. > 1000)
+                    if strike_val < 1000:
+                         # logger.warning(f"[StrikeArb] Ignoring suspicious strike value: {strike_val} from {market_data.symbol}")
+                         pass
                     # Value should be high (~0.99). If Ask is cheap, Buy.
-                    if market_data.ask < 0.85 and market_data.ask > 0.01:
+                    elif market_data.ask < 0.85 and market_data.ask > 0.01:
                          logger.info(f"[StrikeArb] 💎 ARB OPPORTUNITY: Spot ${spot_price:.2f} > Strike ${strike_val}. Ask ${market_data.ask:.2f}. BUY YES.")
                          signals.append(TradeSignal(
                              symbol=market_data.symbol, side="buy", quantity=10, 
@@ -300,8 +304,11 @@ class Crypto15mTrendStrategyV2(Strategy):
                          
                 # Case B: Spot is clearly BELOW Strike (Reality = NO)
                 elif spot_price < (strike_val - decision_buffer):
+                     # SAFETY: Ensure Strike is realistic for BTC
+                    if strike_val < 1000:
+                         pass
                     # Value should be low (~0.01). If Bid is expensive, Sell.
-                    if market_data.bid > 0.15:
+                    elif market_data.bid > 0.15:
                          logger.info(f"[StrikeArb] 💎 ARB OPPORTUNITY: Spot ${spot_price:.2f} < Strike ${strike_val}. Bid ${market_data.bid:.2f}. SELL YES.")
                          signals.append(TradeSignal(
                              symbol=market_data.symbol, side="sell", quantity=10, 
@@ -533,23 +540,30 @@ class CryptoHourlyStrategy(Strategy):
     def analyze(self, market_data: MarketData) -> List[TradeSignal]:
         signals = []
         extra = market_data.extra
+        now = sorted(self.price_history)[-1][0] if self.price_history else datetime.now()
         
-        if extra.get('source') != 'live_coinbase': return [] # Need Spot Price history
-
-        spot_price = market_data.price
-        now = datetime.now()
-        
-        # Maintain 20m Rolling Window
-        self.price_history.append((now, spot_price))
-        cutoff = now - timedelta(minutes=self.window_minutes)
-        self.price_history = [x for x in self.price_history if x[0] > cutoff]
-        
-        # Valid Market Check (Must be KXBTC Hourly)
-        # Valid Market Check (Must be KXBTC Hourly)
-        # Ticker format: KXBTC-YYMONDD-HH00-Txxxxx OR kxbtcd-YYMMMDDHH-Txxxxx
+        # 1. Handle Spot Price Updates (Coinbase)
+        if "Coinbase" in market_data.symbol or extra.get('source') == 'live_coinbase':
+            spot_price = market_data.price
+            now = datetime.now()
+            
+            # Maintain 20m Rolling Window
+            self.price_history.append((now, spot_price))
+            cutoff = now - timedelta(minutes=self.window_minutes)
+            self.price_history = [x for x in self.price_history if x[0] > cutoff]
+            return [] # No direct trades on Spot tick
+            
+        # 2. Handle Kalshi Market Updates (KXBTC Hourly)
+        # Valid Market Check (Must be KXBTC/KXBTCD Hourly)
         symbol = market_data.symbol
         if ("KXBTC" not in symbol and "kxbtcd" not in symbol) or "15M" in symbol: 
-            return [] # Wrong feed
+            return [] 
+
+        # Need Spot History to trade
+        if not self.price_history: 
+            return []
+            
+        current_spot = self.price_history[-1][1]
             
         # Extract Strike
         try:
@@ -558,20 +572,20 @@ class CryptoHourlyStrategy(Strategy):
             strike_part = parts[-1] 
             strike_val = float(re.sub(r'[A-Za-z]', '', strike_part))
             
+            # --- FILTER: Relevance Check ---
+            # Only trade markers within $750 of spot
+            dist = abs(strike_val - current_spot)
+            if dist > 750:
+                return []
+            
             # Target Time: The Hour in the ticker (1800 -> 18:00)
-            # We assume the ticker represents the NEXT hour (Expiration)
-            # But we need to be careful. Is it expiring AT that hour?
-            # Yes, Kalshi Hourly expires at the top of the hour.
-            # We need to parse the date/time from ticker to be precise.
-            # ... For now, let's assume it expires at the next top-of-hour from NOW.
-            target_time = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+            target_time = (datetime.now() + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
             
         except Exception as e:
-            # logger.error(f"[Hourly] Ticker Parse Error ({symbol}): {e}")
             return []
 
         # Predict
-        predicted_price = self._predict_future_price(now, target_time)
+        predicted_price = self._predict_future_price(datetime.now(), target_time)
         if not predicted_price: return []
 
         # Decision Logic (Arbitrage)
@@ -582,7 +596,7 @@ class CryptoHourlyStrategy(Strategy):
             # If Market Price is LOW (e.g. < 0.85), it's a steal.
             # Buying YES means we believe Price > Strike.
             if market_data.ask < 0.85 and market_data.ask > 0:
-                 logger.info(f"[Hourly] 🚀 BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val}. Market Ask {market_data.ask:.2f}. BUY YES.")
+                 logger.info(f"[Hourly] 🚀 BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val} (Spot ${current_spot:.2f}). Ask {market_data.ask:.2f}. BUY YES.")
                  signals.append(TradeSignal(
                     symbol=symbol,
                     side="buy", # Buy YES

@@ -7,6 +7,7 @@ import sys
 import time
 import csv
 from datetime import datetime
+import re
 from src.visualization.mascot import Mascot
 
 # Clear screen helper
@@ -217,9 +218,24 @@ class Dashboard:
             if (now - data['ts']) > 300:
                 continue
                 
+            # SPECIAL: Capture Coinbase Price for reference
+            if "Coinbase" in sym:
+                series_groups.setdefault("COINBASE", []).append((sym, data))
+                continue
+                
+            # SPECIAL: Handle BTC Hourly (KXBTCD) separately for Ladder View
+            if "KXBTCD" in sym or "KXBTC-" in sym:
+                 # Check if it's an hourly (not daily/weekly)
+                 # Ticker format: KXBTCD-YYMMMDDHH-Txxxxx
+                 # 15m format: KXBTC15M...
+                 if "15M" not in sym:
+                     if "BTC_HOURLY" not in series_groups:
+                         series_groups["BTC_HOURLY"] = []
+                     series_groups["BTC_HOURLY"].append((sym, data))
+                     continue
+
             # Extract Base Series
             base = sym.split('-')[0]
-            if "Coinbase" in sym: base = "COINBASE"
             
             if base not in series_groups:
                 series_groups[base] = []
@@ -227,6 +243,66 @@ class Dashboard:
             
         # Select Winner for each group (Newest Timestamp)
         display_list = []
+        # Processing Groups for Display
+        display_list = []
+        
+        # 1. Get Spot Price if available
+        coinbase_price = 0.0
+        if "COINBASE" in series_groups:
+             # Sort by TS descending
+             items = series_groups["COINBASE"]
+             items.sort(key=lambda x: x[1]['ts'], reverse=True)
+             winner_sym, winner_data = items[0]
+             coinbase_price = winner_data['price']
+             display_list.append((winner_sym, winner_data))
+             del series_groups["COINBASE"]
+
+        # 2. Process BTC Hourly Ladder
+        if "BTC_HOURLY" in series_groups:
+            markets = series_groups["BTC_HOURLY"]
+            
+            if coinbase_price <= 0:
+                # If we don't have a spot price, we can't calculate closest.
+                # Fallback: Just show the ones with highest active price (most likely to be NTM)
+                markets.sort(key=lambda x: x[1]['price'], reverse=True)
+                for sym, data in markets[:3]:
+                    display_list.append((sym, data))
+            else:
+                # 1. Parse all strikes
+                parsed_markets = []
+                for sym, data in markets:
+                    try:
+                        # Clean symbol of suffix (e.g. " (1h)")
+                        clean_sym = sym.split(' ')[0]
+                        
+                        # Parse Strike: KXBTCD-26FEB1718-T98000
+                        parts = clean_sym.split('-')
+                        strike_part = parts[-1] 
+                        # Remove 'T' and any other non-digit/dot chars just in case
+                        strike_val = float(re.sub(r'[^\d.]', '', strike_part))
+                        parsed_markets.append((strike_val, sym, data))
+                    except:
+                        pass
+                
+                if parsed_markets:
+                    # 2. Find Closest Markets to Spot
+                    # Sort by distance to spot
+                    parsed_markets.sort(key=lambda x: abs(x[0] - coinbase_price))
+                    
+                    # 3. Take Top 3 Closest
+                    # This naturally selects the Center and its immediate neighbors (Upper/Lower)
+                    # regardless of whether the interval is 250, 100, or 500.
+                    top_3 = parsed_markets[:3]
+                    
+                    # 4. Sort by Strike Descending (Ladder View)
+                    top_3.sort(key=lambda x: x[0], reverse=True)
+                    
+                    for _, sym, data in top_3:
+                        display_list.append((sym, data))
+            
+            del series_groups["BTC_HOURLY"]
+
+        # 3. Standard Processing for others (Winner takes all)
         for base, items in series_groups.items():
             # Sort by TS descending
             items.sort(key=lambda x: x[1]['ts'], reverse=True)

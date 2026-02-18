@@ -2,6 +2,7 @@ import time
 import threading
 import os
 import sys
+import re
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -193,6 +194,89 @@ class OrchestratorEngine:
             logger.error(f"Resolution Error ({series_base}): {e}")
             return None
 
+    def _resolve_btc_ladder(self):
+        """
+        Resolves the 'Ladder' of BTC Hourly markets:
+        1. Center (Closest to Spot)
+        2. Lower (Center - $250)
+        3. Upper (Center + $250)
+        Returns a list of tickers, with Center first.
+        """
+        if not self.kalshi: return []
+        
+        try:
+            # 1. Fetch V1 Markets
+            markets = self.kalshi.fetch_btc_hourly_markets()
+            if not markets:
+                logger.warning("[Dashboard] No V1 BTC Markets found.")
+                return []
+            
+            # 2. Filter for Soonest Expiration
+            markets.sort(key=lambda x: x.extra.get('close_time', '9999'))
+            soonest_time = markets[0].extra.get('close_time')
+            this_hour_markets = [m for m in markets if m.extra.get('close_time') == soonest_time]
+            
+            if not this_hour_markets:
+                logger.warning(f"[Dashboard] No markets found for soonest hour: {soonest_time}")
+                return []
+            
+            # 3. Get Spot Price
+
+            spot_price = 50000.0
+            try:
+                cb_data = self.coinbase.fetch_latest()
+                if cb_data: spot_price = cb_data.price
+            except: pass
+            
+            # 4. Find Center (Closest to Spot)
+            def get_strike(m):
+                try:
+                    # KXBTCD-YYMMMDDHH-Txxxxx
+                    parts = m.symbol.split('-')
+                    strike_part = parts[-1]
+                    return float(re.sub(r'[A-Za-z]', '', strike_part))
+                except Exception as e:
+                    logger.error(f"Strike Parse Error ({m.symbol}): {e}")
+                    return -1.0
+            
+            # Parse all valid markets
+            valid_markets = [] # (strike, market_obj)
+            for m in this_hour_markets:
+                s = get_strike(m)
+                if s > 0: 
+                    valid_markets.append((s, m))
+                else:
+                    logger.debug(f"Failed to parse strike for: {m.symbol}")
+                
+            if not valid_markets:
+                logger.warning(f"[Dashboard] No valid strikes parsed from {len(this_hour_markets)} markets. Sample: {this_hour_markets[0].symbol}")
+                return []
+            
+            # Sort by distance to spot
+
+            valid_markets.sort(key=lambda x: abs(x[0] - spot_price))
+            
+            center_strike, center_market = valid_markets[0]
+            
+            # 5. Find Neighbors (+/- 250)
+            ladder_tickers = [center_market.symbol]
+            
+            # We want specific targets: Center - 250, Center + 250
+            targets = [center_strike - 250, center_strike + 250]
+            
+            for t in targets:
+                # Find best match for this target (within small epsilon, e.g. 5.0)
+                # re-using valid_markets
+                match = next((m for s, m in valid_markets if abs(s - t) < 5.0), None)
+                if match:
+                    ladder_tickers.append(match.symbol)
+            
+            return ladder_tickers
+            
+        except Exception as e:
+            logger.error(f"[Dashboard] Ladder Resolve Failed: {e}")
+            return []
+
     def market_loop(self):
         """Background thread to fetch data and run strategies."""
         ticks = 0
@@ -258,31 +342,33 @@ class OrchestratorEngine:
                                 if ticks % 60 == 0:  # Log every ~5 min to avoid spam
                                     logger.warning("[Dashboard] Ghost Ticker: No active KXBTC15M markets found. 15M strategy SKIPPED.")
                             
-                            # B. Resolve HOURLY Ticker (TIME priority) - LIVE FEED
-                            # Try KXBTCHOURLY series first, then fallback to KXBTC
-                            btc_hr = None
-                            for hourly_series in ["KXBTCHOURLY", "KXBTC"]:
-                                btc_hr = self._resolve_smart_ticker(hourly_series, criteria="time")
-                                if btc_hr:
-                                    break
+                            # B. Resolve HOURLY Ladder (Spot, -250, +250) - LIVE FEED
+                            ladder = self._resolve_btc_ladder()
                             
-                            if btc_hr:
-                                k_data_hr = self.kalshi.fetch_latest(btc_hr)
-                                if k_data_hr:
-                                    self.dashboard.update_price(f"{btc_hr} (1h)", k_data_hr.bid)
-                                    
-                                    # Create specific data object for Hourly Strategy
+                            if ladder:
+                                # Update Dashboard with ALL 3 (or however many found)
+                                for ticker in ladder:
+                                    k_data_ladder = self.kalshi.fetch_latest(ticker)
+                                    if k_data_ladder:
+                                        self.dashboard.update_price(f"{ticker} (1h)", k_data_ladder.bid)
+                                
+                                # Use the CENTER one (First in list) for Strategy
+                                center_ticker = ladder[0]
+                                k_data_center = self.kalshi.fetch_latest(center_ticker)
+                                
+                                if k_data_center:
                                     btc_data_hr = copy.deepcopy(btc_data)
-                                    btc_data_hr.bid = k_data_hr.bid
-                                    btc_data_hr.ask = k_data_hr.ask
-                                    btc_data_hr.symbol = btc_hr
+                                    btc_data_hr.bid = k_data_center.bid
+                                    btc_data_hr.ask = k_data_center.ask
+                                    btc_data_hr.symbol = center_ticker
                                     
                                     # Run Hourly Strategy
                                     hr_signals = self.strategies['crypto_hr'].analyze(btc_data_hr)
                                     self._process_signals(hr_signals, strategy_name="Crypto Hourly")
+
                             else:
                                 if ticks % 60 == 0:
-                                    logger.warning("[Dashboard] Ghost Ticker: No active KXBTCHOURLY or KXBTC hourly markets found.")
+                                    logger.warning("[Dashboard] Ghost Ticker: No active BTC Hourly ladder found.")
                         
                         except Exception as e:
                             logger.error(f"Market Fetch Fail (BTC): {e}")
