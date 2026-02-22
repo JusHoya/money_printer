@@ -12,7 +12,7 @@ from src.data.nws_provider import NWSProvider
 from src.data.coinbase_provider import CoinbaseProvider
 from src.data.kalshi_provider import KalshiProvider
 from src.strategies.weather_strategy import WeatherArbitrageStrategy, WeatherArbitrageStrategyV2
-from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2
+from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2, CryptoLongShotFader
 from src.core.interfaces import TradeSignal
 from src.core.risk_manager import RiskManager
 from src.utils.system_utils import prevent_sleep
@@ -27,10 +27,14 @@ class OrchestratorEngine:
         self.running = True
         self.risk_manager = RiskManager(starting_balance=100.0)
         
+        # Wire the trade-close callback to the dashboard for strategy tracking
+        self.risk_manager.exchange.on_close = self._on_trade_close
+        
         self.strategies = {
             "weather": WeatherArbitrageStrategyV2(), # UPGRADED TO V2
             "crypto": Crypto15mTrendStrategyV2(),   # UPGRADED TO V2
-            "crypto_hr": CryptoHourlyStrategy()
+            "crypto_hr": CryptoHourlyStrategy(),
+            "longshot": CryptoLongShotFader()       # NEW: Fade low-prob contracts
         }
         self.dashboard.active_strategies = list(self.strategies.keys())
         self.ticker_cache = {} # Cache resolved tickers: { "KXHIGHNY": "KXHIGHNY-26JAN30-T20" }
@@ -53,6 +57,13 @@ class OrchestratorEngine:
         if k_id and k_key:
             # SAFETY: Always force read_only=True for now
             self.kalshi = KalshiProvider(k_id, k_key, k_url, read_only=True)
+
+    def _on_trade_close(self, position: dict):
+        """Callback from OMS when a trade is settled/closed. Reports result to dashboard."""
+        strategy_name = position.get('strategy_name', 'Unknown')
+        pnl = position.get('pnl', 0.0)
+        self.dashboard.record_strategy_trade_result(strategy_name, pnl)
+        logger.info(f"[Orchestrator] 📊 Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}")
 
     def _resolve_smart_ticker(self, series_base, criteria="time"):
         """
@@ -332,9 +343,14 @@ class OrchestratorEngine:
                                 if k_data_15:
                                     self.dashboard.update_price(f"{btc_15m} (15m)", k_data_15.bid)
                                     # FUSE DATA for 15M Strategy
+                                    original_spot = btc_data.price  # Save before overwriting
                                     btc_data.bid = k_data_15.bid
                                     btc_data.ask = k_data_15.ask
                                     btc_data.symbol = btc_15m
+                                    # Inject spot price so TrendV2 RSI runs on real BTC prices
+                                    if btc_data.extra is None:
+                                        btc_data.extra = {}
+                                    btc_data.extra['spot_price'] = original_spot
                                     self.risk_manager.update_market_data(btc_15m, btc_data.price)
                                     btc_15m_resolved = True
                             else:
@@ -377,7 +393,10 @@ class OrchestratorEngine:
                     # Without this, the strategy receives raw BTC spot ($69k) and compares against 0.55
                     if btc_15m_resolved:
                         signals = self.strategies['crypto'].analyze(btc_data)
-                        self._process_signals(signals, strategy_name="Trend Catcher V1")
+                        self._process_signals(signals, strategy_name="Trend Catcher V2")
+                        # LongShot Fader: also check the 15m option for longshot pricing
+                        ls_signals = self.strategies['longshot'].analyze(btc_data)
+                        self._process_signals(ls_signals, strategy_name="LongShot Fader")
                 else:
                     # Log failure occasionally
                     if ticks % 10 == 0:
@@ -545,7 +564,7 @@ class OrchestratorEngine:
                 tr = getattr(sig, 'trailing_rules', None)
                 ex = getattr(sig, 'expiration_time', None)
                 
-                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex)
+                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name)
             
             else:
                 # RISKY:

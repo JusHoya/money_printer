@@ -259,7 +259,7 @@ class SimulatedExchange:
         self.STOP_LOSS_PCT = 0.30    # -30% loss -> Close
         self.TIME_LIMIT_MIN = 60     # Force close after 60 mins (for hourly markets)
 
-    def open_position(self, symbol: str, side: str, entry_price: float, quantity: int, stop_loss: float = 0.0, trailing_rules: dict = None, expiration_time: any = None):
+    def open_position(self, symbol: str, side: str, entry_price: float, quantity: int, stop_loss: float = 0.0, trailing_rules: dict = None, expiration_time: any = None, strategy_name: str = None):
         """
         Records a new position.
         :param expiration_time: ISO string or datetime of contract close.
@@ -287,7 +287,8 @@ class SimulatedExchange:
             'stop_loss': stop_loss,
             'trailing_rules': trailing_rules,
             'trailing_activated': False,
-            'expiration_time': expiry_dt
+            'expiration_time': expiry_dt,
+            'strategy_name': strategy_name or 'Unknown'
         }
         self.positions.append(position)
         

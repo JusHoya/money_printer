@@ -173,7 +173,8 @@ class Crypto15mTrendStrategyV2(Strategy):
                  cooldown_seconds: int = 300):
         
         self.last_price = 0.50
-        self.price_history = deque(maxlen=50)  # Store last 50 prices for indicators
+        self.price_history = deque(maxlen=50)  # Option price history (for mean-reversion only)
+        self.spot_price_history = deque(maxlen=50)  # BTC Spot price history (for RSI/MACD)
         
         # --- Tunable "Knobs" ---
         self.bull_trigger = bull_trigger
@@ -196,8 +197,11 @@ class Crypto15mTrendStrategyV2(Strategy):
         self.enable_mean_reversion = enable_mean_reversion
         self.mean_reversion_threshold = mean_reversion_threshold  # 8% deviation from mean
         
-        # Momentum Confirmation
+        # Momentum Confirmation (now uses SPOT prices)
         self.momentum = MomentumConfirmation()
+        
+        # Fixed Cent Stop-Loss for binary options (avoids pct stops wiping out on spread)
+        self.FIXED_STOP_CENTS = 0.05  # $0.05 hard floor stop for binary options
         
     def name(self) -> str:
         mode = "Trend+MR" if self.enable_mean_reversion else "Trend"
@@ -264,11 +268,20 @@ class Crypto15mTrendStrategyV2(Strategy):
         extra = market_data.extra
         now = market_data.timestamp or datetime.now()
         
-
-        # Update price history
+        # --- UPDATE SPOT PRICE HISTORY (for RSI/MACD) ---
+        # The spot price is the underlying BTC price from Coinbase, passed through
+        # run_dashboard.py via btc_data.price. This ensures RSI is on real BTC prices
+        # (~$90k range) not binary option prices (0-1 range), which caused RSI=0/100 bugs.
+        spot_price = extra.get('spot_price') or market_data.price
+        if spot_price and spot_price > 1.0:  # Only real spot prices (not option prob)
+            self.spot_price_history.append(spot_price)
+        
+        # Update option price history (for mean-reversion)
         price_to_monitor = market_data.ask
         self.price_history.append(price_to_monitor)
-        prices = list(self.price_history)
+        
+        # Use spot prices for RSI/MACD if available, fallback to option prices for old behavior
+        indicator_prices = list(self.spot_price_history) if len(self.spot_price_history) >= 15 else list(self.price_history)
         
         # 0.5. Strike Arbitrage (The "Strike" Arb)
         # Check if market pricing is dislocated from Spot Reality
@@ -327,6 +340,7 @@ class Crypto15mTrendStrategyV2(Strategy):
         if now < self.cooldown_until:
             return []
         
+        prices = indicator_prices  # For momentum confirmation
         close_time = extra.get('close_time')
         
         # --- N-Tick Trend Confirmation Counters ---
@@ -357,7 +371,7 @@ class Crypto15mTrendStrategyV2(Strategy):
                     limit_price=market_data.ask,
                     confidence=0.6 + (strength * 0.3)
                 )
-                sig.stop_loss = market_data.ask * (1.0 - self.stop_loss_buffer)
+                sig.stop_loss = market_data.ask - self.FIXED_STOP_CENTS  # Fixed cents for binary options
                 trig_price = market_data.ask + self.trailing_trigger_delta
                 new_sl = trig_price - self.trailing_stop_delta
                 sig.trailing_rules = {'trigger': trig_price, 'new_sl': new_sl}
@@ -386,7 +400,7 @@ class Crypto15mTrendStrategyV2(Strategy):
                     limit_price=market_data.bid,
                     confidence=0.6 + (strength * 0.3)
                 )
-                sig.stop_loss = market_data.bid * (1.0 + self.stop_loss_buffer)
+                sig.stop_loss = market_data.bid + self.FIXED_STOP_CENTS  # Fixed cents for binary options
                 trig_price = market_data.bid - self.trailing_trigger_delta
                 new_sl = trig_price + self.trailing_stop_delta
                 sig.trailing_rules = {'trigger': trig_price, 'new_sl': new_sl}
@@ -764,4 +778,82 @@ class CryptoArbitrageStrategy(Strategy):
                 confidence=conf
             ))
         
+        return signals
+
+
+# ==============================================================================
+# LONGSHOT FADER STRATEGY
+# "The House Edge" - Research-backed Kalshi long-shot bias exploitation
+# ==============================================================================
+# Academic Finding: Kalshi contracts priced < $0.10 win only ~4% of the time.
+# Sellers (shorters) of these contracts win ~96% of trades.
+# This strategy sells low-probability contracts to collect the "optimism tax"
+# from irrational bettors who overpay for long-shots.
+# Source: ifo.de study + jbecker.dev analysis on Kalshi market inefficiencies
+
+class CryptoLongShotFader(Strategy):
+    """
+    Fade the long-shot bias on Kalshi.
+    Sells YES contracts priced below the longshot_ceiling.
+    Win expectation: ~93-96% based on academic research.
+    """
+
+    def __init__(
+        self,
+        longshot_ceiling: float = 0.08,   # Sell anything below 8 cents
+        min_price: float = 0.03,          # Don't sell sub-3c (too illiquid)
+        quantity: int = 5,                # Small position — we rely on frequency
+        cooldown_seconds: int = 600,      # 10 min cooldown per symbol
+    ):
+        self.longshot_ceiling = longshot_ceiling
+        self.min_price = min_price
+        self.quantity = quantity
+        self.cooldown_seconds = cooldown_seconds
+        # Track last trade time per symbol
+        self._last_trade: dict = {}
+
+    def name(self) -> str:
+        return f"LongShot Fader (< ${self.longshot_ceiling:.2f})"
+
+    def analyze(self, market_data: MarketData) -> List[TradeSignal]:
+        signals = []
+        now = datetime.now()
+
+        bid = market_data.bid
+        if bid <= 0:
+            return signals
+
+        # --- LONGSHOT FILTER ---
+        # Only fade contract where YES bid is very cheap (long-shot territory)
+        if not (self.min_price <= bid <= self.longshot_ceiling):
+            return signals
+
+        # --- COOLDOWN CHECK per symbol ---
+        last = self._last_trade.get(market_data.symbol, datetime.min)
+        if (now - last).total_seconds() < self.cooldown_seconds:
+            return signals
+
+        # --- GENERATE SELL SIGNAL ---
+        # Sell YES = bet it won't happen. Confidence derived from historical win rate
+        # of fading contracts at this price level (~1.0 - bid as implied win rate)
+        implied_win_rate = 1.0 - bid  # e.g. bid=0.07 → 0.93 win rate for seller
+        confidence = implied_win_rate * 0.95  # Haircut for liquidity/spread risk
+
+        sig = TradeSignal(
+            symbol=market_data.symbol,
+            side="sell",
+            quantity=self.quantity,
+            limit_price=bid,
+            confidence=confidence,
+        )
+        # No stop-loss needed: max loss is capped at $1.00 per contract (binary)
+        # and position sizing handles risk
+        sig.stop_loss = 0.0
+
+        logger.info(
+            f"[LongShotFader] SELL YES {market_data.symbol} @ ${bid:.3f} "
+            f"(implied win: {implied_win_rate:.1%})"
+        )
+        self._last_trade[market_data.symbol] = now
+        signals.append(sig)
         return signals

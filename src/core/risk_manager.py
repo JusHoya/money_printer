@@ -221,11 +221,11 @@ class RiskManager:
             
         return True
 
-    def record_execution(self, cost: float, symbol: str, side: str, quantity: int, price: float, stop_loss: float = 0.0, trailing_rules: dict = None, expiration_time: any = None):
+    def record_execution(self, cost: float, symbol: str, side: str, quantity: int, price: float, stop_loss: float = 0.0, trailing_rules: dict = None, expiration_time: any = None, strategy_name: str = None):
         """Call this AFTER a trade is executed."""
         # OMS HANDOFF
         # Use exact quantity and price from the signal
-        self.exchange.open_position(symbol, side, price, quantity, stop_loss=stop_loss, trailing_rules=trailing_rules, expiration_time=expiration_time)
+        self.exchange.open_position(symbol, side, price, quantity, stop_loss=stop_loss, trailing_rules=trailing_rules, expiration_time=expiration_time, strategy_name=strategy_name)
         
         self._sync_balance()
         self.last_trade_time = datetime.now()
