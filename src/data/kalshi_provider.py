@@ -172,6 +172,8 @@ class KalshiProvider(DataProvider):
             
             yes_bid = data.get('yes_bid', 0) / 100.0
             yes_ask = data.get('yes_ask', 0) / 100.0
+            no_bid = data.get('no_bid', 0) / 100.0
+            no_ask = data.get('no_ask', 0) / 100.0
             last_price = data.get('last_price', 0) / 100.0
             
             return MarketData(
@@ -184,7 +186,9 @@ class KalshiProvider(DataProvider):
                 extra={
                     "status": data.get('status'),
                     "close_time": data.get('close_time'),
-                    "source": "live_kalshi_ghost" if self.anonymous else "live_kalshi"
+                    "source": "live_kalshi_ghost" if self.anonymous else "live_kalshi",
+                    "no_bid": no_bid,
+                    "no_ask": no_ask
                 }
             )
             
@@ -257,6 +261,8 @@ class KalshiProvider(DataProvider):
                             # Handle weird V1 keys
                             bid = float(m.get('yes_bid', 0)) / 100.0
                             ask = float(m.get('yes_ask', 0)) / 100.0
+                            no_bid = float(m.get('no_bid', 0)) / 100.0
+                            no_ask = float(m.get('no_ask', 0)) / 100.0
                             last = float(m.get('last_price', 0)) / 100.0
                             
                             md = MarketData(
@@ -271,7 +277,9 @@ class KalshiProvider(DataProvider):
                                     "close_time": m.get('close_date'),
                                     "source": "v1_discovery",
                                     "strike_type": m.get('strike_type'),
-                                    "sub_title": m.get('sub_title')
+                                    "sub_title": m.get('sub_title'),
+                                    "no_bid": no_bid,
+                                    "no_ask": no_ask
                                 }
                             )
                             markets.append(md)

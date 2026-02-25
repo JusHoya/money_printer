@@ -635,6 +635,188 @@ class CryptoHourlyStrategy(Strategy):
         
         return signals
 
+# ==============================================================================
+# ENHANCED CRYPTO STRATEGIES V3 (PRD v1.5)
+# ==============================================================================
+
+class Crypto15mTrendStrategyV3(Strategy):
+    """
+    The Trend Catcher V3 📈 (15m High-Frequency)
+    Features: Reciprocal math, BRTI 60s MA targeting, and OBI triggers.
+    """
+    def __init__(self, 
+                 obi_threshold: float = 0.70,
+                 confirmation_delay: int = 120,
+                 window_seconds: int = 60):
+        self.obi_threshold = obi_threshold
+        self.confirmation_delay = confirmation_delay
+        self.window_seconds = window_seconds
+        
+        self.spot_price_history = deque(maxlen=window_seconds * 2) # Store timestamped prices
+        self.FIXED_STOP_CENTS = 0.05
+    
+    def name(self) -> str:
+        return f"Trend Catcher V3 (15m | OBI>{self.obi_threshold})"
+        
+    def _calculate_60s_brti_ma(self, now: datetime) -> Optional[float]:
+        # Filter prices within the last window_seconds
+        cutoff = now - timedelta(seconds=self.window_seconds)
+        recent_prices = [p for t, p in self.spot_price_history if t > cutoff]
+        if not recent_prices: return None
+        return sum(recent_prices) / len(recent_prices)
+        
+    def analyze(self, market_data: MarketData) -> List[TradeSignal]:
+        signals = []
+        extra = market_data.extra
+        now = market_data.timestamp or datetime.now()
+        
+        spot_price = extra.get('spot_price') or market_data.price
+        if spot_price and spot_price > 1.0:
+            self.spot_price_history.append((now, spot_price))
+            
+        # 0. Delay Logic
+        minutes_into_cycle = now.minute % 15
+        if minutes_into_cycle == 0 and now.second < self.confirmation_delay:
+            return []
+            
+        # Reciprocal Math
+        no_bid = extra.get('no_bid', 0.0)
+        no_ask = extra.get('no_ask', 0.0)
+        yes_bid = market_data.bid
+        yes_ask = market_data.ask
+        
+        implied_yes_ask = 1.0 - no_bid if no_bid > 0 else yes_ask
+        implied_no_ask = 1.0 - yes_bid if yes_bid > 0 else no_ask
+        
+        # OBI (Order Book Imbalance)
+        # Using a price-derived proxy
+        obi_yes = (yes_bid / (yes_bid + implied_yes_ask)) if (yes_bid + implied_yes_ask) > 0 else 0.5
+        obi_no = (no_bid / (no_bid + implied_no_ask)) if (no_bid + implied_no_ask) > 0 else 0.5
+
+        # Cross-Spread Arbitrage 
+        if yes_ask > 0 and no_ask > 0 and (yes_ask + no_ask < 1.0):
+            logger.info(f"[TrendV3] 💎 RISK-FREE ARB: YesAsk={yes_ask:.2f} + NoAsk={no_ask:.2f} < 1.0")
+            # In a full arb, we would fire simultaneous signals.
+        
+        # BRTI Target
+        brti_ma = self._calculate_60s_brti_ma(now)
+        if not brti_ma: return []
+
+        try:
+            parts = market_data.symbol.split('-')
+            strike_val = float(re.sub(r'[A-Za-z]', '', parts[-1]))
+        except:
+            return []
+
+        close_time = extra.get('close_time')
+
+        # Momentum Breakout using BRTI MA explicitly
+        if brti_ma > strike_val + 25.0: # Strongly above strike
+            if obi_yes > self.obi_threshold and implied_yes_ask < 0.85:
+                logger.info(f"[TrendV3] 🚀 BULL SIGNAL (BRTI MA: {brti_ma:.2f} > {strike_val}): OBI={obi_yes:.2f}. Ask={implied_yes_ask:.2f}.")
+                sig = TradeSignal(symbol=market_data.symbol, side="buy", quantity=10, limit_price=implied_yes_ask, confidence=0.8)
+                sig.stop_loss = implied_yes_ask - self.FIXED_STOP_CENTS
+                if close_time: sig.expiration_time = close_time
+                signals.append(sig)
+        elif brti_ma < strike_val - 25.0:
+            if obi_no > self.obi_threshold and yes_bid > 0.15:
+                logger.info(f"[TrendV3] 📉 BEAR SIGNAL (BRTI MA: {brti_ma:.2f} < {strike_val}): OBI NO={obi_no:.2f}. Bid={yes_bid:.2f}.")
+                sig = TradeSignal(symbol=market_data.symbol, side="sell", quantity=10, limit_price=yes_bid, confidence=0.8)
+                sig.stop_loss = yes_bid + self.FIXED_STOP_CENTS
+                if close_time: sig.expiration_time = close_time
+                signals.append(sig)
+
+        return signals
+
+class CryptoHourlyStrategyV3(Strategy):
+    """
+    The Time Traveler V3 ⏳ (Hourly Prediction)
+    Targeting 60s BRTI MA, using Reciprocal Math and OBI triggers.
+    """
+    def __init__(self, confidence_margin: float = 50.0, obi_threshold: float = 0.70):
+        self.confidence_margin = confidence_margin
+        self.obi_threshold = obi_threshold
+        self.price_history = [] 
+        self.window_minutes = 20
+        self.FIXED_STOP_CENTS = 0.05
+        
+    def name(self) -> str:
+        return f"The Time Traveler V3 (Hourly | OBI>{self.obi_threshold})"
+
+    def _predict_future_price(self, current_time: datetime, target_time: datetime) -> float:
+        if len(self.price_history) < 10: return None
+        start_time = self.price_history[0][0]
+        X = np.array([(t - start_time).total_seconds() for t, p in self.price_history])
+        Y = np.array([p for t, p in self.price_history])
+        try:
+            slope, intercept = np.polyfit(X, Y, 1)
+            target_seconds = (target_time - start_time).total_seconds()
+            predicted_price = (slope * target_seconds) + intercept
+            return predicted_price
+        except:
+            return None
+
+    def analyze(self, market_data: MarketData) -> List[TradeSignal]:
+        signals = []
+        extra = market_data.extra
+        now = sorted(self.price_history)[-1][0] if self.price_history else datetime.now()
+        
+        if "Coinbase" in market_data.symbol or extra.get('source') == 'live_coinbase':
+            spot_price = market_data.price
+            now = datetime.now()
+            self.price_history.append((now, spot_price))
+            cutoff = now - timedelta(minutes=self.window_minutes)
+            self.price_history = [x for x in self.price_history if x[0] > cutoff]
+            return []
+            
+        symbol = market_data.symbol
+        if ("KXBTC" not in symbol and "kxbtcd" not in symbol) or "15M" in symbol: 
+            return [] 
+
+        if not self.price_history: return []
+        current_spot = self.price_history[-1][1]
+            
+        try:
+            parts = symbol.split('-')
+            strike_val = float(re.sub(r'[A-Za-z]', '', parts[-1]))
+            dist = abs(strike_val - current_spot)
+            if dist > 750: return []
+            target_time = (datetime.now() + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        except:
+            return []
+
+        predicted_price = self._predict_future_price(datetime.now(), target_time)
+        if not predicted_price: return []
+
+        # Reciprocal Math
+        no_bid = extra.get('no_bid', 0.0)
+        yes_bid = market_data.bid
+        implied_yes_ask = 1.0 - no_bid if no_bid > 0 else market_data.ask
+
+        # Synthetic OBI 
+        obi_yes = (yes_bid / (yes_bid + implied_yes_ask)) if (yes_bid + implied_yes_ask) > 0 else 0.5
+        no_ask_proxy = 1.0 - yes_bid
+        obi_no = (no_bid / (no_bid + no_ask_proxy)) if (no_bid + no_ask_proxy) > 0 else 0.5
+        
+        close_time = extra.get('close_time')
+
+        if predicted_price > (strike_val + self.confidence_margin):
+            if obi_yes > self.obi_threshold and implied_yes_ask < 0.85 and implied_yes_ask > 0:
+                 logger.info(f"[HourlyV3] 🚀 BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val}. OBI: {obi_yes:.2f}, Ask {implied_yes_ask:.2f}.")
+                 sig = TradeSignal(symbol=symbol, side="buy", quantity=5, limit_price=implied_yes_ask, confidence=0.8)
+                 sig.stop_loss = implied_yes_ask - self.FIXED_STOP_CENTS
+                 if close_time: sig.expiration_time = close_time
+                 signals.append(sig)
+                
+        elif predicted_price < (strike_val - self.confidence_margin):
+            if obi_no > self.obi_threshold and yes_bid > 0.15 and yes_bid < 1.0:
+                 logger.info(f"[HourlyV3] 📉 BEAR SIGNAL: Pred ${predicted_price:.2f} < Strike ${strike_val}. OBI NO: {obi_no:.2f}, Bid {yes_bid:.2f}.")
+                 sig = TradeSignal(symbol=symbol, side="sell", quantity=5, limit_price=yes_bid, confidence=0.8)
+                 sig.stop_loss = yes_bid + self.FIXED_STOP_CENTS
+                 if close_time: sig.expiration_time = close_time
+                 signals.append(sig)
+        return signals
+
 class CryptoArbitrageStrategy(Strategy):
     """
     The Satoshi Arbitrageur ₿ (ML-Enhanced - 15m)

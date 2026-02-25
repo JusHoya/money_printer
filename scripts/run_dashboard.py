@@ -12,7 +12,7 @@ from src.data.nws_provider import NWSProvider
 from src.data.coinbase_provider import CoinbaseProvider
 from src.data.kalshi_provider import KalshiProvider
 from src.strategies.weather_strategy import WeatherArbitrageStrategy, WeatherArbitrageStrategyV2
-from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2, CryptoLongShotFader
+from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, CryptoHourlyStrategyV3, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2, Crypto15mTrendStrategyV3, CryptoLongShotFader
 from src.core.interfaces import TradeSignal
 from src.core.risk_manager import RiskManager
 from src.utils.system_utils import prevent_sleep
@@ -32,8 +32,8 @@ class OrchestratorEngine:
         
         self.strategies = {
             "weather": WeatherArbitrageStrategyV2(), # UPGRADED TO V2
-            "crypto": Crypto15mTrendStrategyV2(),   # UPGRADED TO V2
-            "crypto_hr": CryptoHourlyStrategy(),
+            "crypto": Crypto15mTrendStrategyV3(),   # UPGRADED TO V3
+            "crypto_hr": CryptoHourlyStrategyV3(),  # UPGRADED TO V3
             "longshot": CryptoLongShotFader()       # NEW: Fade low-prob contracts
         }
         self.dashboard.active_strategies = list(self.strategies.keys())
@@ -393,7 +393,7 @@ class OrchestratorEngine:
                     # Without this, the strategy receives raw BTC spot ($69k) and compares against 0.55
                     if btc_15m_resolved:
                         signals = self.strategies['crypto'].analyze(btc_data)
-                        self._process_signals(signals, strategy_name="Trend Catcher V2")
+                        self._process_signals(signals, strategy_name="Trend Catcher V3")
                         # LongShot Fader: also check the 15m option for longshot pricing
                         ls_signals = self.strategies['longshot'].analyze(btc_data)
                         self._process_signals(ls_signals, strategy_name="LongShot Fader")
@@ -549,8 +549,10 @@ class OrchestratorEngine:
             # User Protocol: Always deduct Price * Quantity (Treat Short as Buying Inverse)
             est_cost = sig.limit_price * sig.quantity
             
+            ex = getattr(sig, 'expiration_time', None)
+            
             # RISK CHECK
-            is_safe = self.risk_manager.check_order(est_cost, category=category)
+            is_safe = self.risk_manager.check_order(est_cost, category=category, strategy_name=strategy_name, expiration_time=ex)
             
             if is_safe:
                 # SAFE: Execute and Record

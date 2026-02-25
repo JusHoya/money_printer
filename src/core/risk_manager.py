@@ -31,9 +31,12 @@ class RiskManager:
         self.last_trade_time = datetime.min
         self.today = date.today()
         
+        self.strategy_pnl = {}
+        
         # RULES
         self.MAX_RISK_PER_TRADE_PCT = 0.05 
-        self.MAX_DAILY_DRAWDOWN_PCT = 0.10 
+        self.MAX_DAILY_DRAWDOWN_PCT = 0.05 
+        self.MAX_STRATEGY_DRAWDOWN_PCT = 0.10
         self.MAX_PORTFOLIO_EXPOSURE_PCT = 0.50 # Max 50% of funds active at once
         self.MIN_TRADE_INTERVAL_SEC = 30 # Increased from 5s to prevent limit cycles
         self.LOSS_COOLDOWN_SEC = 120  # 2-minute cooldown per symbol after a loss
@@ -46,7 +49,11 @@ class RiskManager:
         self.daily_pnl = stats['realized']
         self._sync_balance()
         pnl = position.get('pnl', 0.0)
-        logger.info(f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f}")
+        strategy_name = position.get('strategy_name', 'Unknown')
+        
+        self.strategy_pnl[strategy_name] = self.strategy_pnl.get(strategy_name, 0.0) + pnl
+        
+        logger.info(f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f} | Strategy: {strategy_name}")
         
         # Per-symbol loss cooldown to prevent re-entry after stop-loss
         if pnl < 0:
@@ -76,6 +83,7 @@ class RiskManager:
         # CRITICAL: Reset internal PnL counters to prevent double counting
         # The 'real_balance' already includes all past PnL.
         self.daily_pnl = 0.0
+        self.strategy_pnl = {}
         self.exchange.reset_stats() 
         
         self._sync_balance()
@@ -94,6 +102,7 @@ class RiskManager:
         if date.today() > self.today:
             self.today = date.today()
             self.daily_pnl = 0.0
+            self.strategy_pnl = {}
             # Reset exchange realized PnL for the new day? 
             # In simulation, we usually keep cumulative, but for 'Daily' reporting:
             # Let's just update the baseline.
@@ -126,8 +135,8 @@ class RiskManager:
         f = p - (q / b)
         
         # 3. Apply Fractional Multiplier (Safety)
-        # User Rule: Fractional Kelly (0.25x to 0.3x)
-        f_fractional = f * 0.25
+        # User Rule: Fractional Kelly (0.75x V1.5 PRD)
+        f_fractional = f * 0.75
         
         if f_fractional <= 0: return 0
         
@@ -163,11 +172,26 @@ class RiskManager:
                 total += p['entry_price'] * p['quantity']
         return total
 
-    def check_order(self, proposed_cost: float, category: str = "general") -> bool:
+    def check_order(self, proposed_cost: float, category: str = "general", strategy_name: str = None, expiration_time: any = None) -> bool:
         """
         Returns True if the order is safe to execute.
         """
         self._reset_daily_stats_if_needed()
+        
+        # 0. Final Minute Freeze (Circuit Breaker)
+        if expiration_time:
+            expiry_dt = expiration_time
+            if isinstance(expiration_time, str):
+                try:
+                    expiry_dt = datetime.fromisoformat(expiration_time.replace('Z', '+00:00'))
+                except:
+                    pass
+            if isinstance(expiry_dt, datetime):
+                now = datetime.now() if expiry_dt.tzinfo is None else datetime.now().astimezone()
+                time_to_expiry_sec = (expiry_dt - now).total_seconds()
+                if 0 < time_to_expiry_sec <= 60:
+                    logger.warning(f"[Risk] [REJECT] FINAL MINUTE FREEZE: {time_to_expiry_sec:.1f}s until expiry.")
+                    return False
         
         # 1. Capital Check
         if proposed_cost > self.balance:
@@ -186,6 +210,13 @@ class RiskManager:
         if self.daily_pnl < -(self.starting_balance_day * self.MAX_DAILY_DRAWDOWN_PCT):
             logger.warning(f"[Risk] [KILL] KILL SWITCH: Daily Drawdown Limit Hit (${self.daily_pnl:.2f})")
             return False
+            
+        # 3.5 Strategy Drawdown Limit
+        if strategy_name:
+            strat_pnl = self.strategy_pnl.get(strategy_name, 0.0)
+            if strat_pnl < -(self.starting_balance_day * self.MAX_STRATEGY_DRAWDOWN_PCT):
+                logger.warning(f"[Risk] [REJECT] STRATEGY DRAWDOWN LIMIT: {strategy_name} (${strat_pnl:.2f} PnL)")
+                return False
             
         # 4. Dynamic Exposure Limit (Smart Slots)
         current_total_exposure = self.get_current_exposure()
