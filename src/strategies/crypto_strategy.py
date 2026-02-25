@@ -716,13 +716,17 @@ class Crypto15mTrendStrategyV3(Strategy):
                 logger.info(f"[TrendV3] 🚀 BULL SIGNAL (BRTI MA: {brti_ma:.2f} > {strike_val}): OBI={obi_yes:.2f}. Ask={implied_yes_ask:.2f}.")
                 sig = TradeSignal(symbol=market_data.symbol, side="buy", quantity=10, limit_price=implied_yes_ask, confidence=0.8)
                 sig.stop_loss = implied_yes_ask - self.FIXED_STOP_CENTS
+                sig.trailing_rules = {'trigger': implied_yes_ask + 0.10, 'new_sl': implied_yes_ask + 0.05}
                 if close_time: sig.expiration_time = close_time
                 signals.append(sig)
         elif brti_ma < strike_val - 25.0:
             if obi_no > self.obi_threshold and yes_bid > 0.15:
-                logger.info(f"[TrendV3] 📉 BEAR SIGNAL (BRTI MA: {brti_ma:.2f} < {strike_val}): OBI NO={obi_no:.2f}. Bid={yes_bid:.2f}.")
-                sig = TradeSignal(symbol=market_data.symbol, side="sell", quantity=10, limit_price=yes_bid, confidence=0.8)
-                sig.stop_loss = yes_bid + self.FIXED_STOP_CENTS
+                no_ask_price = extra.get('no_ask', implied_no_ask)
+                logger.info(f"[TrendV3] 📉 BEAR SIGNAL (BUY NO, BRTI MA: {brti_ma:.2f} < {strike_val}): OBI NO={obi_no:.2f}. NO Ask={no_ask_price:.2f}.")
+                sig = TradeSignal(symbol=market_data.symbol, side="buy", quantity=10, limit_price=no_ask_price, confidence=0.8)
+                sig.stop_loss = no_ask_price - self.FIXED_STOP_CENTS
+                sig.trailing_rules = {'trigger': no_ask_price + 0.10, 'new_sl': no_ask_price + 0.05}
+                sig.contract_side = 'NO'
                 if close_time: sig.expiration_time = close_time
                 signals.append(sig)
 
@@ -805,14 +809,18 @@ class CryptoHourlyStrategyV3(Strategy):
                  logger.info(f"[HourlyV3] 🚀 BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val}. OBI: {obi_yes:.2f}, Ask {implied_yes_ask:.2f}.")
                  sig = TradeSignal(symbol=symbol, side="buy", quantity=5, limit_price=implied_yes_ask, confidence=0.8)
                  sig.stop_loss = implied_yes_ask - self.FIXED_STOP_CENTS
+                 sig.trailing_rules = {'trigger': implied_yes_ask + 0.10, 'new_sl': implied_yes_ask + 0.05}
                  if close_time: sig.expiration_time = close_time
                  signals.append(sig)
-                
+
         elif predicted_price < (strike_val - self.confidence_margin):
             if obi_no > self.obi_threshold and yes_bid > 0.15 and yes_bid < 1.0:
-                 logger.info(f"[HourlyV3] 📉 BEAR SIGNAL: Pred ${predicted_price:.2f} < Strike ${strike_val}. OBI NO: {obi_no:.2f}, Bid {yes_bid:.2f}.")
-                 sig = TradeSignal(symbol=symbol, side="sell", quantity=5, limit_price=yes_bid, confidence=0.8)
-                 sig.stop_loss = yes_bid + self.FIXED_STOP_CENTS
+                 no_ask = extra.get('no_ask', 1.0 - yes_bid)
+                 logger.info(f"[HourlyV3] 📉 BEAR SIGNAL (BUY NO): Pred ${predicted_price:.2f} < Strike ${strike_val}. OBI NO: {obi_no:.2f}, NO Ask {no_ask:.2f}.")
+                 sig = TradeSignal(symbol=symbol, side="buy", quantity=5, limit_price=no_ask, confidence=0.8)
+                 sig.stop_loss = no_ask - self.FIXED_STOP_CENTS
+                 sig.trailing_rules = {'trigger': no_ask + 0.10, 'new_sl': no_ask + 0.05}
+                 sig.contract_side = 'NO'
                  if close_time: sig.expiration_time = close_time
                  signals.append(sig)
         return signals
@@ -1028,9 +1036,9 @@ class CryptoLongShotFader(Strategy):
             limit_price=bid,
             confidence=confidence,
         )
-        # No stop-loss needed: max loss is capped at $1.00 per contract (binary)
-        # and position sizing handles risk
-        sig.stop_loss = 0.0
+        # Stop loss at $0.20: caps loss at $0.16/contract for a $0.04 sell
+        # (instead of $0.96/contract with no stop)
+        sig.stop_loss = 0.20
 
         logger.info(
             f"[LongShotFader] SELL YES {market_data.symbol} @ ${bid:.3f} "

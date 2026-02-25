@@ -22,6 +22,7 @@ class TradeSignal:
     quantity: int
     limit_price: Optional[float] = None
     confidence: float = 0.0  # 0.0 to 1.0
+    contract_side: str = 'YES'  # 'YES' or 'NO'
 
 class DataProvider(ABC):
     """Interface for fetching data (Market, Weather, etc)."""

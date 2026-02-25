@@ -20,7 +20,9 @@ class TestMatchingEngineV2(unittest.TestCase):
         # 1. Open Position: Buy YES (Long) on Precip NYC
         # Symbol must contain city fragment AND PRECIP for routing
         self.exchange.open_position("KXPRECIPNYC-TestPeriod", "buy", 0.20, 100)
-        
+        # Disable profit targets for this test (testing raw PnL updates)
+        self.exchange.positions[0]['profit_targets'] = []
+
         # Initial PnL should be 0
         self.assertEqual(self.exchange.unrealized_pnl, 0.0)
         

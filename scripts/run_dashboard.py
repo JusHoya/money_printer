@@ -316,6 +316,10 @@ class OrchestratorEngine:
                             try:
                                 k_data = self.kalshi.fetch_latest(symbol)
                                 if k_data:
+                                    # Cache real Kalshi price on the position for accurate exits
+                                    real_price = k_data.bid if k_data.bid > 0 else k_data.ask
+                                    if real_price > 0:
+                                        self.risk_manager.exchange.update_market_price(symbol, real_price)
                                     # Update Price & PnL in Risk Manager
                                     # This triggers 'update_market' in SimulatedExchange, which checks stops/expiry
                                     self.risk_manager.update_market_data(symbol, k_data.price)
@@ -546,8 +550,11 @@ class OrchestratorEngine:
                 sig.quantity = final_qty
             
             # Calculate Cost / Collateral
-            # User Protocol: Always deduct Price * Quantity (Treat Short as Buying Inverse)
-            est_cost = sig.limit_price * sig.quantity
+            # For sells (short YES), collateral is (1-price)*qty, not price*qty
+            if sig.side == 'sell' and getattr(sig, 'contract_side', 'YES') == 'YES':
+                est_cost = (1.0 - sig.limit_price) * sig.quantity
+            else:
+                est_cost = sig.limit_price * sig.quantity
             
             ex = getattr(sig, 'expiration_time', None)
             
@@ -558,7 +565,8 @@ class OrchestratorEngine:
                 # SAFE: Execute and Record
                 # Notional is now same as Cost/Risk per user definition
                 notional = sig.limit_price * sig.quantity
-                self.dashboard.log(f"EXEC: {sig.side.upper()} {sig.quantity}x {sig.symbol} @ {sig.limit_price} | Debit: ${est_cost:.2f}")
+                cs_label = getattr(sig, 'contract_side', 'YES')
+                self.dashboard.log(f"EXEC: {sig.side.upper()} {cs_label} {sig.quantity}x {sig.symbol} @ {sig.limit_price} | Debit: ${est_cost:.2f}")
                 self.dashboard.record_signal(sig, status="EXECUTED", strategy_name=strategy_name)
                 
                 # Extract Risk Rules (Attached by Strategy)
@@ -566,7 +574,8 @@ class OrchestratorEngine:
                 tr = getattr(sig, 'trailing_rules', None)
                 ex = getattr(sig, 'expiration_time', None)
                 
-                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name)
+                cs = getattr(sig, 'contract_side', 'YES')
+                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name, contract_side=cs)
             
             else:
                 # RISKY:

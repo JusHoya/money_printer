@@ -256,10 +256,10 @@ class SimulatedExchange:
         
         # Simulation Settings
         self.TAKE_PROFIT_PCT = 0.15  # +15% gain -> Close (Ravenous Mode)
-        self.STOP_LOSS_PCT = 0.30    # -30% loss -> Close
+        self.STOP_LOSS_PCT = 0.15    # -15% loss -> Close (tightened from 30%)
         self.TIME_LIMIT_MIN = 60     # Force close after 60 mins (for hourly markets)
 
-    def open_position(self, symbol: str, side: str, entry_price: float, quantity: int, stop_loss: float = 0.0, trailing_rules: dict = None, expiration_time: any = None, strategy_name: str = None):
+    def open_position(self, symbol: str, side: str, entry_price: float, quantity: int, stop_loss: float = 0.0, trailing_rules: dict = None, expiration_time: any = None, strategy_name: str = None, contract_side: str = 'YES'):
         """
         Records a new position.
         :param expiration_time: ISO string or datetime of contract close.
@@ -278,20 +278,33 @@ class SimulatedExchange:
         position = {
             'id': len(self.positions) + len(self.closed_trades) + 1,
             'symbol': symbol,
-            'side': side, 
+            'side': side,
             'entry_price': entry_price,
-            'current_price': entry_price, 
+            'current_price': entry_price,
             'quantity': quantity,
+            'original_quantity': quantity,
             'open_time': datetime.now(),
             'pnl': 0.0,
             'stop_loss': stop_loss,
             'trailing_rules': trailing_rules,
             'trailing_activated': False,
             'expiration_time': expiry_dt,
-            'strategy_name': strategy_name or 'Unknown'
+            'strategy_name': strategy_name or 'Unknown',
+            'last_market_price': entry_price,
+            'contract_side': contract_side,
+            'profit_targets': [
+                {'move': 0.05, 'exit_pct': 0.33, 'hit': False},
+                {'move': 0.10, 'exit_pct': 0.50, 'hit': False},
+            ],
         }
         self.positions.append(position)
         
+    def update_market_price(self, symbol: str, real_price: float):
+        """Cache a real Kalshi market price on matching positions."""
+        for pos in self.positions:
+            if symbol in pos['symbol'] or pos['symbol'] in symbol:
+                pos['last_market_price'] = real_price
+
     def update_market(self, symbol_fragment: str, current_spot_price: float):
         """
         Updates the valuation of open positions based on the underlying spot price.
@@ -373,17 +386,31 @@ class SimulatedExchange:
                         normalized_diff = diff / scale
                         # tanh maps (-inf, inf) -> (-1, 1), then scale to price range
                         probability_shift = math.tanh(normalized_diff) * 0.49
-                        estimated_price = max(0.01, min(0.99, 0.50 + probability_shift))
+                        tanh_estimate = max(0.01, min(0.99, 0.50 + probability_shift))
+
+                        # If tanh gives a weak signal (near 0.50) and we have a real market price,
+                        # prefer the cached market price to avoid phantom 0.50 exits
+                        if abs(probability_shift) < 0.10 and pos.get('last_market_price', 0) != pos['entry_price']:
+                            estimated_price = pos['last_market_price']
+                            logger.debug(f"[OMS] Using cached market price {estimated_price:.2f} (tanh was {tanh_estimate:.2f})")
+                        else:
+                            estimated_price = tanh_estimate
                     except Exception as e:
                         logger.warning(f"[OMS] Price calc error for {pos['symbol']}: {e}")
                         estimated_price = pos['entry_price']
 
                 # --- COMMON PNL CALC ---
-                pos['current_price'] = estimated_price
-                if pos['side'] == 'buy':
-                    pos['pnl'] = (estimated_price - pos['entry_price']) * pos['quantity']
+                # For NO contracts, invert the estimated price
+                if pos.get('contract_side') == 'NO':
+                    display_price = 1.0 - estimated_price
                 else:
-                    pos['pnl'] = (pos['entry_price'] - estimated_price) * pos['quantity']
+                    display_price = estimated_price
+
+                pos['current_price'] = display_price
+                if pos['side'] == 'buy':
+                    pos['pnl'] = (display_price - pos['entry_price']) * pos['quantity']
+                else:
+                    pos['pnl'] = (pos['entry_price'] - display_price) * pos['quantity']
                 
                 # --- EARLY SETTLEMENT (Liquidity/Heuristic) ---
                 # If price is pegged at 0.99 or 0.01 for a sustained period (10m), assume market has decided.
@@ -397,6 +424,10 @@ class SimulatedExchange:
                          self._close_position(pos, current_spot_price, reason="EARLY_SETTLEMENT")
                          continue
                 
+                # --- PROFIT TARGET LADDER (Partial Exits) ---
+                if self._check_profit_targets(pos, display_price):
+                    continue
+
                 # --- STOP LOSS / TRAILING LOGIC (Price Based) ---
                 if pos['stop_loss'] > 0:
                     # 1. Check Trailing Trigger
@@ -420,20 +451,80 @@ class SimulatedExchange:
                     elif pos['side'] == 'sell' and estimated_price >= pos['stop_loss']: hit = True
                     
                     if hit:
-                        self._close_position(pos, estimated_price, reason=f"STOP_LOSS_PRICE ({pos['stop_loss']})")
+                        # Use last_market_price for exit, not raw sigmoid estimate
+                        safe_exit = pos.get('last_market_price', pos['entry_price'])
+                        self._close_position(pos, safe_exit, reason=f"STOP_LOSS_PRICE ({pos['stop_loss']})")
                         continue
                             
                 # Fallback: PCT Based Stops
                 pnl_pct = pos['pnl'] / (pos['entry_price'] * pos['quantity']) if pos['entry_price'] > 0 else 0
                 if pnl_pct >= self.TAKE_PROFIT_PCT:
-                    self._close_position(pos, estimated_price, reason="TAKE_PROFIT")
+                    self._close_position(pos, display_price, reason="TAKE_PROFIT")
                 elif pnl_pct <= -self.STOP_LOSS_PCT and pos['stop_loss'] == 0:
-                    self._close_position(pos, estimated_price, reason="STOP_LOSS_PCT")
+                    logger.warning(f"[OMS] PCT STOP triggered for {pos['symbol']} (pnl_pct={pnl_pct:.2%}). Consider adding explicit stop_loss.")
+                    # Use last_market_price or entry_price, never raw sigmoid
+                    safe_exit = pos.get('last_market_price', pos['entry_price'])
+                    self._close_position(pos, safe_exit, reason="STOP_LOSS_PCT")
                         
             except Exception as e:
                 logger.error(f"[OMS] PnL calculation error for {pos['symbol']}: {e}")
             
         self.unrealized_pnl = sum(p['pnl'] for p in self.positions)
+
+    def _check_profit_targets(self, pos, current_price) -> bool:
+        """
+        Check profit target ladder for partial exits.
+        Returns True if position was fully closed.
+        """
+        targets = pos.get('profit_targets', [])
+        if not targets:
+            return False
+
+        entry = pos['entry_price']
+        if pos['side'] == 'buy':
+            price_move = current_price - entry
+        else:
+            price_move = entry - current_price
+
+        fully_closed = False
+        for target in targets:
+            if target['hit']:
+                continue
+            if price_move >= target['move'] - 1e-9:
+                target['hit'] = True
+                exit_qty = max(1, int(pos['quantity'] * target['exit_pct']))
+                if exit_qty >= pos['quantity']:
+                    exit_qty = pos['quantity']
+                    fully_closed = True
+
+                # Calculate partial PnL
+                if pos['side'] == 'buy':
+                    partial_pnl = (current_price - entry) * exit_qty
+                else:
+                    partial_pnl = (entry - current_price) * exit_qty
+
+                pos['quantity'] -= exit_qty
+                self.realized_pnl += partial_pnl
+
+                partial_trade = dict(pos)
+                partial_trade['exit_price'] = current_price
+                partial_trade['pnl'] = partial_pnl
+                partial_trade['close_time'] = datetime.now()
+                partial_trade['reason'] = f"PROFIT_TARGET (+{target['move']:.2f})"
+                partial_trade['quantity'] = exit_qty
+                self.closed_trades.append(partial_trade)
+
+                logger.info(f"[OMS] 🎯 PROFIT TARGET +{target['move']:.2f}: Closed {exit_qty}x {pos['symbol']} | PnL: ${partial_pnl:+.2f}")
+
+                if self.on_close:
+                    self.on_close(partial_trade)
+
+                if fully_closed or pos['quantity'] <= 0:
+                    if pos in self.positions:
+                        self.positions.remove(pos)
+                    return True
+
+        return False
 
     def _close_position(self, pos, final_spot_price, reason="MARKET"):
         """
