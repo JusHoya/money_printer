@@ -161,8 +161,8 @@ class Crypto15mTrendStrategyV2(Strategy):
     """
     
     def __init__(self, 
-                 bull_trigger: float = 0.60,
-                 bear_trigger: float = 0.40,
+                 bull_trigger: float = 0.75,
+                 bear_trigger: float = 0.25,
                  stop_loss_buffer: float = 0.10,
                  trailing_trigger_delta: float = 0.15,
                  trailing_stop_delta: float = 0.05,
@@ -371,42 +371,37 @@ class Crypto15mTrendStrategyV2(Strategy):
                     limit_price=market_data.ask,
                     confidence=0.6 + (strength * 0.3)
                 )
-                sig.stop_loss = market_data.ask - self.FIXED_STOP_CENTS  # Fixed cents for binary options
-                trig_price = market_data.ask + self.trailing_trigger_delta
-                new_sl = trig_price - self.trailing_stop_delta
-                sig.trailing_rules = {'trigger': trig_price, 'new_sl': new_sl}
+                sig.stop_loss = 0.50  # Hold to expiry, midpoint stop
                 if close_time: sig.expiration_time = close_time
                 signals.append(sig)
-                
+
                 # Activate cooldown & reset counter after signal
                 self.cooldown_until = now + timedelta(seconds=self.cooldown_seconds)
                 self.consecutive_above = 0
             else:
                 logger.info(f"[TrendV2] ⚠️ BULL REJECTED: {reason}")
-                
-        # 2. BEAR BREAKOUT with N-Tick + Momentum Confirmation
+
+        # 2. BEAR BREAKOUT with N-Tick + Momentum Confirmation -> BUY NO
         elif self.consecutive_below >= self.trend_confirm_ticks:
             confirmed, reason, strength = self.momentum.should_confirm_sell(prices)
-            
+
             if confirmed:
-                logger.info(f"[TrendV2] 📉 BEAR BREAKOUT: {price_to_monitor:.2f} < {self.bear_trigger} ({self.consecutive_below} ticks) | {reason}")
+                logger.info(f"[TrendV2] 📉 BEAR BREAKOUT (BUY NO): {price_to_monitor:.2f} < {self.bear_trigger} ({self.consecutive_below} ticks) | {reason}")
                 base_qty = 10
                 qty = int(base_qty * (0.5 + strength * 0.5))
-                
+
                 sig = TradeSignal(
                     symbol=market_data.symbol,
-                    side="sell",
+                    side="buy",
                     quantity=qty,
-                    limit_price=market_data.bid,
+                    limit_price=1.0 - market_data.bid,
                     confidence=0.6 + (strength * 0.3)
                 )
-                sig.stop_loss = market_data.bid + self.FIXED_STOP_CENTS  # Fixed cents for binary options
-                trig_price = market_data.bid - self.trailing_trigger_delta
-                new_sl = trig_price + self.trailing_stop_delta
-                sig.trailing_rules = {'trigger': trig_price, 'new_sl': new_sl}
+                sig.contract_side = 'NO'
+                sig.stop_loss = 0.50  # Hold to expiry, midpoint stop
                 if close_time: sig.expiration_time = close_time
                 signals.append(sig)
-                
+
                 # Activate cooldown & reset counter after signal
                 self.cooldown_until = now + timedelta(seconds=self.cooldown_seconds)
                 self.consecutive_below = 0
@@ -778,8 +773,14 @@ class CryptoHourlyStrategyV3(Strategy):
             return [] 
 
         if not self.price_history: return []
+
+        # Time window filter: first 15 min, mid-hour 25-35, last 15 min
+        minute = datetime.now().minute
+        if not (minute < 15 or (25 <= minute <= 35) or minute >= 45):
+            return []
+
         current_spot = self.price_history[-1][1]
-            
+
         try:
             parts = symbol.split('-')
             strike_val = float(re.sub(r'[A-Za-z]', '', parts[-1]))
@@ -808,8 +809,7 @@ class CryptoHourlyStrategyV3(Strategy):
             if obi_yes > self.obi_threshold and implied_yes_ask < 0.85 and implied_yes_ask > 0:
                  logger.info(f"[HourlyV3] 🚀 BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val}. OBI: {obi_yes:.2f}, Ask {implied_yes_ask:.2f}.")
                  sig = TradeSignal(symbol=symbol, side="buy", quantity=5, limit_price=implied_yes_ask, confidence=0.8)
-                 sig.stop_loss = implied_yes_ask - self.FIXED_STOP_CENTS
-                 sig.trailing_rules = {'trigger': implied_yes_ask + 0.10, 'new_sl': implied_yes_ask + 0.05}
+                 sig.stop_loss = 0.50  # Hold through hour
                  if close_time: sig.expiration_time = close_time
                  signals.append(sig)
 
@@ -818,8 +818,7 @@ class CryptoHourlyStrategyV3(Strategy):
                  no_ask = extra.get('no_ask', 1.0 - yes_bid)
                  logger.info(f"[HourlyV3] 📉 BEAR SIGNAL (BUY NO): Pred ${predicted_price:.2f} < Strike ${strike_val}. OBI NO: {obi_no:.2f}, NO Ask {no_ask:.2f}.")
                  sig = TradeSignal(symbol=symbol, side="buy", quantity=5, limit_price=no_ask, confidence=0.8)
-                 sig.stop_loss = no_ask - self.FIXED_STOP_CENTS
-                 sig.trailing_rules = {'trigger': no_ask + 0.10, 'new_sl': no_ask + 0.05}
+                 sig.stop_loss = 0.50  # Hold through hour
                  sig.contract_side = 'NO'
                  if close_time: sig.expiration_time = close_time
                  signals.append(sig)

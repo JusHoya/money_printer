@@ -171,13 +171,18 @@ class WeatherArbitrageStrategyV2(Strategy):
         
     def analyze(self, market_data: MarketData) -> List[TradeSignal]:
         # 0. Warmup Period (Don't trade before 10 AM)
-        if datetime.now().hour < 10:
+        if not (10 <= datetime.now().hour < 14):
             return []
-            
+
         signals = []
         extra = market_data.extra
         symbol = market_data.symbol
-        
+
+        # Skip near-resolved markets (99-cent filter)
+        if market_data.bid >= 0.95 or market_data.ask <= 0.05:
+            logger.info(f"[MeteorV2] SKIP: near-resolved {market_data.symbol} bid={market_data.bid} ask={market_data.ask}")
+            return []
+
         # 1. Source Fidelity
         if extra.get('source') != 'live_nws':
             return []
@@ -254,22 +259,28 @@ class WeatherArbitrageStrategyV2(Strategy):
                 # If even with a miracle rise, we are below strike (for Above contract)
                 if is_above_contract and projected_max < strike_val:
                     if market_bid > 0.05:
-                        logger.info(f"[MeteorV2] ⚾ YOGI BERRA: Proj Max {projected_max:.1f} < Strike {strike_val}. SELL YES.")
-                        signals.append(TradeSignal(
-                             symbol=symbol, side="sell", quantity=100,
-                             limit_price=market_bid, confidence=0.99
-                        ))
+                        logger.info(f"[MeteorV2] ⚾ YOGI BERRA: Proj Max {projected_max:.1f} < Strike {strike_val}. BUY NO.")
+                        sig = TradeSignal(
+                             symbol=symbol, side="buy", quantity=100,
+                             limit_price=1.0 - market_bid, confidence=0.99
+                        )
+                        sig.contract_side = 'NO'
+                        sig.stop_loss = 0.20
+                        signals.append(sig)
                         return signals
 
             if velocity is not None:
                 # High confidence short: temp dropping and already below strike
                 if is_above_contract and velocity < -1.0 and current_temp < (strike_val - 3):
                     if market_bid > 0.40:
-                        logger.info(f"[MeteorV2] ❄️ COOLING VELOCITY ({velocity:.1f}°/hr): Short {symbol}")
-                        signals.append(TradeSignal(
-                            symbol=symbol, side="sell", quantity=50,
-                            limit_price=market_bid, confidence=0.85
-                        ))
+                        logger.info(f"[MeteorV2] ❄️ COOLING VELOCITY ({velocity:.1f}°/hr): BUY NO {symbol}")
+                        sig = TradeSignal(
+                            symbol=symbol, side="buy", quantity=50,
+                            limit_price=1.0 - market_bid, confidence=0.85
+                        )
+                        sig.contract_side = 'NO'
+                        sig.stop_loss = 0.25
+                        signals.append(sig)
                         return signals
                 
                 # High confidence long: temp rising rapidly toward strike
@@ -293,11 +304,14 @@ class WeatherArbitrageStrategyV2(Strategy):
                  # Check if we are comfortably safe
                  # For Above contract: Current Temp < Strike - 5
                  if is_above_contract and current_temp and current_temp < (strike_val - 5):
-                     logger.info(f"[MeteorV2] 📉 FADE LONGSHOT: Bid {market_bid:.2f} < 0.10. Selling pennies.")
-                     signals.append(TradeSignal(
-                         symbol=symbol, side="sell", quantity=20, # Small size
-                         limit_price=market_bid, confidence=0.7 
-                     ))
+                     logger.info(f"[MeteorV2] 📉 FADE LONGSHOT: Bid {market_bid:.2f} < 0.10. BUY NO pennies.")
+                     sig = TradeSignal(
+                         symbol=symbol, side="buy", quantity=20,
+                         limit_price=1.0 - market_bid, confidence=0.7
+                     )
+                     sig.contract_side = 'NO'
+                     sig.stop_loss = 0.20
+                     signals.append(sig)
 
         # 5. Forecast-Based Logic with Bias Correction
         if not forecasts:
@@ -334,11 +348,14 @@ class WeatherArbitrageStrategyV2(Strategy):
                     limit_price=market_ask, confidence=final_confidence
                 ))
             elif nws_high < (strike_val - self.min_edge_degrees) and market_bid > 0.20:
-                logger.info(f"[MeteorV2] ❄️ FORECAST SHORT: {nws_high:.1f}°F < {strike_val}°F (conf={final_confidence:.2f})")
-                signals.append(TradeSignal(
-                    symbol=symbol, side="sell", quantity=50,
-                    limit_price=market_bid, confidence=final_confidence
-                ))
+                logger.info(f"[MeteorV2] ❄️ FORECAST SHORT: {nws_high:.1f}°F < {strike_val}°F (conf={final_confidence:.2f}) BUY NO")
+                sig = TradeSignal(
+                    symbol=symbol, side="buy", quantity=50,
+                    limit_price=1.0 - market_bid, confidence=final_confidence
+                )
+                sig.contract_side = 'NO'
+                sig.stop_loss = 0.25
+                signals.append(sig)
         else:
             # Below Contract
             if nws_high < (strike_val - self.min_edge_degrees) and market_ask < 0.80:
@@ -347,10 +364,14 @@ class WeatherArbitrageStrategyV2(Strategy):
                     limit_price=market_ask, confidence=final_confidence
                 ))
             elif nws_high > (strike_val + self.min_edge_degrees) and market_bid > 0.20:
-                signals.append(TradeSignal(
-                    symbol=symbol, side="sell", quantity=50,
-                    limit_price=market_bid, confidence=final_confidence
-                ))
+                logger.info(f"[MeteorV2] FORECAST SHORT (Below): BUY NO (conf={final_confidence:.2f})")
+                sig = TradeSignal(
+                    symbol=symbol, side="buy", quantity=50,
+                    limit_price=1.0 - market_bid, confidence=final_confidence
+                )
+                sig.contract_side = 'NO'
+                sig.stop_loss = 0.25
+                signals.append(sig)
         
         return signals
 

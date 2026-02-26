@@ -69,51 +69,51 @@ class TestNTickConfirmation(unittest.TestCase):
         fill_history(self.strategy, 20)
     
     def test_single_tick_above_bull_no_signal(self):
-        """1 tick above 0.60 should NOT fire a BULL signal."""
-        signals = self.strategy.analyze(make_market("TEST-001", 0.65))
+        """1 tick above 0.75 should NOT fire a BULL signal."""
+        signals = self.strategy.analyze(make_market("TEST-001", 0.80))
         self.assertEqual(len(signals), 0, "Should NOT signal on 1 tick above bull trigger")
-    
+
     def test_two_ticks_above_bull_no_signal(self):
-        """2 ticks above 0.60 should still NOT fire."""
-        self.strategy.analyze(make_market("TEST-001", 0.65))
-        signals = self.strategy.analyze(make_market("TEST-001", 0.66))
+        """2 ticks above 0.75 should still NOT fire."""
+        self.strategy.analyze(make_market("TEST-001", 0.80))
+        signals = self.strategy.analyze(make_market("TEST-001", 0.81))
         self.assertEqual(len(signals), 0, "Should NOT signal on 2 ticks above bull trigger")
-    
+
     def test_three_ticks_above_bull_fires(self):
-        """3 consecutive ticks above 0.60 SHOULD fire a BULL signal."""
-        self.strategy.analyze(make_market("TEST-001", 0.62))
-        self.strategy.analyze(make_market("TEST-001", 0.63))
-        signals = self.strategy.analyze(make_market("TEST-001", 0.64))
+        """3 consecutive ticks above 0.75 SHOULD fire a BULL signal."""
+        self.strategy.analyze(make_market("TEST-001", 0.78))
+        self.strategy.analyze(make_market("TEST-001", 0.79))
+        signals = self.strategy.analyze(make_market("TEST-001", 0.80))
         self.assertGreater(len(signals), 0, "Should fire BULL after 3 consecutive ticks above trigger")
         self.assertEqual(signals[0].side, "buy")
-    
+
     def test_interrupted_ticks_reset_counter(self):
         """If price drops back into dead zone, counter resets."""
         # 2 ticks above
-        self.strategy.analyze(make_market("TEST-001", 0.62))
-        self.strategy.analyze(make_market("TEST-001", 0.63))
+        self.strategy.analyze(make_market("TEST-001", 0.78))
+        self.strategy.analyze(make_market("TEST-001", 0.79))
         # Drop back to dead zone
         self.strategy.analyze(make_market("TEST-001", 0.50))
         # 1 tick above again (counter should be reset)
-        signals = self.strategy.analyze(make_market("TEST-001", 0.65))
+        signals = self.strategy.analyze(make_market("TEST-001", 0.80))
         self.assertEqual(len(signals), 0, "Counter should reset when price returns to dead zone")
-    
+
     def test_bear_requires_three_ticks(self):
-        """3 consecutive ticks below 0.40 SHOULD fire a BEAR signal."""
-        self.strategy.analyze(make_market("TEST-001", 0.38, bid=0.38, ask=0.38))
-        self.strategy.analyze(make_market("TEST-001", 0.37, bid=0.37, ask=0.37))
-        signals = self.strategy.analyze(make_market("TEST-001", 0.36, bid=0.36, ask=0.36))
+        """3 consecutive ticks below 0.25 SHOULD fire a BEAR (BUY NO) signal."""
+        self.strategy.analyze(make_market("TEST-001", 0.22, bid=0.22, ask=0.22))
+        self.strategy.analyze(make_market("TEST-001", 0.21, bid=0.21, ask=0.21))
+        signals = self.strategy.analyze(make_market("TEST-001", 0.20, bid=0.20, ask=0.20))
         self.assertGreater(len(signals), 0, "Should fire BEAR after 3 consecutive ticks below trigger")
-        self.assertEqual(signals[0].side, "sell")
-    
+        self.assertEqual(signals[0].side, "buy")  # Now BUY NO instead of sell
+
     def test_counter_switches_direction(self):
         """Counter for bull resets when price crosses to bear territory."""
         # 2 ticks above bull
-        self.strategy.analyze(make_market("TEST-001", 0.62))
-        self.strategy.analyze(make_market("TEST-001", 0.63))
+        self.strategy.analyze(make_market("TEST-001", 0.78))
+        self.strategy.analyze(make_market("TEST-001", 0.79))
         self.assertEqual(self.strategy.consecutive_above, 2)
         # Jump to bear territory
-        self.strategy.analyze(make_market("TEST-001", 0.35, bid=0.35, ask=0.35))
+        self.strategy.analyze(make_market("TEST-001", 0.20, bid=0.20, ask=0.20))
         self.assertEqual(self.strategy.consecutive_above, 0)
         self.assertEqual(self.strategy.consecutive_below, 1)
 
@@ -134,16 +134,16 @@ class TestPostTradeCooldown(unittest.TestCase):
         
         # Fire BULL (3 ticks)
         t = base_time + timedelta(seconds=20)
-        self.strategy.analyze(make_market("TEST-001", 0.62, timestamp=t))
-        self.strategy.analyze(make_market("TEST-001", 0.63, timestamp=t + timedelta(seconds=1)))
-        signals = self.strategy.analyze(make_market("TEST-001", 0.64, timestamp=t + timedelta(seconds=2)))
+        self.strategy.analyze(make_market("TEST-001", 0.78, timestamp=t))
+        self.strategy.analyze(make_market("TEST-001", 0.79, timestamp=t + timedelta(seconds=1)))
+        signals = self.strategy.analyze(make_market("TEST-001", 0.80, timestamp=t + timedelta(seconds=2)))
         self.assertGreater(len(signals), 0, "Should fire the initial BULL signal")
-        
+
         # Immediately try again (within cooldown) — should be blocked
         t2 = t + timedelta(seconds=30)  # 30s later, still within 5min cooldown
-        self.strategy.analyze(make_market("TEST-001", 0.62, timestamp=t2))
-        self.strategy.analyze(make_market("TEST-001", 0.63, timestamp=t2 + timedelta(seconds=1)))
-        signals2 = self.strategy.analyze(make_market("TEST-001", 0.64, timestamp=t2 + timedelta(seconds=2)))
+        self.strategy.analyze(make_market("TEST-001", 0.78, timestamp=t2))
+        self.strategy.analyze(make_market("TEST-001", 0.79, timestamp=t2 + timedelta(seconds=1)))
+        signals2 = self.strategy.analyze(make_market("TEST-001", 0.80, timestamp=t2 + timedelta(seconds=2)))
         self.assertEqual(len(signals2), 0, "Should be blocked by cooldown")
     
     def test_cooldown_expires_allows_re_entry(self):
@@ -153,21 +153,21 @@ class TestPostTradeCooldown(unittest.TestCase):
         
         # Fire BULL
         t = base_time + timedelta(seconds=20)
-        self.strategy.analyze(make_market("TEST-001", 0.62, timestamp=t))
-        self.strategy.analyze(make_market("TEST-001", 0.63, timestamp=t + timedelta(seconds=1)))
-        signals = self.strategy.analyze(make_market("TEST-001", 0.64, timestamp=t + timedelta(seconds=2)))
+        self.strategy.analyze(make_market("TEST-001", 0.78, timestamp=t))
+        self.strategy.analyze(make_market("TEST-001", 0.79, timestamp=t + timedelta(seconds=1)))
+        signals = self.strategy.analyze(make_market("TEST-001", 0.80, timestamp=t + timedelta(seconds=2)))
         self.assertGreater(len(signals), 0, "Initial signal should fire")
-        
+
         # Wait past cooldown (6 minutes > 5 min cooldown)
         t_after = t + timedelta(minutes=6)
         # Fill some neutral data to avoid stale state
         for i in range(5):
             self.strategy.analyze(make_market("TEST-001", 0.50, timestamp=t_after + timedelta(seconds=i - 10)))
-        
+
         # 3 ticks above threshold
-        self.strategy.analyze(make_market("TEST-001", 0.62, timestamp=t_after))
-        self.strategy.analyze(make_market("TEST-001", 0.63, timestamp=t_after + timedelta(seconds=5)))
-        signals2 = self.strategy.analyze(make_market("TEST-001", 0.64, timestamp=t_after + timedelta(seconds=10)))
+        self.strategy.analyze(make_market("TEST-001", 0.78, timestamp=t_after))
+        self.strategy.analyze(make_market("TEST-001", 0.79, timestamp=t_after + timedelta(seconds=5)))
+        signals2 = self.strategy.analyze(make_market("TEST-001", 0.80, timestamp=t_after + timedelta(seconds=10)))
         self.assertGreater(len(signals2), 0, "Should allow signal after cooldown expires")
     
     def test_cooldown_set_after_mean_reversion_signal(self):
