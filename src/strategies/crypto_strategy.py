@@ -1046,3 +1046,221 @@ class CryptoLongShotFader(Strategy):
         self._last_trade[market_data.symbol] = now
         signals.append(sig)
         return signals
+
+
+# ==============================================================================
+# CRYPTO 15M LATE SNIPER — Enter last 5 minutes, ride to expiry
+# ==============================================================================
+
+class Crypto15mLateSniper(Strategy):
+    """
+    Enters BTC 15-minute markets only in the last 5 minutes (minutes 10-13)
+    when the outcome is already becoming clear. Picks the side with better
+    decimal odds, adapts the max-odds threshold based on win/loss history,
+    and counter-trades on stop-loss exits.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Crypto15mLateSniper"
+
+    def __init__(self):
+        # Adaptive threshold: decimal odds ceiling for entry
+        self.max_odds = 1.45  # Start: only enter at >= 69% implied probability
+        self.ODDS_FLOOR = 1.10
+        self.ODDS_CEILING = 2.00
+        self.TIGHTEN_STEP = 0.05  # On loss
+        self.RELAX_STEP = 0.03    # On win
+
+        # Cycle tracking
+        self._current_cycle_key = None  # e.g. "KXBTC15M-26FEB281330"
+        self._traded_this_cycle = False
+        self._trade_history = []  # list of (odds, won: bool)
+
+        # Counter-trade state
+        self._counter_armed = False
+        self._counter_side = None       # 'YES' or 'NO'
+        self._counter_symbol = None
+        self._counter_expiration = None
+
+        self.quantity = 10  # placeholder, Kelly will override
+
+    def _cycle_key(self, symbol: str) -> str:
+        """Extract cycle identifier from ticker, e.g. 'KXBTC15M-26FEB281330'."""
+        parts = symbol.split('-')
+        if len(parts) >= 2:
+            return f"{parts[0]}-{parts[1]}"
+        return symbol
+
+    def _minute_in_cycle(self, symbol: str) -> Optional[int]:
+        """Parse the minute-of-cycle from the ticker timestamp."""
+        try:
+            parts = symbol.split('-')
+            if len(parts) < 2:
+                return None
+            time_part = parts[1]
+            # Format: 26FEB281330 -> last 4 digits are HHMM
+            hhmm = time_part[-4:]
+            mm = int(hhmm[2:])
+            return mm % 15
+        except Exception:
+            return None
+
+    def analyze(self, market_data: MarketData) -> Optional[list]:
+        """
+        Called each tick with fused Kalshi 15m data.
+        Only generates signals in minutes 10-13 of the 15-min cycle.
+        """
+        if not market_data or not market_data.symbol:
+            return None
+
+        now = datetime.now()
+        cycle_key = self._cycle_key(market_data.symbol)
+
+        # Detect new cycle
+        if cycle_key != self._current_cycle_key:
+            self._current_cycle_key = cycle_key
+            self._traded_this_cycle = False
+            logger.info(f"[LateSniper] New cycle: {cycle_key} | Threshold: {self.max_odds:.2f}")
+
+        if self._traded_this_cycle:
+            # Check if counter-trade is armed
+            if self._counter_armed:
+                return self._fire_counter_trade(market_data)
+            return None
+
+        # Determine minute in cycle from wall clock
+        minute_in_cycle = now.minute % 15
+
+        # Trade from minute 6 onward (avoid minute 14 = final-minute freeze)
+        if minute_in_cycle < 6:
+            return None
+
+        # Calculate decimal odds for both sides
+        ask = market_data.ask if market_data.ask and market_data.ask > 0.01 else None
+        bid = market_data.bid if market_data.bid and market_data.bid > 0.01 else None
+
+        if not ask or not bid:
+            return None
+
+        no_ask = 1.0 - bid  # Cost to buy NO = 1 - YES bid
+        if no_ask < 0.01:
+            no_ask = 0.01
+
+        yes_odds = 1.0 / ask       # Decimal odds for YES
+        no_odds = 1.0 / no_ask     # Decimal odds for NO
+
+        # Pick the side with lower odds (higher probability)
+        if yes_odds <= no_odds:
+            chosen_side = 'YES'
+            chosen_odds = yes_odds
+            entry_price = ask
+            trade_side = 'buy'
+        else:
+            chosen_side = 'NO'
+            chosen_odds = no_odds
+            entry_price = no_ask
+            trade_side = 'buy'
+
+        # Threshold gate (force-trade at minute 13)
+        force_trade = (minute_in_cycle >= 13)
+
+        if chosen_odds > self.max_odds and not force_trade:
+            logger.debug(f"[LateSniper] Odds {chosen_odds:.2f} > threshold {self.max_odds:.2f}, waiting...")
+            return None
+
+        if force_trade and chosen_odds > self.max_odds:
+            logger.info(f"[LateSniper] FORCE TRADE at min {minute_in_cycle}: odds {chosen_odds:.2f} (threshold {self.max_odds:.2f})")
+
+        # Build signal
+        confidence = 1.0 / chosen_odds  # implied probability
+        sig = TradeSignal(
+            symbol=market_data.symbol,
+            side=trade_side,
+            quantity=self.quantity,
+            limit_price=entry_price,
+            confidence=confidence,
+            contract_side=chosen_side,
+        )
+        sig.stop_loss = max(0.01, entry_price - 0.08)  # 8 cents below entry
+        sig.expiration_time = getattr(market_data, 'expiration_time', None) or \
+                              (market_data.extra or {}).get('close_time')
+        sig.disable_profit_targets = True  # Hold to expiry, no partial exits
+
+        self._traded_this_cycle = True
+        logger.info(
+            f"[LateSniper] ENTRY: {trade_side.upper()} {chosen_side} {market_data.symbol} "
+            f"@ ${entry_price:.2f} | Odds: {chosen_odds:.2f} | Min: {minute_in_cycle}"
+        )
+
+        return [sig]
+
+    def _fire_counter_trade(self, market_data: MarketData) -> Optional[list]:
+        """Fire the armed counter-trade (opposite side after stop-loss)."""
+        if not self._counter_armed:
+            return None
+
+        self._counter_armed = False
+
+        # Price the counter side
+        ask = market_data.ask if market_data.ask and market_data.ask > 0.01 else None
+        bid = market_data.bid if market_data.bid and market_data.bid > 0.01 else None
+        if not ask or not bid:
+            return None
+
+        if self._counter_side == 'YES':
+            entry_price = ask
+        else:
+            no_ask = 1.0 - bid
+            entry_price = max(0.01, no_ask)
+
+        confidence = 1.0 / (1.0 / entry_price) if entry_price > 0 else 0.5
+
+        sig = TradeSignal(
+            symbol=self._counter_symbol or market_data.symbol,
+            side='buy',
+            quantity=self.quantity,
+            limit_price=entry_price,
+            confidence=confidence,
+            contract_side=self._counter_side,
+        )
+        sig.stop_loss = max(0.01, entry_price - 0.08)
+        sig.expiration_time = self._counter_expiration
+        sig.disable_profit_targets = True
+        sig.is_counter_trade = True  # Flag to bypass cooldowns
+
+        logger.info(
+            f"[LateSniper] COUNTER-TRADE: BUY {self._counter_side} {sig.symbol} "
+            f"@ ${entry_price:.2f}"
+        )
+        return [sig]
+
+    def _handle_position_close(self, position: dict):
+        """
+        Called by orchestrator when a Late Sniper position closes.
+        Records outcome and adjusts adaptive threshold.
+        """
+        pnl = position.get('pnl', 0.0)
+        entry_price = position.get('entry_price', 0.50)
+        odds = 1.0 / entry_price if entry_price > 0 else 1.0
+        won = pnl > 0
+        reason = position.get('reason', '')
+
+        self._trade_history.append((odds, won))
+
+        # Adjust threshold
+        if won:
+            self.max_odds = min(self.ODDS_CEILING, self.max_odds + self.RELAX_STEP)
+            logger.info(f"[LateSniper] WIN @ odds {odds:.2f} -> threshold relaxed to {self.max_odds:.2f}")
+        else:
+            self.max_odds = max(self.ODDS_FLOOR, self.max_odds - self.TIGHTEN_STEP)
+            logger.info(f"[LateSniper] LOSS @ odds {odds:.2f} -> threshold tightened to {self.max_odds:.2f}")
+
+        # Arm counter-trade on stop-loss exits
+        if 'STOP_LOSS' in reason:
+            contract_side = position.get('contract_side', 'YES')
+            self._counter_side = 'NO' if contract_side == 'YES' else 'YES'
+            self._counter_symbol = position.get('symbol')
+            self._counter_expiration = position.get('expiration_time')
+            self._counter_armed = True
+            logger.info(f"[LateSniper] Counter-trade ARMED: {self._counter_side} on {self._counter_symbol}")

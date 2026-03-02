@@ -12,7 +12,7 @@ from src.data.nws_provider import NWSProvider
 from src.data.coinbase_provider import CoinbaseProvider
 from src.data.kalshi_provider import KalshiProvider
 from src.strategies.weather_strategy import WeatherArbitrageStrategy, WeatherArbitrageStrategyV2
-from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, CryptoHourlyStrategyV3, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2, Crypto15mTrendStrategyV3, CryptoLongShotFader
+from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, CryptoHourlyStrategyV3, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2, Crypto15mTrendStrategyV3, CryptoLongShotFader, Crypto15mLateSniper
 from src.core.interfaces import TradeSignal
 from src.core.risk_manager import RiskManager
 from src.utils.system_utils import prevent_sleep
@@ -34,7 +34,8 @@ class OrchestratorEngine:
             "weather": WeatherArbitrageStrategyV2(), # UPGRADED TO V2
             "crypto": Crypto15mTrendStrategyV3(),   # UPGRADED TO V3
             "crypto_hr": CryptoHourlyStrategyV3(),  # UPGRADED TO V3
-            "longshot": CryptoLongShotFader()       # NEW: Fade low-prob contracts
+            "longshot": CryptoLongShotFader(),      # Fade low-prob contracts
+            "late_sniper": Crypto15mLateSniper()    # Late-entry sniper
         }
         self.dashboard.active_strategies = list(self.strategies.keys())
         self.ticker_cache = {} # Cache resolved tickers: { "KXHIGHNY": "KXHIGHNY-26JAN30-T20" }
@@ -64,6 +65,10 @@ class OrchestratorEngine:
         pnl = position.get('pnl', 0.0)
         self.dashboard.record_strategy_trade_result(strategy_name, pnl)
         logger.info(f"[Orchestrator] 📊 Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}")
+
+        # Forward Late Sniper closes to the strategy for adaptive threshold adjustment
+        if strategy_name == "Late Sniper":
+            self.strategies["late_sniper"]._handle_position_close(position)
 
     def _resolve_smart_ticker(self, series_base, criteria="time"):
         """
@@ -335,7 +340,15 @@ class OrchestratorEngine:
                     # TODO: Implement a clean sweep in Dashboard class.
                     
                     self.dashboard.update_price("BTC-USD (Coinbase)", btc_data.price)
-                    
+
+                    # Feed raw spot price to hourly strategy for price history accumulation
+                    spot_feed = copy.deepcopy(btc_data)
+                    spot_feed.symbol = "BTC-USD (Coinbase)"
+                    if spot_feed.extra is None:
+                        spot_feed.extra = {}
+                    spot_feed.extra['source'] = 'live_coinbase'
+                    self.strategies['crypto_hr'].analyze(spot_feed)
+
                     # Try to fetch Live Kalshi BTC Price (High Frequency 15M)
                     btc_15m_resolved = False
                     if self.kalshi:
@@ -381,7 +394,14 @@ class OrchestratorEngine:
                                     btc_data_hr.bid = k_data_center.bid
                                     btc_data_hr.ask = k_data_center.ask
                                     btc_data_hr.symbol = center_ticker
-                                    
+                                    # Inject hourly-specific extra fields for strategy
+                                    if k_data_center.extra:
+                                        if btc_data_hr.extra is None:
+                                            btc_data_hr.extra = {}
+                                        btc_data_hr.extra['no_bid'] = k_data_center.extra.get('no_bid', 0.0)
+                                        btc_data_hr.extra['no_ask'] = k_data_center.extra.get('no_ask', 0.0)
+                                        btc_data_hr.extra['close_time'] = k_data_center.extra.get('close_time')
+
                                     # Run Hourly Strategy
                                     hr_signals = self.strategies['crypto_hr'].analyze(btc_data_hr)
                                     self._process_signals(hr_signals, strategy_name="Crypto Hourly")
@@ -401,6 +421,9 @@ class OrchestratorEngine:
                         # LongShot Fader: also check the 15m option for longshot pricing
                         ls_signals = self.strategies['longshot'].analyze(btc_data)
                         self._process_signals(ls_signals, strategy_name="LongShot Fader")
+                        # Late Sniper: enter in last 5 minutes of cycle
+                        sniper_signals = self.strategies['late_sniper'].analyze(btc_data)
+                        self._process_signals(sniper_signals, strategy_name="Late Sniper")
                 else:
                     # Log failure occasionally
                     if ticks % 10 == 0:
@@ -558,9 +581,22 @@ class OrchestratorEngine:
             
             ex = getattr(sig, 'expiration_time', None)
             
+            # Counter-trade bypass: temporarily clear rate-limit and loss cooldown
+            is_counter = getattr(sig, 'is_counter_trade', False)
+            if is_counter:
+                saved_last_trade = self.risk_manager.last_trade_time
+                saved_cooldowns = dict(self.risk_manager.loss_cooldown)
+                self.risk_manager.last_trade_time = datetime.min
+                self.risk_manager.loss_cooldown.clear()
+
             # RISK CHECK
             is_safe = self.risk_manager.check_order(est_cost, category=category, strategy_name=strategy_name, expiration_time=ex)
-            
+
+            # Restore if counter-trade
+            if is_counter and not is_safe:
+                self.risk_manager.last_trade_time = saved_last_trade
+                self.risk_manager.loss_cooldown = saved_cooldowns
+
             if is_safe:
                 # SAFE: Execute and Record
                 # Notional is now same as Cost/Risk per user definition
@@ -575,7 +611,8 @@ class OrchestratorEngine:
                 ex = getattr(sig, 'expiration_time', None)
                 
                 cs = getattr(sig, 'contract_side', 'YES')
-                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name, contract_side=cs)
+                dpt = getattr(sig, 'disable_profit_targets', False)
+                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name, contract_side=cs, disable_profit_targets=dpt)
             
             else:
                 # RISKY:
