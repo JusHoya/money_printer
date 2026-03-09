@@ -639,8 +639,8 @@ class Crypto15mTrendStrategyV3(Strategy):
     The Trend Catcher V3 📈 (15m High-Frequency)
     Features: Reciprocal math, BRTI 60s MA targeting, and OBI triggers.
     """
-    def __init__(self, 
-                 obi_threshold: float = 0.70,
+    def __init__(self,
+                 obi_threshold: float = 0.55,
                  confirmation_delay: int = 120,
                  window_seconds: int = 60):
         self.obi_threshold = obi_threshold
@@ -705,6 +705,8 @@ class Crypto15mTrendStrategyV3(Strategy):
 
         close_time = extra.get('close_time')
 
+        logger.debug(f"[TrendV3] Eval {market_data.symbol}: BRTI_MA={brti_ma:.2f}, Strike={strike_val}, OBI_YES={obi_yes:.3f}, OBI_NO={obi_no:.3f}, Threshold={self.obi_threshold}")
+
         # Momentum Breakout using BRTI MA explicitly
         if brti_ma > strike_val + 25.0: # Strongly above strike
             if obi_yes > self.obi_threshold and implied_yes_ask < 0.85:
@@ -732,7 +734,7 @@ class CryptoHourlyStrategyV3(Strategy):
     The Time Traveler V3 ⏳ (Hourly Prediction)
     Targeting 60s BRTI MA, using Reciprocal Math and OBI triggers.
     """
-    def __init__(self, confidence_margin: float = 50.0, obi_threshold: float = 0.70):
+    def __init__(self, confidence_margin: float = 50.0, obi_threshold: float = 0.55):
         self.confidence_margin = confidence_margin
         self.obi_threshold = obi_threshold
         self.price_history = [] 
@@ -772,11 +774,14 @@ class CryptoHourlyStrategyV3(Strategy):
         if ("KXBTC" not in symbol and "kxbtcd" not in symbol) or "15M" in symbol: 
             return [] 
 
-        if not self.price_history: return []
+        if not self.price_history:
+            logger.debug(f"[HourlyV3] No price history yet, skipping {symbol}")
+            return []
 
         # Time window filter: first 15 min, mid-hour 25-35, last 15 min
         minute = datetime.now().minute
         if not (minute < 15 or (25 <= minute <= 35) or minute >= 45):
+            logger.debug(f"[HourlyV3] Outside time window (minute={minute}), skipping")
             return []
 
         current_spot = self.price_history[-1][1]
@@ -785,13 +790,17 @@ class CryptoHourlyStrategyV3(Strategy):
             parts = symbol.split('-')
             strike_val = float(re.sub(r'[A-Za-z]', '', parts[-1]))
             dist = abs(strike_val - current_spot)
-            if dist > 750: return []
+            if dist > 750:
+                logger.debug(f"[HourlyV3] Strike ${strike_val} too far from spot ${current_spot:.2f} (dist={dist:.0f})")
+                return []
             target_time = (datetime.now() + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         except:
             return []
 
         predicted_price = self._predict_future_price(datetime.now(), target_time)
-        if not predicted_price: return []
+        if not predicted_price:
+            logger.debug(f"[HourlyV3] Prediction failed (need 10+ points, have {len(self.price_history)})")
+            return []
 
         # Reciprocal Math
         no_bid = extra.get('no_bid', 0.0)
@@ -804,6 +813,8 @@ class CryptoHourlyStrategyV3(Strategy):
         obi_no = (no_bid / (no_bid + no_ask_proxy)) if (no_bid + no_ask_proxy) > 0 else 0.5
         
         close_time = extra.get('close_time')
+
+        logger.info(f"[HourlyV3] Eval {symbol}: Pred=${predicted_price:.2f}, Strike=${strike_val}, Margin={abs(predicted_price-strike_val):.2f}, OBI_YES={obi_yes:.3f}, OBI_NO={obi_no:.3f}, Threshold={self.obi_threshold}")
 
         if predicted_price > (strike_val + self.confidence_margin):
             if obi_yes > self.obi_threshold and implied_yes_ask < 0.85 and implied_yes_ask > 0:
@@ -1173,7 +1184,10 @@ class Crypto15mLateSniper(Strategy):
             logger.info(f"[LateSniper] FORCE TRADE at min {minute_in_cycle}: odds {chosen_odds:.2f} (threshold {self.max_odds:.2f})")
 
         # Build signal
-        confidence = 1.0 / chosen_odds  # implied probability
+        # Confidence must exceed implied probability for Kelly to see edge
+        # Late-cycle entries have informational advantage: boost by 10%
+        implied_prob = 1.0 / chosen_odds
+        confidence = min(0.95, implied_prob + 0.10)
         sig = TradeSignal(
             symbol=market_data.symbol,
             side=trade_side,

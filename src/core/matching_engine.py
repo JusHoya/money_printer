@@ -524,6 +524,12 @@ class SimulatedExchange:
                         self.positions.remove(pos)
                     return True
 
+        # Clean up ghost positions with qty reduced to 0 by rounding
+        if pos['quantity'] <= 0:
+            if pos in self.positions:
+                self.positions.remove(pos)
+            return True
+
         return False
 
     def _close_position(self, pos, final_spot_price, reason="MARKET"):

@@ -26,6 +26,7 @@ class OrchestratorEngine:
         self.dashboard = Dashboard()
         self.running = True
         self.risk_manager = RiskManager(starting_balance=100.0)
+        self.last_15m_trade_interval = None  # Track which 15m interval we last traded in
         
         # Wire the trade-close callback to the dashboard for strategy tracking
         self.risk_manager.exchange.on_close = self._on_trade_close
@@ -407,7 +408,7 @@ class OrchestratorEngine:
                                     self._process_signals(hr_signals, strategy_name="Crypto Hourly")
 
                             else:
-                                if ticks % 60 == 0:
+                                if ticks % 10 == 0:
                                     logger.warning("[Dashboard] Ghost Ticker: No active BTC Hourly ladder found.")
                         
                         except Exception as e:
@@ -416,14 +417,27 @@ class OrchestratorEngine:
                     # GATE: Only run 15M strategy if we have fused Kalshi option data
                     # Without this, the strategy receives raw BTC spot ($69k) and compares against 0.55
                     if btc_15m_resolved:
-                        signals = self.strategies['crypto'].analyze(btc_data)
-                        self._process_signals(signals, strategy_name="Trend Catcher V3")
-                        # LongShot Fader: also check the 15m option for longshot pricing
-                        ls_signals = self.strategies['longshot'].analyze(btc_data)
-                        self._process_signals(ls_signals, strategy_name="LongShot Fader")
-                        # Late Sniper: enter in last 5 minutes of cycle
-                        sniper_signals = self.strategies['late_sniper'].analyze(btc_data)
-                        self._process_signals(sniper_signals, strategy_name="Late Sniper")
+                        now = datetime.now()
+                        current_interval_id = now.hour * 4 + now.minute // 15
+                        minute_in_interval = now.minute % 15
+                        can_trade_15m = (minute_in_interval >= 7 and
+                                        current_interval_id != self.last_15m_trade_interval)
+
+                        if can_trade_15m:
+                            signals = self.strategies['crypto'].analyze(btc_data)
+                            traded = self._process_signals(signals, strategy_name="Trend Catcher V3")
+                            if not traded:
+                                # LongShot Fader: also check the 15m option for longshot pricing
+                                ls_signals = self.strategies['longshot'].analyze(btc_data)
+                                traded = self._process_signals(ls_signals, strategy_name="LongShot Fader")
+                            if not traded:
+                                # Late Sniper: enter in last 5 minutes of cycle
+                                sniper_signals = self.strategies['late_sniper'].analyze(btc_data)
+                                traded = self._process_signals(sniper_signals, strategy_name="Late Sniper")
+                            if traded:
+                                self.last_15m_trade_interval = current_interval_id
+                        elif minute_in_interval < 7 and ticks % 30 == 0:
+                            logger.debug(f"[15m Gate] Waiting for minute 7 of interval (currently min {minute_in_interval})")
                 else:
                     # Log failure occasionally
                     if ticks % 10 == 0:
@@ -541,8 +555,9 @@ class OrchestratorEngine:
         return count >= 1
 
     def _process_signals(self, signals, strategy_name=None):
-        if not signals: return
+        if not signals: return False
         if not isinstance(signals, list): signals = [signals]
+        traded = False
         
         for sig in signals:
             # Determine Category
@@ -571,7 +586,12 @@ class OrchestratorEngine:
                 
                 # Update signal
                 sig.quantity = final_qty
-            
+
+            # Skip zero-quantity signals
+            if sig.quantity < 1:
+                logger.debug(f"[Process] Skipping qty=0 signal for {sig.symbol}")
+                continue
+
             # Calculate Cost / Collateral
             # For sells (short YES), collateral is (1-price)*qty, not price*qty
             if sig.side == 'sell' and getattr(sig, 'contract_side', 'YES') == 'YES':
@@ -613,7 +633,8 @@ class OrchestratorEngine:
                 cs = getattr(sig, 'contract_side', 'YES')
                 dpt = getattr(sig, 'disable_profit_targets', False)
                 self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name, contract_side=cs, disable_profit_targets=dpt)
-            
+                traded = True
+
             else:
                 # RISKY:
                 # In Live Trading, we would block this.
@@ -622,6 +643,8 @@ class OrchestratorEngine:
                 self.dashboard.log(f"⚠️ HARVEST: {sig.symbol} (Risky but Recorded)")
                 self.dashboard.record_signal(sig, status="HARVEST_ONLY", strategy_name=strategy_name)
                 # We do NOT deduct balance in Risk Manager to avoid 'bust' simulation stopping the harvest
+
+        return traded
 
     def run(self):
         prevent_sleep()

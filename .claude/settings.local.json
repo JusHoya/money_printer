@@ -3,7 +3,12 @@
     "allow": [
       "Bash(python -m pytest:*)",
       "Bash(python:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(xargs:*)"
     ]
   }
 }
