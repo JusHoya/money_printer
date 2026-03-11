@@ -9,12 +9,16 @@ Money Printer is an algorithmic trading system for the **Kalshi** prediction mar
 ## Commands
 
 ```bash
-# Run the live dashboard (main entry point)
+# Run the live dashboard (all bots)
 python scripts/run_dashboard.py
 
+# Run specific bot(s)
+python scripts/run_dashboard.py --bot btc_15m
+python scripts/run_dashboard.py --bot btc_15m --bot weather
+
 # Run simulation
-python scripts/simulate.py --strategy crypto --days 30 --live
-python scripts/simulate.py --strategy weather --days 10
+python scripts/simulate.py --bot btc_15m --days 30 --live
+python scripts/simulate.py --bot weather --days 10
 
 # Lab: audit, compare, optimize strategies against harvested data
 $env:PYTHONPATH = "."; python scripts/lab.py --audit
@@ -38,19 +42,26 @@ All components implement these ABCs:
 - **DataProvider** — `connect()`, `fetch_latest(symbol) -> MarketData`
 - **Strategy** — `analyze(data: MarketData) -> Optional[TradeSignal]`
 - **ExecutionEngine** — `execute(signal: TradeSignal) -> bool`
+- **Bot** (`src/bots/base.py`) — `setup()`, `tick()`, `get_symbols()` — encapsulates a data provider, strategy waterfall, and tick loop for a specific market
 
 Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSignal` (symbol/side/quantity/confidence).
 
 ### Data Flow
-`DataProvider` → `Strategy.analyze()` → `TradeSignal` → `RiskManager.check()` → `SimulatedExchange.execute()`
+`DataProvider` → `Bot.tick()` → `Strategy.analyze()` → `TradeSignal` → `SignalProcessorMixin._process_signals()` → `RiskManager.check()` → `SimulatedExchange.execute()`
 
 ### Key Components
+
+**`src/bots/`** — Bot implementations:
+- `base.py`: Bot ABC defining `setup()`, `tick()`, `get_symbols()`
+- `registry.py`: Bot registry for CLI `--bot` selection
+- `mixins.py`: `SignalProcessorMixin` — shared signal processing logic (risk check → execution)
+- `btc_15m.py`, `btc_hourly.py`, `weather.py`: Concrete bot implementations
 
 **`src/core/risk_manager.py` — RiskManager**: Enforces capital preservation rules (max risk per trade, daily drawdown limits, per-strategy drawdown, portfolio exposure caps, trade interval throttling, loss cooldown per symbol). Owns a `SimulatedExchange` instance and syncs balance via `_on_trade_close` callback.
 
 **`src/core/matching_engine.py` — SimulatedExchange + LimitOrderBook**: Full simulated exchange with limit orders, order book depth tracking, trailing stops, and position lifecycle management. Tracks per-strategy PnL stats.
 
-**`scripts/run_dashboard.py` — OrchestratorEngine**: The main runtime loop. Wires together providers, strategies, risk manager, and dashboard. Runs data fetch → strategy analysis → risk check → execution in a continuous loop with threading.
+**`scripts/run_dashboard.py` — OrchestratorEngine**: The main runtime loop. Wires together bots, risk manager, and dashboard. Uses `--bot` flag to select which bots to run. Runs bot tick loops in a continuous cycle with threading.
 
 **`src/data/kalshi_provider.py`**: Kalshi API client handling RSA-signed auth, market discovery (series/events/tickers), and orderbook fetching. Uses demo API by default.
 
@@ -72,5 +83,5 @@ Copy `.env.example` to `.env` and fill in Kalshi demo API credentials and NWS us
 ## Conventions
 - The `agent_space/` directory is a Gemini agent framework — not part of the trading system core.
 - Logs go to `logs/` directory.
-- Test JSON fixtures (API response dumps) live in `tests/`.
-- Scripts in `scripts/` are standalone utilities for debugging, probing APIs, and running the system.
+- Test JSON fixtures (API response dumps) live in `tests/fixtures/`.
+- Scripts in `scripts/` are the main entry points; `scripts/debug/` has standalone utilities for debugging and probing APIs.

@@ -1,0 +1,87 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\hoyer\WorkSpace\Projects\money_printer
+plugins: anyio-4.12.0, cov-7.0.0
+collecting ... collected 6 items
+
+tests/test_strategy_tracking.py::test_strategy_name_stored_in_position PASSED
+tests/test_strategy_tracking.py::test_strategy_name_defaults_to_unknown PASSED
+tests/test_strategy_tracking.py::test_on_close_callback_receives_strategy_name FAILED
+tests/test_strategy_tracking.py::test_strategy_name_preserved_in_closed_trades PASSED
+tests/test_strategy_tracking.py::test_fixed_cent_stop_loss_not_triggered_by_spread_noise PASSED
+tests/test_strategy_tracking.py::test_longshot_fader_targets_correct_price_range FAILED
+
+================================== FAILURES ===================================
+________________ test_on_close_callback_receives_strategy_name ________________
+
+    def test_on_close_callback_receives_strategy_name():
+        """Critical: on_close must fire with the strategy_name on the closed position."""
+        closed = []
+    
+        def capture(pos):
+            closed.append(pos)
+    
+        ex = SimulatedExchange(on_close=capture)
+        ex.open_position(
+            symbol='KXHIGHNY-26FEB19-T44',
+            side='buy',
+            entry_price=0.35,
+            quantity=5,
+            strategy_name='Trend Catcher V2'
+        )
+    
+        # Force close it directly
+        pos = ex.positions[0]
+        ex._close_position(pos, 0.80, reason='EXPIRATION')
+    
+        assert len(closed) == 1, "on_close should have fired"
+        assert closed[0]['strategy_name'] == 'Trend Catcher V2', f"Got: {closed[0].get('strategy_name')}"
+>       assert closed[0]['pnl'] > 0, "Win should have positive PnL"
+E       AssertionError: Win should have positive PnL
+E       assert -1.75 > 0
+
+tests\test_strategy_tracking.py:59: AssertionError
+_______________ test_longshot_fader_targets_correct_price_range _______________
+
+    def test_longshot_fader_targets_correct_price_range():
+        """LongShot Fader must only fire on [min_price, longshot_ceiling] range."""
+        from src.strategies.crypto_strategy import CryptoLongShotFader
+        from src.core.interfaces import MarketData
+        from datetime import datetime
+    
+        fader = CryptoLongShotFader(longshot_ceiling=0.08, min_price=0.03)
+    
+        def make_market(bid):
+            return MarketData(
+                symbol='KXBTC15M-TEST-T50000',
+                price=bid,
+                bid=bid,
+                ask=bid + 0.01,
+                timestamp=datetime.now()
+            )
+    
+        # Below min \u2192 no trade
+>       assert fader.analyze(make_market(0.02)) == []
+                             ^^^^^^^^^^^^^^^^^
+
+tests\test_strategy_tracking.py:110: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+bid = 0.02
+
+    def make_market(bid):
+>       return MarketData(
+            symbol='KXBTC15M-TEST-T50000',
+            price=bid,
+            bid=bid,
+            ask=bid + 0.01,
+            timestamp=datetime.now()
+        )
+E       TypeError: MarketData.__init__() missing 1 required positional argument: 'volume'
+
+tests\test_strategy_tracking.py:101: TypeError
+=========================== short test summary info ===========================
+FAILED tests/test_strategy_tracking.py::test_on_close_callback_receives_strategy_name
+FAILED tests/test_strategy_tracking.py::test_longshot_fader_targets_correct_price_range
+========================= 2 failed, 4 passed in 1.11s =========================

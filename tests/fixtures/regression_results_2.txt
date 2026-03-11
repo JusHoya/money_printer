@@ -1,0 +1,21 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\hoyer\WorkSpace\Projects\money_printer
+plugins: anyio-4.12.0, cov-7.0.0
+collecting ... collected 12 items
+
+tests/test_pnl_flow.py::TestPnLFlow::test_balance_decreases_on_loss PASSED [  8%]
+tests/test_pnl_flow.py::TestPnLFlow::test_balance_increases_on_profitable_close PASSED [ 16%]
+tests/test_pnl_flow.py::TestPnLFlow::test_equity_calculation PASSED      [ 25%]
+tests/test_pnl_flow.py::TestPnLFlow::test_open_position_reduces_balance PASSED [ 33%]
+tests/test_pnl_flow.py::TestPnLFlow::test_realized_pnl_on_position_close PASSED [ 41%]
+tests/test_pnl_flow.py::TestPnLFlow::test_tanh_price_formula_temperature PASSED [ 50%]
+tests/test_pnl_flow.py::TestPnLFlow::test_unrealized_pnl_updates_on_price_move PASSED [ 58%]
+tests/test_pnl_flow.py::TestExposureCalculation::test_exposure_by_category PASSED [ 66%]
+tests/test_pnl_flow.py::TestExposureCalculation::test_exposure_sums_position_costs PASSED [ 75%]
+tests/test_matching_engine_v2.py::TestMatchingEngineV2::test_cross_contamination PASSED [ 83%]
+tests/test_matching_engine_v2.py::TestMatchingEngineV2::test_precip_pnl_update PASSED [ 91%]
+tests/test_matching_engine_v2.py::TestMatchingEngineV2::test_temp_pnl_update PASSED [100%]
+
+============================= 12 passed in 0.13s ==============================

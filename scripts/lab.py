@@ -28,7 +28,7 @@ sys.path.append(os.getcwd())
 
 from src.core.interfaces import MarketData
 from src.core.matching_engine import SimulatedExchange
-from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2
+from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2, Crypto15mTrendStrategyV3
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
 from src.utils.logger import logger
 
@@ -37,8 +37,21 @@ LOG_DIR = "logs"
 AUDIT_REPORT_FILE = os.path.join(LOG_DIR, "audit_report.json")
 OPTIMAL_PARAMS_FILE = os.path.join(LOG_DIR, "optimal_params.json")
 
+BOT_SYMBOL_FILTERS = {
+    "btc_15m": ["BTC"],
+    "btc_hourly": ["BTC"],
+    "weather": ["HIGH", "LOW", "RAIN"],
+}
+
+BOT_STRATEGY_KEYS = {
+    "btc_15m": ["Crypto V2", "Crypto V3"],
+    "btc_hourly": ["Crypto V2", "Crypto V3"],
+    "weather": ["Weather V2"],
+}
+
 class Lab:
-    def __init__(self):
+    def __init__(self, bot_filter: str = None):
+        self.bot_filter = bot_filter
         self.data = []
         self._load_data()
         
@@ -89,11 +102,19 @@ class Lab:
         
         if not self.data: return {}
 
-        # Instantiate V2 Strategies
-        strategies = {
+        # Instantiate strategies
+        all_strategies = {
             "Crypto V2": Crypto15mTrendStrategyV2(),
+            "Crypto V3": Crypto15mTrendStrategyV3(),
             "Weather V2": WeatherArbitrageStrategyV2()
         }
+
+        # Filter by bot if specified
+        if self.bot_filter and self.bot_filter in BOT_STRATEGY_KEYS:
+            allowed = BOT_STRATEGY_KEYS[self.bot_filter]
+            strategies = {k: v for k, v in all_strategies.items() if k in allowed}
+        else:
+            strategies = all_strategies
         
         results = {}
         
@@ -124,7 +145,7 @@ class Lab:
                 is_crypto = "BTC" in md.symbol or "ETH" in md.symbol
                 is_weather = "HIGH" in md.symbol or "LOW" in md.symbol or "RAIN" in md.symbol
                 
-                if name == "Crypto V2" and is_crypto:
+                if name in ("Crypto V2", "Crypto V3") and is_crypto:
                     oms = oms_instances[name]
                     # Update OMS market price for tracking
                     if "BTC" in md.symbol: oms.update_market('BTC', md.price)
@@ -209,8 +230,14 @@ class Lab:
         strategies_to_test = []
         if target_strategy in ["all", "crypto"]:
             strategies_to_test.append(("Crypto V2", Crypto15mTrendStrategyV2, crypto_grid))
+            strategies_to_test.append(("Crypto V3", Crypto15mTrendStrategyV3, crypto_grid))
         if target_strategy in ["all", "weather"]:
             strategies_to_test.append(("Weather V2", WeatherArbitrageStrategyV2, weather_grid))
+
+        # Filter by bot if active
+        if self.bot_filter and self.bot_filter in BOT_STRATEGY_KEYS:
+            allowed = BOT_STRATEGY_KEYS[self.bot_filter]
+            strategies_to_test = [(n, c, g) for n, c, g in strategies_to_test if n in allowed]
             
         for name, strat_class, grid in strategies_to_test:
             print(f"\n⚙️  Optimizing {name}...")
@@ -235,7 +262,7 @@ class Lab:
                 
                 # Pre-filter for speed
                 relevant_data = self.data # Default all
-                if name == "Crypto V2":
+                if name in ("Crypto V2", "Crypto V3"):
                     relevant_data = [d for d in self.data if "BTC" in d['Symbol'] or "ETH" in d['Symbol']]
                 elif name == "Weather V2":
                     relevant_data = [d for d in self.data if "HIGH" in d['Symbol'] or "LOW" in d['Symbol']]
@@ -251,7 +278,7 @@ class Lab:
                         )
                     except: continue
                     
-                    if name == "Crypto V2" and "BTC" in md.symbol:
+                    if name in ("Crypto V2", "Crypto V3") and "BTC" in md.symbol:
                         oms.update_market('BTC', md.price)
                         
                     sigs = strategy.analyze(md)
@@ -347,10 +374,12 @@ if __name__ == "__main__":
     parser.add_argument("--refine", action="store_true", help="Run audit and optimize if needed")
     parser.add_argument("--strategy", type=str, default="all", help="Target strategy for optimization (crypto/weather)")
     parser.add_argument("--threshold", type=float, default=80.0, help="Win rate threshold for refinement")
-    
+    parser.add_argument("--bot", type=str, default=None, choices=["btc_15m", "btc_hourly", "weather"],
+                        help="Filter strategies by bot (btc_15m, btc_hourly, weather)")
+
     args = parser.parse_args()
-    
-    lab = Lab()
+
+    lab = Lab(bot_filter=args.bot)
     
     if args.refine:
         lab.run_refinement(threshold=args.threshold)

@@ -52,15 +52,33 @@ def run_simulation(strategy_name, days, optimize, use_live=False):
         else:
             providers = [MockNWSProvider()]
             
+    elif strategy_name.lower() == 'btc_15m':
+        from src.strategies.crypto_strategy import Crypto15mTrendStrategyV3
+        strategy = Crypto15mTrendStrategyV3()
+        if use_live:
+            from src.data.coinbase_provider import CoinbaseProvider
+            providers = [CoinbaseProvider("BTC-USD")]
+        else:
+            print("Mock Crypto Provider not implemented yet. Use --live for now.")
+            return
+
+    elif strategy_name.lower() == 'btc_hourly':
+        from src.strategies.crypto_strategy import CryptoHourlyStrategyV3
+        strategy = CryptoHourlyStrategyV3()
+        if use_live:
+            from src.data.coinbase_provider import CoinbaseProvider
+            providers = [CoinbaseProvider("BTC-USD")]
+        else:
+            print("Mock Crypto Provider not implemented yet. Use --live for now.")
+            return
+
     elif strategy_name.lower() == 'crypto':
         from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2
         strategy = Crypto15mTrendStrategyV2()
         if use_live:
             from src.data.coinbase_provider import CoinbaseProvider
-            # Default to BTC-USD
             providers = [CoinbaseProvider("BTC-USD")]
         else:
-             # Mock provider for crypto (needs implementation if we want offline tests)
              print("Mock Crypto Provider not implemented yet. Use --live for now.")
              return
     else:
@@ -85,11 +103,27 @@ def run_simulation(strategy_name, days, optimize, use_live=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Money Printer Simulation Engine")
-    parser.add_argument("--strategy", type=str, required=True, help="Strategy to simulate (weather|crypto)")
+    parser.add_argument("--strategy", type=str, default=None, help="Strategy to simulate (weather|crypto)")
+    parser.add_argument("--bot", type=str, default=None, choices=["btc_15m", "btc_hourly", "weather"],
+                        help="Bot preset (btc_15m|btc_hourly|weather). Takes precedence over --strategy.")
     parser.add_argument("--days", type=int, default=30, help="Days (steps) to simulate")
     parser.add_argument("--optimize", action="store_true", help="Enable parameter optimization loop")
     parser.add_argument("--live", action="store_true", help="Use LIVE data sources (NWS/Kalshi) instead of mocks")
-    
+
     args = parser.parse_args()
-    
-    run_simulation(args.strategy, args.days, args.optimize, args.live)
+
+    # --bot maps to a strategy name for run_simulation
+    BOT_MAP = {
+        "btc_15m": "btc_15m",
+        "btc_hourly": "btc_hourly",
+        "weather": "weather",
+    }
+
+    if args.bot:
+        strategy_name = BOT_MAP[args.bot]
+    elif args.strategy:
+        strategy_name = args.strategy
+    else:
+        parser.error("at least one of --bot or --strategy is required")
+
+    run_simulation(strategy_name, args.days, args.optimize, args.live)
