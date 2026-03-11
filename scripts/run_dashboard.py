@@ -49,6 +49,9 @@ class OrchestratorEngine:
         else:
             self.bots = BotRegistry.create_all()
 
+        # Track which bots are currently active (all bots active by default)
+        self.active_bots = {bot.name for bot in self.bots}
+
         # Collect strategy names for dashboard
         all_strategies = []
         for bot in self.bots:
@@ -56,6 +59,22 @@ class OrchestratorEngine:
         self.dashboard.active_strategies = all_strategies
 
         logger.info(f"[Orchestrator] Active bots: {[b.name for b in self.bots]}")
+
+    def start_bot(self, name: str):
+        """Activate a bot by name so it participates in the market loop."""
+        bot_names = [b.name for b in self.bots]
+        if name not in bot_names:
+            raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        self.active_bots.add(name)
+        logger.info(f"[Orchestrator] Bot '{name}' started.")
+
+    def stop_bot(self, name: str):
+        """Deactivate a bot by name so it is skipped in the market loop."""
+        bot_names = [b.name for b in self.bots]
+        if name not in bot_names:
+            raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        self.active_bots.discard(name)
+        logger.info(f"[Orchestrator] Bot '{name}' stopped.")
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
@@ -96,8 +115,10 @@ class OrchestratorEngine:
                             except Exception:
                                 pass
 
-                # Tick all active bots
+                # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:
+                    if bot.name not in self.active_bots:
+                        continue
                     try:
                         bot.tick(self.risk_manager, self.dashboard)
                     except Exception as e:

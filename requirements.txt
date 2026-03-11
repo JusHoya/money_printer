@@ -4,6 +4,11 @@ python-dotenv
 cryptography
 keyboard; platform_system=="Windows"
 
+# Requirements for Web Dashboard
+fastapi
+uvicorn[standard]
+websockets
+
 # Requirements for ML
 scikit-learn
 joblib

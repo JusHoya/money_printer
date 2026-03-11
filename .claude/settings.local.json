@@ -8,7 +8,21 @@
       "Bash(grep:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(mkdir -p \"C:/Users/hoyer/WorkSpace/Projects/money_printer/src/web/static/img\" && mkdir -p \"C:/Users/hoyer/WorkSpace/Projects/money_printer/src/web/static/js\")",
+      "Bash(pip install:*)",
+      "Bash(curl -s http://localhost:8050/ | head -30)",
+      "Bash(curl -s http://localhost:8050/api/bots 2>&1)",
+      "Bash(curl -s http://localhost:8050/static/css/dashboard.css | head -20)",
+      "Bash(curl -s http://localhost:8050/static/js/app.js | head -10)",
+      "Bash(PYTHONPATH=. python -c \"from src.bots.registry import *; print\\(dir\\(\\)\\)\" 2>&1)",
+      "Bash(kill %1 2>/dev/null; PYTHONPATH=. PYTHONIOENCODING=utf-8 python -c \"\nfrom scripts.run_dashboard import OrchestratorEngine\nfrom src.web.state_manager import StateManager\nimport json\n\nengine = OrchestratorEngine\\(bot_names=['btc_15m']\\)\nsm = StateManager\\(engine\\)\nsnap = sm.snapshot\\(\\)\nprint\\(json.dumps\\(snap, indent=2, default=str\\)[:3000]\\)\n\" 2>&1)",
+      "Bash(kill %1 2>/dev/null)",
+      "Bash(kill %1 2>/dev/null; true)",
+      "Bash(taskkill //F //IM python.exe 2>/dev/null; true)",
+      "Bash(cd C:/Users/hoyer/WorkSpace/Projects/money_printer && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt -x -q 2>&1 | tail -20)",
+      "Bash(cd C:/Users/hoyer/WorkSpace/Projects/money_printer && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/test_output_cooldown.txt -x -q 2>&1 | tail -20)",
+      "Bash(start http://localhost:8050)"
     ]
   }
 }

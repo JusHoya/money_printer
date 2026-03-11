@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Money Printer Dashboard</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ================================================================== -->
+  <!-- HEADER BAR                                                          -->
+  <!-- ================================================================== -->
+  <header id="header-bar">
+    <div class="header-left">
+      <span id="app-title">Money Printer</span>
+      <canvas id="mascot-canvas" width="32" height="32" title="Mr. Krabs"></canvas>
+      <span id="mascot-state">IDLE</span>
+    </div>
+
+    <div class="header-center">
+      <span id="uptime-label">Uptime</span>
+      <span id="uptime">--:--:--</span>
+    </div>
+
+    <div class="header-right">
+      <div id="ws-dot" title="WebSocket connection"></div>
+      <span id="mode-pill" class="sandbox">
+        <span class="pill-dot"></span>
+        <span id="mode-text">SANDBOX</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ================================================================== -->
+  <!-- CONTROL BAR                                                         -->
+  <!-- ================================================================== -->
+  <section id="control-bar">
+    <div class="bot-dropdown-wrap">
+      <button id="bot-dropdown-btn" onclick="toggleBotDropdown()">
+        <span id="bot-dropdown-label">Select Bots</span>
+        <span class="chevron">&#9660;</span>
+      </button>
+      <div id="bot-dropdown-menu">
+        <div class="bot-option" style="color:var(--text-dim);cursor:default;font-size:11px;">No bots registered</div>
+      </div>
+    </div>
+
+    <button class="ctrl-btn ctrl-btn-start" onclick="startSelected()">Start Selected</button>
+    <button class="ctrl-btn ctrl-btn-stop"  onclick="stopSelected()">Stop Selected</button>
+
+    <div id="bot-chips"></div>
+  </section>
+
+  <!-- ================================================================== -->
+  <!-- PORTFOLIO SUMMARY BAR                                               -->
+  <!-- ================================================================== -->
+  <section id="portfolio-bar">
+    <div class="pf-card">
+      <div class="pf-label">Equity</div>
+      <div class="pf-value neu" id="pf-equity">$0.00</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Cash</div>
+      <div class="pf-value neu" id="pf-cash">$0.00</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Exposure</div>
+      <div class="pf-value neu" id="pf-exposure">$0.00</div>
+      <div class="pf-sub" id="pf-exposure-pct">0.0%</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Exposure %</div>
+      <div class="pf-value neu" id="pf-exposure-pct2">0.0%</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Realized PnL</div>
+      <div class="pf-value neu" id="pf-realized">$0.00</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Unrealized PnL</div>
+      <div class="pf-value neu" id="pf-unrealized">$0.00</div>
+    </div>
+  </section>
+
+  <!-- ================================================================== -->
+  <!-- MAIN CONTENT GRID                                                   -->
+  <!-- ================================================================== -->
+  <main id="main-grid">
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- LEFT COLUMN (~60%)                                               -->
+    <!-- ---------------------------------------------------------------- -->
+    <div id="left-col">
+
+      <!-- PnL Chart -->
+      <div class="card" id="chart-card">
+        <div class="card-header">
+          <span class="card-title">Equity Curve</span>
+          <span class="card-badge" id="chart-range">Live</span>
+        </div>
+        <div class="card-body">
+          <canvas id="pnl-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Open Positions -->
+      <div class="card" id="positions-card">
+        <div class="card-header">
+          <span class="card-title">Open Positions</span>
+          <span class="card-badge" id="positions-count">0</span>
+        </div>
+        <div id="positions-table-wrap">
+          <table class="data-table" id="positions-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Contract</th>
+                <th class="col-num">Qty</th>
+                <th class="col-num">Entry</th>
+                <th class="col-num">Current</th>
+                <th class="col-num">PnL</th>
+                <th>Strategy</th>
+                <th class="col-num">Age</th>
+              </tr>
+            </thead>
+            <tbody id="positions-tbody">
+              <tr><td colspan="10" class="empty-state">No open positions</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Strategy Performance -->
+      <div class="card" id="strategy-card">
+        <div class="card-header">
+          <span class="card-title">Strategy Performance</span>
+          <span class="card-badge" id="strategy-count">0</span>
+        </div>
+        <div id="strategy-table-wrap">
+          <table class="data-table" id="strategy-table">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th class="col-num">Signals</th>
+                <th class="col-num">Wins</th>
+                <th class="col-num">Losses</th>
+                <th>Win Rate</th>
+                <th class="col-num">PnL</th>
+                <th class="col-num">Active</th>
+              </tr>
+            </thead>
+            <tbody id="strategy-tbody">
+              <tr><td colspan="7" class="empty-state">No signals yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /#left-col -->
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- RIGHT COLUMN (~40%)                                              -->
+    <!-- ---------------------------------------------------------------- -->
+    <div id="right-col">
+
+      <!-- Market Data Feed -->
+      <div class="card" id="market-card">
+        <div class="card-header">
+          <span class="card-title">Market Data</span>
+          <span class="card-badge" id="market-count">0</span>
+        </div>
+        <div id="market-list-wrap">
+          <div id="market-list">
+            <div class="empty-state">No feeds</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alerts Panel -->
+      <div class="card" id="alerts-card">
+        <div class="card-header">
+          <span class="card-title">Alerts</span>
+          <span class="card-badge" id="alerts-count">0</span>
+        </div>
+        <div id="alerts-list">
+          <div class="empty-state">No alerts</div>
+        </div>
+      </div>
+
+      <!-- System Log -->
+      <div class="card" id="log-card">
+        <div class="card-header">
+          <span class="card-title">System Log</span>
+        </div>
+        <div id="log-list"></div>
+      </div>
+
+    </div><!-- /#right-col -->
+
+  </main><!-- /#main-grid -->
+
+  <!-- ================================================================== -->
+  <!-- FOOTER — future extension placeholders (hidden by default)         -->
+  <!-- ================================================================== -->
+  <footer id="footer-area">
+    <div id="ml-training-section">
+      <div class="card-title" style="margin-bottom:8px;">ML Training</div>
+      <p style="color:var(--text-muted);font-size:12px;">Training module not loaded.</p>
+    </div>
+    <div id="test-harness-section">
+      <div class="card-title" style="margin-bottom:8px;">Test Harness</div>
+      <p style="color:var(--text-muted);font-size:12px;">Test harness not loaded.</p>
+    </div>
+  </footer>
+
+</div><!-- /#app -->
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- App scripts -->
+<script src="/static/js/mascot.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
