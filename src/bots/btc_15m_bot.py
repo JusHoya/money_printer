@@ -55,7 +55,14 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             if btc_15m:
                 k_data_15 = self.kalshi.fetch_latest(btc_15m)
                 if k_data_15:
-                    dashboard.update_price(f"{btc_15m} (15m)", k_data_15.bid)
+                    best_price = k_data_15.bid if k_data_15.bid > 0 else (k_data_15.ask if k_data_15.ask > 0 else k_data_15.price)
+                    dashboard.update_price(
+                        f"{btc_15m} (15m)", best_price,
+                        bid=k_data_15.bid, ask=k_data_15.ask,
+                        no_bid=k_data_15.extra.get('no_bid', 0.0) if k_data_15.extra else 0.0,
+                        no_ask=k_data_15.extra.get('no_ask', 0.0) if k_data_15.extra else 0.0,
+                        volume=k_data_15.volume,
+                    )
                     # Fuse data
                     original_spot = btc_data.price
                     btc_data.bid = k_data_15.bid

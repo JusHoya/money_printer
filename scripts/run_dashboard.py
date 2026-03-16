@@ -52,6 +52,10 @@ class OrchestratorEngine:
         # Track which bots are currently active (all bots active by default)
         self.active_bots = {bot.name for bot in self.bots}
 
+        # Uptime tracking — pauses when all bots are stopped
+        self._uptime_accumulated = 0.0
+        self._uptime_resumed_at = time.time()
+
         # Collect strategy names for dashboard
         all_strategies = []
         for bot in self.bots:
@@ -60,12 +64,22 @@ class OrchestratorEngine:
 
         logger.info(f"[Orchestrator] Active bots: {[b.name for b in self.bots]}")
 
+    @property
+    def uptime_seconds(self) -> float:
+        """Total seconds bots have been active (pauses when all bots stopped)."""
+        if self.active_bots:
+            return self._uptime_accumulated + (time.time() - self._uptime_resumed_at)
+        return self._uptime_accumulated
+
     def start_bot(self, name: str):
         """Activate a bot by name so it participates in the market loop."""
         bot_names = [b.name for b in self.bots]
         if name not in bot_names:
             raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        was_empty = len(self.active_bots) == 0
         self.active_bots.add(name)
+        if was_empty:
+            self._uptime_resumed_at = time.time()
         logger.info(f"[Orchestrator] Bot '{name}' started.")
 
     def stop_bot(self, name: str):
@@ -73,7 +87,10 @@ class OrchestratorEngine:
         bot_names = [b.name for b in self.bots]
         if name not in bot_names:
             raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        was_active = name in self.active_bots
         self.active_bots.discard(name)
+        if was_active and len(self.active_bots) == 0:
+            self._uptime_accumulated += time.time() - self._uptime_resumed_at
         logger.info(f"[Orchestrator] Bot '{name}' stopped.")
 
     def _on_trade_close(self, position: dict):

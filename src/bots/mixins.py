@@ -68,13 +68,17 @@ class TickerResolverMixin:
                 params = {"series_ticker": series_base, "limit": 200}
                 if cursor:
                     params["cursor"] = cursor
-                resp = kalshi.session.get(f"{kalshi.api_url}/markets", params=params)
-                if resp.status_code != 200: break
-                data = resp.json()
-                page_markets = data.get('markets', [])
-                active_markets.extend([m for m in page_markets if m.get('status') == 'active'])
-                cursor = data.get('cursor')
-                if not cursor or not page_markets:
+                result = kalshi.search_markets(**params)
+                if isinstance(result, tuple):
+                    page_markets, cursor = result
+                else:
+                    page_markets, cursor = result, None
+                if not page_markets:
+                    break
+                # Include 'active' and 'initialized' (pre-open) markets;
+                # exclude 'closed', 'finalized', 'settled'
+                active_markets.extend([m for m in page_markets if m.get('status') in ('active', 'initialized')])
+                if not cursor:
                     break
                 if active_markets:
                     break

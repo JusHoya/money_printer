@@ -22,7 +22,14 @@
       "Bash(taskkill //F //IM python.exe 2>/dev/null; true)",
       "Bash(cd C:/Users/hoyer/WorkSpace/Projects/money_printer && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt -x -q 2>&1 | tail -20)",
       "Bash(cd C:/Users/hoyer/WorkSpace/Projects/money_printer && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/test_output_cooldown.txt -x -q 2>&1 | tail -20)",
-      "Bash(start http://localhost:8050)"
+      "Bash(start http://localhost:8050)",
+      "Bash(find /c/Users/hoyer/WorkSpace/Projects/money_printer -path \"*/tests/*\" -type f \\\\\\( -name \"*test*.py\" -o -name \"*test*.js\" \\\\\\) 2>/dev/null | head -20)",
+      "Bash(file /c/Users/hoyer/WorkSpace/Projects/money_printer/assets/*.png)",
+      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/test_web_dashboard.py -v 2>&1 | head -80)",
+      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/test_web_dashboard.py -v 2>&1)",
+      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/test_web_dashboard.py -v --timeout=30 2>&1)",
+      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt -v 2>&1 | tail -30)",
+      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -v 2>&1 | tail -40)"
     ]
   }
 }

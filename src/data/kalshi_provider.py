@@ -4,7 +4,7 @@ import base64
 import time
 import os
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from src.core.interfaces import DataProvider, MarketData
@@ -146,17 +146,78 @@ class KalshiProvider(DataProvider):
             logger.error(f"[KalshiProvider] Failed to fetch balance: {e}")
             return 0.0
 
-    def fetch_latest(self, symbol: str) -> MarketData:
+    @staticmethod
+    def _parse_price(data: dict, dollar_key: str, cent_key: str) -> float:
+        """Extract price from API response, handling both V2 (_dollars string)
+        and V1 (cents integer) field formats.
+
+        V2 API returns e.g. ``yes_bid_dollars: "0.0700"`` (string, already dollars).
+        V1 API returns e.g. ``yes_bid: 7`` (int, cents) alongside the _dollars field.
+        We prefer the _dollars field when present and non-null.
         """
-        Fetches market data for a specific ticker. 
-        Works without auth on the public elections endpoint.
+        # Try V2 _dollars field first (string in dollars)
+        dollars_val = data.get(dollar_key)
+        if dollars_val is not None:
+            try:
+                return float(dollars_val)
+            except (TypeError, ValueError):
+                pass
+        # Fall back to V1 cents field
+        cents_val = data.get(cent_key)
+        if cents_val is not None:
+            try:
+                return float(cents_val) / 100.0
+            except (TypeError, ValueError):
+                pass
+        return 0.0
+
+    def _parse_market_data(self, symbol: str, data: dict, source: str) -> MarketData:
+        """Parse a market JSON object into a MarketData instance.
+
+        Handles both V2 API responses (``*_dollars`` string fields) and
+        V1 API responses (``yes_bid`` etc. as integer cents).
         """
+        yes_bid = self._parse_price(data, 'yes_bid_dollars', 'yes_bid')
+        yes_ask = self._parse_price(data, 'yes_ask_dollars', 'yes_ask')
+        no_bid = self._parse_price(data, 'no_bid_dollars', 'no_bid')
+        no_ask = self._parse_price(data, 'no_ask_dollars', 'no_ask')
+        last_price = self._parse_price(data, 'last_price_dollars', 'last_price')
+
+        # Volume: try float-point field first, then integer
+        volume = 0
+        vol_fp = data.get('volume_fp')
+        if vol_fp is not None:
+            try:
+                volume = int(float(vol_fp))
+            except (TypeError, ValueError):
+                volume = data.get('volume', 0) or 0
+        else:
+            volume = data.get('volume', 0) or 0
+
+        return MarketData(
+            symbol=symbol,
+            timestamp=datetime.now(),
+            price=last_price,
+            volume=volume,
+            bid=yes_bid,
+            ask=yes_ask,
+            extra={
+                "status": data.get('status'),
+                "close_time": data.get('close_time'),
+                "source": source,
+                "no_bid": no_bid,
+                "no_ask": no_ask
+            }
+        )
+
+    def _fetch_market_raw(self, symbol: str, api_url: str) -> Optional[dict]:
+        """Fetch raw market JSON from a given API base URL."""
         path = f"/markets/{symbol}"
-        url = f"{self.api_url}{path}"
-        
+        url = f"{api_url}{path}"
+
         headers = {"Content-Type": "application/json"}
-        
-        if not self.anonymous:
+
+        if not self.anonymous and api_url == self.api_url:
             timestamp = str(int(time.time() * 1000))
             signature = self._sign_request("GET", path, timestamp)
             headers.update({
@@ -164,34 +225,69 @@ class KalshiProvider(DataProvider):
                 "KALSHI-ACCESS-SIGNATURE": signature,
                 "KALSHI-ACCESS-TIMESTAMP": timestamp
             })
-        
+
+        resp = self.session.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get('market', {})
+
+    def _get_authenticated_headers(self, method: str, path: str) -> dict:
+        """Build headers with auth signature for the configured API."""
+        headers = {"Content-Type": "application/json"}
+        if not self.anonymous:
+            timestamp = str(int(time.time() * 1000))
+            signature = self._sign_request(method, path, timestamp)
+            headers.update({
+                "KALSHI-ACCESS-KEY": self.key_id,
+                "KALSHI-ACCESS-SIGNATURE": signature,
+                "KALSHI-ACCESS-TIMESTAMP": timestamp
+            })
+        return headers
+
+    def search_markets(self, **params) -> list:
+        """Search markets with proper authentication. Returns list of market dicts."""
+        path = "/markets"
+        url = f"{self.api_url}{path}"
+        headers = self._get_authenticated_headers("GET", path)
         try:
-            resp = self.session.get(url, headers=headers, timeout=10)
-            resp.raise_for_status()
-            data = resp.json().get('market', {})
-            
-            yes_bid = data.get('yes_bid', 0) / 100.0
-            yes_ask = data.get('yes_ask', 0) / 100.0
-            no_bid = data.get('no_bid', 0) / 100.0
-            no_ask = data.get('no_ask', 0) / 100.0
-            last_price = data.get('last_price', 0) / 100.0
-            
-            return MarketData(
-                symbol=symbol,
-                timestamp=datetime.now(),
-                price=last_price,
-                volume=data.get('volume', 0),
-                bid=yes_bid,
-                ask=yes_ask,
-                extra={
-                    "status": data.get('status'),
-                    "close_time": data.get('close_time'),
-                    "source": "live_kalshi_ghost" if self.anonymous else "live_kalshi",
-                    "no_bid": no_bid,
-                    "no_ask": no_ask
-                }
+            resp = self.session.get(url, headers=headers, params=params, timeout=10)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return data.get('markets', []), data.get('cursor')
+        except Exception as e:
+            logger.error(f"[KalshiProvider] Search Error: {e}")
+            return [], None
+
+    def fetch_latest(self, symbol: str) -> MarketData:
+        """
+        Fetches market data for a specific ticker.
+        Falls back to the public production API if the configured (demo) API
+        returns all-zero prices (empty orderbook).
+        """
+        try:
+            data = self._fetch_market_raw(symbol, self.api_url)
+            result = self._parse_market_data(
+                symbol, data,
+                "live_kalshi_ghost" if self.anonymous else "live_kalshi"
             )
-            
+
+            # If all prices are zero and we're on a non-public API (e.g. demo),
+            # try the public production API for real orderbook prices.
+            if (result.bid == 0 and result.ask == 0 and result.price == 0
+                    and self.api_url != self.PUBLIC_API_URL):
+                try:
+                    pub_data = self._fetch_market_raw(symbol, self.PUBLIC_API_URL)
+                    pub_result = self._parse_market_data(symbol, pub_data, "live_kalshi_public")
+                    if pub_result.bid > 0 or pub_result.ask > 0 or pub_result.price > 0:
+                        # Preserve status/close_time from primary API, overlay prices
+                        pub_result.extra["status"] = result.extra.get("status")
+                        pub_result.extra["close_time"] = result.extra.get("close_time")
+                        return pub_result
+                except Exception:
+                    pass  # Fall through to original result
+
+            return result
+
         except Exception as e:
             logger.error(f"[KalshiProvider] Fetch Error for {symbol}: {e}")
             return None
@@ -256,32 +352,13 @@ class KalshiProvider(DataProvider):
                                 except Exception:
                                     pass
 
-                            # Map V1 JSON to MarketData
+                            # Map V1 JSON to MarketData (V1 has both cents and _dollars fields)
                             symbol = m.get('ticker_name')
-                            # Handle weird V1 keys
-                            bid = float(m.get('yes_bid', 0)) / 100.0
-                            ask = float(m.get('yes_ask', 0)) / 100.0
-                            no_bid = float(m.get('no_bid', 0)) / 100.0
-                            no_ask = float(m.get('no_ask', 0)) / 100.0
-                            last = float(m.get('last_price', 0)) / 100.0
-                            
-                            md = MarketData(
-                                symbol=symbol,
-                                timestamp=datetime.now(),
-                                price=last,
-                                volume=m.get('volume', 0),
-                                bid=bid,
-                                ask=ask,
-                                extra={
-                                    "status": m.get('status'),
-                                    "close_time": m.get('close_date'),
-                                    "source": "v1_discovery",
-                                    "strike_type": m.get('strike_type'),
-                                    "sub_title": m.get('sub_title'),
-                                    "no_bid": no_bid,
-                                    "no_ask": no_ask
-                                }
-                            )
+                            md = self._parse_market_data(symbol, m, "v1_discovery")
+                            # V1 uses close_date instead of close_time
+                            md.extra["close_time"] = m.get('close_date')
+                            md.extra["strike_type"] = m.get('strike_type')
+                            md.extra["sub_title"] = m.get('sub_title')
                             markets.append(md)
             except Exception as e:
                 # logger.debug(f"Probe failed for {event_ticker}: {e}")

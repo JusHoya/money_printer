@@ -66,7 +66,14 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         k_data = self.kalshi.fetch_latest(active_ticker)
                         if k_data:
                             max_t = nws_data.extra.get('max_temp_today_f')
-                            dashboard.update_price(f"{active_ticker} (Market)", k_data.bid, max_temp=max_t)
+                            best_price = k_data.bid if k_data.bid > 0 else (k_data.ask if k_data.ask > 0 else k_data.price)
+                            dashboard.update_price(
+                                f"{active_ticker} (Market)", best_price,
+                                bid=k_data.bid, ask=k_data.ask,
+                                no_bid=k_data.extra.get('no_bid', 0.0) if k_data.extra else 0.0,
+                                no_ask=k_data.extra.get('no_ask', 0.0) if k_data.extra else 0.0,
+                                volume=k_data.volume, max_temp=max_t,
+                            )
 
                             # Fuse data
                             nws_data.bid = k_data.bid

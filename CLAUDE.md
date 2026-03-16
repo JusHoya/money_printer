@@ -63,7 +63,7 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`scripts/run_dashboard.py` — OrchestratorEngine**: The main runtime loop. Wires together bots, risk manager, and dashboard. Uses `--bot` flag to select which bots to run. Runs bot tick loops in a continuous cycle with threading.
 
-**`src/data/kalshi_provider.py`**: Kalshi API client handling RSA-signed auth, market discovery (series/events/tickers), and orderbook fetching. Uses demo API by default.
+**`src/data/kalshi_provider.py`**: Kalshi API client handling RSA-signed auth, market discovery (series/events/tickers), and orderbook fetching. Uses demo API by default. See **Kalshi API** section below for critical field-name details.
 
 **`src/data/coinbase_provider.py`**: Fetches BTC-USD price from Coinbase public API.
 
@@ -79,6 +79,31 @@ Real-time terminal UI showing PnL, market feeds, strategy signals, and position 
 
 ## Environment Setup
 Copy `.env.example` to `.env` and fill in Kalshi demo API credentials and NWS user-agent. The private key file (`kalshi_priv.key` or path in `KALSHI_PRIVATE_KEY_PATH`) must exist for Kalshi API auth.
+
+## Kalshi API — Critical Reference
+
+**API URLs:**
+- Production: `https://api.elections.kalshi.com/trade-api/v2` (the ONLY valid production endpoint; `api.kalshi.co` and `trading-api.kalshi.com` are defunct)
+- Demo: `https://demo-api.kalshi.co/trade-api/v2` (sandbox, empty orderbooks — falls back to production for price reads)
+- V1 (BTC Hourly discovery only): `https://api.elections.kalshi.com/v1`
+
+**Price field names (V2 API — current):**
+The V2 API uses `_dollars` suffix string fields, NOT the old integer-cents fields:
+- `yes_bid_dollars`, `yes_ask_dollars` (string, e.g. `"0.0700"`)
+- `no_bid_dollars`, `no_ask_dollars` (string)
+- `last_price_dollars` (string)
+- `volume_fp` (string float, e.g. `"1234.00"`)
+- Old field names (`yes_bid`, `yes_ask` as integers in cents) are **gone from V2 responses**.
+- V1 API returns BOTH old and new field names.
+- `_parse_price()` in `kalshi_provider.py` handles both formats; always use it.
+
+**Market statuses:**
+- `active` — open for trading (weather markets)
+- `initialized` — created but not yet open (BTC 15m markets before their interval)
+- `finalized`, `settled`, `closed` — expired
+- Discovery must include BOTH `active` and `initialized` to find BTC 15m markets.
+
+**Live API tests:** `tests/test_web_dashboard.py::TestKalshiMarketDataLive` — 10 tests that hit the real API to verify field names, price parsing, and market discovery. Run these if you suspect API changes.
 
 ## Conventions
 - The `agent_space/` directory is a Gemini agent framework — not part of the trading system core.

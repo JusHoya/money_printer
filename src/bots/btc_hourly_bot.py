@@ -55,7 +55,14 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 for ticker in ladder:
                     k_data_ladder = self.kalshi.fetch_latest(ticker)
                     if k_data_ladder:
-                        dashboard.update_price(f"{ticker} (1h)", k_data_ladder.bid)
+                        best_price = k_data_ladder.bid if k_data_ladder.bid > 0 else (k_data_ladder.ask if k_data_ladder.ask > 0 else k_data_ladder.price)
+                        dashboard.update_price(
+                            f"{ticker} (1h)", best_price,
+                            bid=k_data_ladder.bid, ask=k_data_ladder.ask,
+                            no_bid=k_data_ladder.extra.get('no_bid', 0.0) if k_data_ladder.extra else 0.0,
+                            no_ask=k_data_ladder.extra.get('no_ask', 0.0) if k_data_ladder.extra else 0.0,
+                            volume=k_data_ladder.volume,
+                        )
 
                 # Use center ticker for strategy
                 center_ticker = ladder[0]

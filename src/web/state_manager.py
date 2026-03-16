@@ -4,6 +4,7 @@ for the HTML dashboard. Reads directly from risk_manager, exchange, bots, and
 the TUI Dashboard (for alerts/logs/strategy stats), bypassing the TUI render path.
 """
 
+import csv
 import os
 import time
 from collections import deque
@@ -54,9 +55,13 @@ class StateManager:
         equity = portfolio.get("equity", 0.0)
         self._pnl_history.append({"ts": time.time(), "equity": equity})
 
+        # Log portfolio CSV (normally done by TUI render loop)
+        if dashboard and rm:
+            dashboard.log_portfolio(rm)
+
         return {
             "mode": self._mode,
-            "uptime": _fmt_uptime(dashboard.start_time) if dashboard else "00:00:00",
+            "uptime": self._fmt_uptime_seconds(orch.uptime_seconds) if hasattr(orch, 'uptime_seconds') else "00:00:00",
             "portfolio": portfolio,
             "market_data": self._market_data(dashboard),
             "alerts": list(dashboard.alerts) if dashboard else [],
@@ -66,6 +71,7 @@ class StateManager:
             "pnl_history": list(self._pnl_history),
             "bots": self._bots(orch),
             "mascot_state": self._mascot_state(dashboard),
+            "data_log": self._data_log(dashboard),
         }
 
     # ------------------------------------------------------------------
@@ -113,6 +119,8 @@ class StateManager:
                     "price": round(data["price"], 4),
                     "bid": round(extra.get("bid", 0.0), 4),
                     "ask": round(extra.get("ask", 0.0), 4),
+                    "no_bid": round(extra.get("no_bid", 0.0), 4),
+                    "no_ask": round(extra.get("no_ask", 0.0), 4),
                     "volume": round(extra.get("volume", 0.0), 4),
                     "extra": {k: v for k, v in extra.items()},
                 }
@@ -169,6 +177,28 @@ class StateManager:
                 active = True
             result.append({"name": bot.name, "active": active})
         return result
+
+    @staticmethod
+    def _fmt_uptime_seconds(total: float) -> str:
+        total_seconds = int(total)
+        h = total_seconds // 3600
+        m = (total_seconds % 3600) // 60
+        s = total_seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def _data_log(self, dashboard) -> list:
+        if dashboard is None:
+            return []
+        log_path = getattr(dashboard, "data_log_path", None)
+        if not log_path or not os.path.exists(log_path):
+            return []
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            return rows[-20:]
+        except Exception:
+            return []
 
     def _mascot_state(self, dashboard) -> str:
         if dashboard is None:

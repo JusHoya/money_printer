@@ -162,6 +162,9 @@
 
     </div><!-- /#left-col -->
 
+    <!-- Column resize handle -->
+    <div class="grid-resizer" id="grid-resizer"></div>
+
     <!-- ---------------------------------------------------------------- -->
     <!-- RIGHT COLUMN (~40%)                                              -->
     <!-- ---------------------------------------------------------------- -->
@@ -174,6 +177,14 @@
           <span class="card-badge" id="market-count">0</span>
         </div>
         <div id="market-list-wrap">
+          <div class="mkt-header">
+            <span class="mkt-sym">Symbol</span>
+            <span class="mkt-price">Price</span>
+            <span class="mkt-yes-bid">Y.Bid</span>
+            <span class="mkt-yes-ask">Y.Ask</span>
+            <span class="mkt-no-bid">N.Bid</span>
+            <span class="mkt-no-ask">N.Ask</span>
+          </div>
           <div id="market-list">
             <div class="empty-state">No feeds</div>
           </div>
@@ -197,6 +208,15 @@
           <span class="card-title">System Log</span>
         </div>
         <div id="log-list"></div>
+      </div>
+
+      <!-- Data Log -->
+      <div class="card" id="datalog-card">
+        <div class="card-header">
+          <span class="card-title">Data Log</span>
+          <span class="card-badge" id="datalog-count">0</span>
+        </div>
+        <div id="datalog-list"></div>
       </div>
 
     </div><!-- /#right-col -->

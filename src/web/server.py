@@ -89,6 +89,40 @@ def create_app(state_manager, orchestrator) -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get("/api/logs/data")
+    async def get_data_log():
+        dashboard = getattr(orchestrator, "dashboard", None)
+        if not dashboard or not hasattr(dashboard, "data_log_path"):
+            return JSONResponse(content=[])
+        try:
+            path = Path(dashboard.data_log_path)
+            if not path.exists():
+                return JSONResponse(content=[])
+            import csv
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            return JSONResponse(content=rows[-100:])
+        except Exception as e:
+            log.error(f"[api] data log error: {e}")
+            return JSONResponse(content=[])
+
+    @app.get("/api/logs/session")
+    async def get_session_log():
+        dashboard = getattr(orchestrator, "dashboard", None)
+        if not dashboard or not hasattr(dashboard, "session_log_path"):
+            return JSONResponse(content=[])
+        try:
+            path = Path(dashboard.session_log_path)
+            if not path.exists():
+                return JSONResponse(content=[])
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            return JSONResponse(content=[l.rstrip("\n") for l in lines[-50:]])
+        except Exception as e:
+            log.error(f"[api] session log error: {e}")
+            return JSONResponse(content=[])
+
     @app.post("/api/bots/{name}/stop")
     async def stop_bot(name: str):
         if not hasattr(orchestrator, "stop_bot"):

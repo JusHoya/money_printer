@@ -332,7 +332,20 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-mono);
   border: 1px solid;
   transition: all 0.2s;
-  cursor: default;
+  cursor: pointer;
+  user-select: none;
+}
+.bot-chip:hover {
+  filter: brightness(1.3);
+}
+.bot-chip.pending {
+  opacity: 0.5;
+  animation: chip-pulse 1s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes chip-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 0.8; }
 }
 .bot-chip.active {
   background: var(--green-dim);
@@ -408,7 +421,7 @@ a:hover { text-decoration: underline; }
    ========================================================================= */
 #main-grid {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: var(--left-col-width, 60%) 6px var(--right-col-width, 1fr);
   grid-template-rows: auto auto auto;
   gap: 12px;
   padding: 12px;
@@ -423,8 +436,22 @@ a:hover { text-decoration: underline; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow: auto;
   box-shadow: var(--shadow);
+  resize: vertical;
+  min-height: 120px;
+  max-height: 80vh;
+}
+
+.grid-resizer {
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.2s;
+  width: 6px;
+  border-radius: 3px;
+}
+.grid-resizer:hover, .grid-resizer.dragging {
+  background: var(--accent);
 }
 
 .card-header {
@@ -597,9 +624,27 @@ td.neu { color: var(--text); }
   overflow-y: auto;
 }
 
+.mkt-header,
+.mkt-row-contract {
+  display: grid;
+  grid-template-columns: 1fr 50px 42px 42px 42px 42px;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.mkt-header {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
 .mkt-row {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   align-items: center;
   padding: 6px 14px;
@@ -608,8 +653,12 @@ td.neu { color: var(--text); }
   font-size: 11px;
   transition: background 0.15s;
 }
-.mkt-row:last-child { border-bottom: none; }
-.mkt-row:hover { background: var(--surface-2); }
+.mkt-row-contract {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.mkt-row:last-child, .mkt-row-contract:last-child { border-bottom: none; }
+.mkt-row:hover, .mkt-row-contract:hover { background: var(--surface-2); }
 
 .mkt-sym {
   color: var(--accent);
@@ -618,9 +667,11 @@ td.neu { color: var(--text); }
   white-space: nowrap;
   font-size: 11px;
 }
-.mkt-price { color: var(--text); font-weight: 700; text-align: right; }
-.mkt-bid   { color: var(--green); font-size: 10px; text-align: right; }
-.mkt-ask   { color: var(--red);   font-size: 10px; text-align: right; }
+.mkt-price    { color: var(--text); font-weight: 700; text-align: right; }
+.mkt-yes-bid  { color: var(--green); font-size: 10px; text-align: right; }
+.mkt-yes-ask  { color: var(--red);   font-size: 10px; text-align: right; }
+.mkt-no-bid   { color: var(--green); font-size: 10px; text-align: right; }
+.mkt-no-ask   { color: var(--red);   font-size: 10px; text-align: right; }
 
 /* Alerts panel */
 #alerts-card .card-body { padding: 0; }
@@ -670,6 +721,37 @@ td.neu { color: var(--text); }
 }
 .log-line:hover { color: var(--text); }
 .log-line.log-alert { color: var(--red); }
+
+/* Data Log panel */
+#datalog-card .card-body { padding: 0; }
+
+#datalog-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.datalog-row {
+  display: grid;
+  grid-template-columns: 70px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 14px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  transition: background 0.15s;
+}
+.datalog-row:last-child { border-bottom: none; }
+.datalog-row:hover { background: var(--surface-2); }
+
+.datalog-ts    { color: var(--text-dim); }
+.datalog-sym   { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.datalog-price { color: var(--text); font-weight: 600; text-align: right; }
+.datalog-type  { color: var(--text-muted); font-size: 9px; text-align: right; }
 
 /* =========================================================================
    FOOTER / PLACEHOLDER SECTIONS
@@ -722,9 +804,11 @@ td.neu { color: var(--text); }
    ========================================================================= */
 @media (max-width: 900px) {
   #main-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
     grid-template-rows: auto;
   }
+
+  .grid-resizer { display: none; }
 
   #right-col { order: -1; }
 

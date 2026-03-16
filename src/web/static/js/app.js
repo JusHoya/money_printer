@@ -298,15 +298,26 @@ function updateMarketData(items) {
   }
 
   el.innerHTML = items.map(m => {
-    const bid = Number(m.bid || 0);
-    const ask = Number(m.ask || 0);
-    const bidStr = bid > 0 ? bid.toFixed(2) : '';
-    const askStr = ask > 0 ? ask.toFixed(2) : '';
+    const yesBid = Number(m.bid || 0);
+    const yesAsk = Number(m.ask || 0);
+    const noBid  = Number(m.no_bid || 0);
+    const noAsk  = Number(m.no_ask || 0);
+    const hasContract = yesBid > 0 || yesAsk > 0 || noBid > 0 || noAsk > 0;
+    const priceStr = Number(m.price).toFixed(2);
+    const fmtP = v => v > 0 ? v.toFixed(2) : '-';
+    if (hasContract) {
+      return `<div class="mkt-row mkt-row-contract">` +
+        `<span class="mkt-sym" title="${escHtml(m.symbol)}">${escHtml(m.symbol)}</span>` +
+        `<span class="mkt-price">${priceStr}</span>` +
+        `<span class="mkt-yes-bid">${fmtP(yesBid)}</span>` +
+        `<span class="mkt-yes-ask">${fmtP(yesAsk)}</span>` +
+        `<span class="mkt-no-bid">${fmtP(noBid)}</span>` +
+        `<span class="mkt-no-ask">${fmtP(noAsk)}</span>` +
+        `</div>`;
+    }
     return `<div class="mkt-row">` +
       `<span class="mkt-sym" title="${escHtml(m.symbol)}">${escHtml(m.symbol)}</span>` +
-      `<span class="mkt-price">${Number(m.price).toFixed(2)}</span>` +
-      `<span class="mkt-bid">${bidStr}</span>` +
-      `<span class="mkt-ask">${askStr}</span>` +
+      `<span class="mkt-price" style="grid-column:2/-1">${priceStr}</span>` +
       `</div>`;
   }).join('');
 }
@@ -429,26 +440,44 @@ function updatePositions(positions) {
  * CSS: .bot-chip.active / .bot-chip.inactive, .chip-dot
  */
 function updateBots(bots) {
+  _syncSelectedBotsWithActive(bots);
   _updateBotChips(bots);
   _rebuildBotDropdownIfChanged(bots);
 }
 
-let _knownBotsJson = '';
+let _knownBotNames = '';
+let _pendingBots = {};
 
 function _updateBotChips(bots) {
   const el = $('bot-chips');
   if (!el) return;
   if (!bots || bots.length === 0) { el.innerHTML = ''; return; }
+
+  // Clear pending state for bots whose status has changed
+  bots.forEach(b => { delete _pendingBots[b.name]; });
+
   el.innerHTML = bots.map(b => {
     const cls = b.active ? 'active' : 'inactive';
-    return `<span class="bot-chip ${cls}"><span class="chip-dot"></span>${escHtml(b.name)}</span>`;
+    const pending = _pendingBots[b.name] ? ' pending' : '';
+    return `<span class="bot-chip ${cls}${pending}" data-bot-chip="${escHtml(b.name)}"><span class="chip-dot"></span>${escHtml(b.name)}</span>`;
   }).join('');
 }
 
+function _syncSelectedBotsWithActive(bots) {
+  if (!bots) return;
+  bots.forEach(b => { _selectedBots[b.name] = b.active; });
+  _updateDropdownLabel();
+}
+
 function _rebuildBotDropdownIfChanged(bots) {
-  const botsJson = JSON.stringify(bots || []);
-  if (botsJson === _knownBotsJson) return;
-  _knownBotsJson = botsJson;
+  // Only rebuild when bot *names* change, not active status
+  const names = (bots || []).map(b => b.name).sort().join(',');
+  if (names === _knownBotNames) {
+    // Names unchanged — just update checkbox state without rebuilding DOM
+    _syncCheckboxStates(bots);
+    return;
+  }
+  _knownBotNames = names;
 
   const menu = $('bot-dropdown-menu');
   if (!menu) return;
@@ -464,6 +493,15 @@ function _rebuildBotDropdownIfChanged(bots) {
   }).join('');
 
   _updateDropdownLabel();
+}
+
+function _syncCheckboxStates(bots) {
+  const menu = $('bot-dropdown-menu');
+  if (!menu || !bots) return;
+  const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
+  checkboxes.forEach(cb => {
+    cb.checked = !!_selectedBots[cb.value];
+  });
 }
 
 /**
@@ -549,6 +587,18 @@ async function botAction(name, action) {
   }
 }
 
+// Delegate click events for bot chips — click to toggle start/stop
+document.addEventListener('click', e => {
+  const chip = e.target.closest('[data-bot-chip]');
+  if (!chip) return;
+  const name = chip.dataset.botChip;
+  const isActive = chip.classList.contains('active');
+  const action = isActive ? 'stop' : 'start';
+  _pendingBots[name] = true;
+  chip.classList.add('pending');
+  botAction(name, action);
+});
+
 // Delegate click events for inline start/stop buttons (future bots panel extension)
 document.addEventListener('click', e => {
   const btn = e.target.closest('[data-action]');
@@ -619,6 +669,40 @@ function _dispatchSnapshot(snap) {
 }
 
 /* ========================================================================== */
+/* Data Log updater                                                              */
+/* ========================================================================== */
+
+/**
+ * Update data log panel.
+ * HTML: <div id="datalog-list">
+ * CSS: .datalog-row, .datalog-ts, .datalog-sym, .datalog-price, .datalog-type
+ */
+function updateDataLog(entries) {
+  const el    = $('datalog-list');
+  const count = $('datalog-count');
+  if (count) count.textContent = (entries || []).length;
+  if (!el) return;
+
+  if (!entries || entries.length === 0) {
+    el.innerHTML = '<div class="empty-state">No data log entries</div>';
+    return;
+  }
+
+  el.innerHTML = entries.map(e => {
+    const ts = (e.Timestamp || '').split('T')[1] || e.Timestamp || '';
+    const tsShort = ts.length > 8 ? ts.substring(0, 8) : ts;
+    return `<div class="datalog-row">` +
+      `<span class="datalog-ts">${escHtml(tsShort)}</span>` +
+      `<span class="datalog-sym">${escHtml(e.Symbol || '')}</span>` +
+      `<span class="datalog-price">${escHtml(e.Price || '')}</span>` +
+      `<span class="datalog-type">${escHtml(e.Type || '')}</span>` +
+      `</div>`;
+  }).join('');
+
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ========================================================================== */
 /* Register built-in section updaters                                           */
 /* ========================================================================== */
 
@@ -636,6 +720,52 @@ registerSection('positions',      updatePositions);
 registerSection('bots',           updateBots);
 registerSection('mascot_state',   updateMascotState);
 registerSection('pnl_history',    updatePnLChart);
+registerSection('data_log',       updateDataLog);
+
+/* ========================================================================== */
+/* Grid column resizer                                                         */
+/* ========================================================================== */
+
+function initGridResizer() {
+  const resizer = document.getElementById('grid-resizer');
+  const grid = document.getElementById('main-grid');
+  if (!resizer || !grid) return;
+
+  // Restore saved width
+  const saved = localStorage.getItem('mp-grid-left');
+  if (saved) {
+    grid.style.setProperty('--left-col-width', saved);
+    const pct = parseFloat(saved);
+    if (!isNaN(pct)) grid.style.setProperty('--right-col-width', (100 - pct - 1) + '%');
+  }
+
+  let startX, startLeftWidth;
+
+  resizer.addEventListener('mousedown', (e) => {
+    startX = e.clientX;
+    startLeftWidth = document.getElementById('left-col').getBoundingClientRect().width;
+    resizer.classList.add('dragging');
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    e.preventDefault();
+  });
+
+  function onMouseMove(e) {
+    const gridWidth = grid.getBoundingClientRect().width;
+    const newLeftWidth = startLeftWidth + (e.clientX - startX);
+    const pct = Math.max(30, Math.min(80, (newLeftWidth / gridWidth) * 100));
+    grid.style.setProperty('--left-col-width', pct + '%');
+    grid.style.setProperty('--right-col-width', (100 - pct - 1) + '%');
+  }
+
+  function onMouseUp() {
+    resizer.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    const leftW = grid.style.getPropertyValue('--left-col-width');
+    if (leftW) localStorage.setItem('mp-grid-left', leftW);
+  }
+}
 
 /* ========================================================================== */
 /* Boot                                                                          */
@@ -644,6 +774,7 @@ registerSection('pnl_history',    updatePnLChart);
 document.addEventListener('DOMContentLoaded', () => {
   showDisconnectedOverlay();
   initChart();
+  initGridResizer();
   _wsConnect();
 });
 
