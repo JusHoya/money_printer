@@ -213,7 +213,7 @@ class TickerResolverMixin:
             targets = [center_strike - 250, center_strike + 250]
 
             for t in targets:
-                match = next((m for s, m in valid_markets if abs(s - t) < 5.0), None)
+                match = next((m for s, m in valid_markets if abs(s - t) < 150.0), None)
                 if match:
                     ladder_tickers.append(match.symbol)
 
