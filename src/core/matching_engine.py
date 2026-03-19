@@ -447,8 +447,14 @@ class SimulatedExchange:
             ):
                 continue
 
+            # Grace period: skip profit targets and stops for the first 30s
+            # after opening. Prevents tanh estimation from instantly gaming
+            # the entry price on the same tick.
+            age_seconds = (datetime.now() - pos["open_time"]).total_seconds()
+            age = age_seconds / 60
+            in_grace_period = age_seconds < 30
+
             # Check Time Limit (Legacy fallback)
-            age = (datetime.now() - pos["open_time"]).total_seconds() / 60
             if age >= self.TIME_LIMIT_MIN:
                 # Use estimated option price, NOT raw spot price
                 self._close_position(
@@ -540,11 +546,14 @@ class SimulatedExchange:
                         continue
 
                 # --- PROFIT TARGET LADDER (Partial Exits) ---
-                if self._check_profit_targets(pos, display_price):
+                # Skip during grace period to prevent instant tanh gaming
+                if not in_grace_period and self._check_profit_targets(
+                    pos, display_price
+                ):
                     continue
 
                 # --- STOP LOSS / TRAILING LOGIC (Price Based) ---
-                if pos["stop_loss"] > 0:
+                if pos["stop_loss"] > 0 and not in_grace_period:
                     # 1. Check Trailing Trigger
                     if pos.get("trailing_rules") and not pos["trailing_activated"]:
                         trig = pos["trailing_rules"].get("trigger", 999)
@@ -583,7 +592,9 @@ class SimulatedExchange:
                         )
                         continue
 
-                # Fallback: PCT Based Stops
+                # Fallback: PCT Based Stops (also skip during grace period)
+                if in_grace_period:
+                    continue
                 pnl_pct = (
                     pos["pnl"] / (pos["entry_price"] * pos["quantity"])
                     if pos["entry_price"] > 0
