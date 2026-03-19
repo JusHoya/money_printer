@@ -1,37 +1,43 @@
 import requests
-import json
 import base64
 import time
 import os
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from src.core.interfaces import DataProvider, MarketData
 from src.utils.logger import logger
 
+
 class KalshiProvider(DataProvider):
     """
-    Data Provider for Kalshi. 
+    Data Provider for Kalshi.
     Supports Authenticated (Private) and Anonymous (Public Read-Only) modes.
     """
-    
+
     PUBLIC_API_URL = "https://api.elections.kalshi.com/trade-api/v2"
     V1_API_URL = "https://api.elections.kalshi.com/v1"
-    
-    def __init__(self, key_id: str = None, private_key_path: str = None, api_url: str = None, read_only: bool = False):
+
+    def __init__(
+        self,
+        key_id: str = None,
+        private_key_path: str = None,
+        api_url: str = None,
+        read_only: bool = False,
+    ):
         self.key_id = key_id
-        self.api_url = (api_url or self.PUBLIC_API_URL).rstrip('/')
+        self.api_url = (api_url or self.PUBLIC_API_URL).rstrip("/")
         self.anonymous = not (key_id and private_key_path)
         self.read_only = read_only
-        
+
         if not self.anonymous:
             self.private_key = self._load_private_key(private_key_path)
         else:
             self.private_key = None
-            
+
         self.session = requests.Session()
-        
+
     def _load_private_key(self, path_or_content: str):
         try:
             # Check if it's a file path
@@ -40,15 +46,16 @@ class KalshiProvider(DataProvider):
                     key_data = key_file.read()
             else:
                 # Treat as raw key content (PEM)
-                key_data = path_or_content.encode('utf-8')
+                key_data = path_or_content.encode("utf-8")
                 # Add PEM headers if missing
                 if b"BEGIN PRIVATE KEY" not in key_data:
-                    key_data = b"-----BEGIN RSA PRIVATE KEY-----\n" + key_data + b"\n-----END RSA PRIVATE KEY-----"
-            
-            return serialization.load_pem_private_key(
-                key_data,
-                password=None
-            )
+                    key_data = (
+                        b"-----BEGIN RSA PRIVATE KEY-----\n"
+                        + key_data
+                        + b"\n-----END RSA PRIVATE KEY-----"
+                    )
+
+            return serialization.load_pem_private_key(key_data, password=None)
         except Exception as e:
             logger.error(f"[KalshiProvider] Error loading private key: {e}")
             raise e
@@ -57,22 +64,21 @@ class KalshiProvider(DataProvider):
         """Generates the RSA signature for the request."""
         if self.anonymous:
             return ""
-            
+
         full_path = path
         if not path.startswith("/trade-api/v2"):
-             full_path = "/trade-api/v2" + path
-             
+            full_path = "/trade-api/v2" + path
+
         payload = f"{timestamp}{method}{full_path}"
-        
+
         signature = self.private_key.sign(
-            payload.encode('utf-8'),
+            payload.encode("utf-8"),
             padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
+                mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH
             ),
-            hashes.SHA256()
+            hashes.SHA256(),
         )
-        return base64.b64encode(signature).decode('utf-8')
+        return base64.b64encode(signature).decode("utf-8")
 
     def place_order(self, symbol: str, side: str, quantity: int, price: float):
         """
@@ -80,8 +86,10 @@ class KalshiProvider(DataProvider):
         SAFETY: If read_only is True, this explicitly BLOCKS the request.
         """
         if self.read_only:
-            raise RuntimeError(f"Trade blocked: Provider is in READ-ONLY mode. (Attempted: {side} {quantity} {symbol})")
-            
+            raise RuntimeError(
+                f"Trade blocked: Provider is in READ-ONLY mode. (Attempted: {side} {quantity} {symbol})"
+            )
+
         logger.warning("Order placement not implemented for live trading yet.")
         return False
 
@@ -94,23 +102,27 @@ class KalshiProvider(DataProvider):
         try:
             url = f"{self.api_url}/exchange/status"
             headers = {"Content-Type": "application/json"}
-            
+
             if not self.anonymous:
                 path = "/exchange/status"
                 timestamp = str(int(time.time() * 1000))
                 signature = self._sign_request("GET", path, timestamp)
-                headers.update({
-                    "KALSHI-ACCESS-KEY": self.key_id,
-                    "KALSHI-ACCESS-SIGNATURE": signature,
-                    "KALSHI-ACCESS-TIMESTAMP": timestamp
-                })
-                
+                headers.update(
+                    {
+                        "KALSHI-ACCESS-KEY": self.key_id,
+                        "KALSHI-ACCESS-SIGNATURE": signature,
+                        "KALSHI-ACCESS-TIMESTAMP": timestamp,
+                    }
+                )
+
             resp = self.session.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
-                 logger.info(f"[KalshiProvider] Exchange is Online. (Live Prod/Public)")
-                 return True
+                logger.info("[KalshiProvider] Exchange is Online. (Live Prod/Public)")
+                return True
             else:
-                logger.error(f"[KalshiProvider] Exchange Status Error: {resp.status_code}")
+                logger.error(
+                    f"[KalshiProvider] Exchange Status Error: {resp.status_code}"
+                )
                 return False
         except Exception as e:
             logger.error(f"[KalshiProvider] Connection Error: {e}")
@@ -122,25 +134,25 @@ class KalshiProvider(DataProvider):
         """
         if self.anonymous:
             return 0.0
-            
+
         path = "/portfolio/balance"
         url = f"{self.api_url}{path}"
-        
+
         timestamp = str(int(time.time() * 1000))
         signature = self._sign_request("GET", path, timestamp)
-        
+
         headers = {
             "KALSHI-ACCESS-KEY": self.key_id,
             "KALSHI-ACCESS-SIGNATURE": signature,
             "KALSHI-ACCESS-TIMESTAMP": timestamp,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         try:
             resp = self.session.get(url, headers=headers, timeout=10)
             resp.raise_for_status()
             data = resp.json()
-            balance_cents = data.get('balance', 0)
+            balance_cents = data.get("balance", 0)
             return balance_cents / 100.0
         except Exception as e:
             logger.error(f"[KalshiProvider] Failed to fetch balance: {e}")
@@ -177,22 +189,31 @@ class KalshiProvider(DataProvider):
         Handles both V2 API responses (``*_dollars`` string fields) and
         V1 API responses (``yes_bid`` etc. as integer cents).
         """
-        yes_bid = self._parse_price(data, 'yes_bid_dollars', 'yes_bid')
-        yes_ask = self._parse_price(data, 'yes_ask_dollars', 'yes_ask')
-        no_bid = self._parse_price(data, 'no_bid_dollars', 'no_bid')
-        no_ask = self._parse_price(data, 'no_ask_dollars', 'no_ask')
-        last_price = self._parse_price(data, 'last_price_dollars', 'last_price')
+        yes_bid = self._parse_price(data, "yes_bid_dollars", "yes_bid")
+        yes_ask = self._parse_price(data, "yes_ask_dollars", "yes_ask")
+        no_bid = self._parse_price(data, "no_bid_dollars", "no_bid")
+        no_ask = self._parse_price(data, "no_ask_dollars", "no_ask")
+        last_price = self._parse_price(data, "last_price_dollars", "last_price")
 
         # Volume: try float-point field first, then integer
         volume = 0
-        vol_fp = data.get('volume_fp')
+        vol_fp = data.get("volume_fp")
         if vol_fp is not None:
             try:
                 volume = int(float(vol_fp))
             except (TypeError, ValueError):
-                volume = data.get('volume', 0) or 0
+                volume = data.get("volume", 0) or 0
         else:
-            volume = data.get('volume', 0) or 0
+            volume = data.get("volume", 0) or 0
+
+        # Extract strike from floor_strike (BTC) or ticker parsing (weather)
+        strike = None
+        floor_strike = data.get("floor_strike")
+        if floor_strike is not None:
+            try:
+                strike = float(floor_strike)
+            except (TypeError, ValueError):
+                pass
 
         return MarketData(
             symbol=symbol,
@@ -202,12 +223,14 @@ class KalshiProvider(DataProvider):
             bid=yes_bid,
             ask=yes_ask,
             extra={
-                "status": data.get('status'),
-                "close_time": data.get('close_time'),
+                "status": data.get("status"),
+                "close_time": data.get("close_time"),
                 "source": source,
                 "no_bid": no_bid,
-                "no_ask": no_ask
-            }
+                "no_ask": no_ask,
+                "strike": strike,
+                "strike_type": data.get("strike_type"),
+            },
         )
 
     def _fetch_market_raw(self, symbol: str, api_url: str) -> Optional[dict]:
@@ -220,15 +243,17 @@ class KalshiProvider(DataProvider):
         if not self.anonymous and api_url == self.api_url:
             timestamp = str(int(time.time() * 1000))
             signature = self._sign_request("GET", path, timestamp)
-            headers.update({
-                "KALSHI-ACCESS-KEY": self.key_id,
-                "KALSHI-ACCESS-SIGNATURE": signature,
-                "KALSHI-ACCESS-TIMESTAMP": timestamp
-            })
+            headers.update(
+                {
+                    "KALSHI-ACCESS-KEY": self.key_id,
+                    "KALSHI-ACCESS-SIGNATURE": signature,
+                    "KALSHI-ACCESS-TIMESTAMP": timestamp,
+                }
+            )
 
         resp = self.session.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
-        return resp.json().get('market', {})
+        return resp.json().get("market", {})
 
     def _get_authenticated_headers(self, method: str, path: str) -> dict:
         """Build headers with auth signature for the configured API."""
@@ -236,11 +261,13 @@ class KalshiProvider(DataProvider):
         if not self.anonymous:
             timestamp = str(int(time.time() * 1000))
             signature = self._sign_request(method, path, timestamp)
-            headers.update({
-                "KALSHI-ACCESS-KEY": self.key_id,
-                "KALSHI-ACCESS-SIGNATURE": signature,
-                "KALSHI-ACCESS-TIMESTAMP": timestamp
-            })
+            headers.update(
+                {
+                    "KALSHI-ACCESS-KEY": self.key_id,
+                    "KALSHI-ACCESS-SIGNATURE": signature,
+                    "KALSHI-ACCESS-TIMESTAMP": timestamp,
+                }
+            )
         return headers
 
     def search_markets(self, **params) -> list:
@@ -253,7 +280,7 @@ class KalshiProvider(DataProvider):
             if resp.status_code != 200:
                 return []
             data = resp.json()
-            return data.get('markets', []), data.get('cursor')
+            return data.get("markets", []), data.get("cursor")
         except Exception as e:
             logger.error(f"[KalshiProvider] Search Error: {e}")
             return [], None
@@ -267,17 +294,22 @@ class KalshiProvider(DataProvider):
         try:
             data = self._fetch_market_raw(symbol, self.api_url)
             result = self._parse_market_data(
-                symbol, data,
-                "live_kalshi_ghost" if self.anonymous else "live_kalshi"
+                symbol, data, "live_kalshi_ghost" if self.anonymous else "live_kalshi"
             )
 
             # If all prices are zero and we're on a non-public API (e.g. demo),
             # try the public production API for real orderbook prices.
-            if (result.bid == 0 and result.ask == 0 and result.price == 0
-                    and self.api_url != self.PUBLIC_API_URL):
+            if (
+                result.bid == 0
+                and result.ask == 0
+                and result.price == 0
+                and self.api_url != self.PUBLIC_API_URL
+            ):
                 try:
                     pub_data = self._fetch_market_raw(symbol, self.PUBLIC_API_URL)
-                    pub_result = self._parse_market_data(symbol, pub_data, "live_kalshi_public")
+                    pub_result = self._parse_market_data(
+                        symbol, pub_data, "live_kalshi_public"
+                    )
                     if pub_result.bid > 0 or pub_result.ask > 0 or pub_result.price > 0:
                         # Preserve status/close_time from primary API, overlay prices
                         pub_result.extra["status"] = result.extra.get("status")
@@ -299,7 +331,7 @@ class KalshiProvider(DataProvider):
         """
         markets = []
         now = datetime.now()
-        
+
         # Candidate hours: Current hour + next 12 hours
         candidates = []
         for i in range(12):
@@ -313,38 +345,42 @@ class KalshiProvider(DataProvider):
             dd = t.strftime("%d")
             # Hour: 17 (24-hour)
             hh = t.strftime("%H")
-            
+
             ticker = f"KXBTCD-{yy}{mmm}{dd}{hh}"
             candidates.append(ticker)
-            
-        logger.info(f"[KalshiProvider] Probing {len(candidates)} candidate BTC hourly events...")
-        
+
+        logger.info(
+            f"[KalshiProvider] Probing {len(candidates)} candidate BTC hourly events..."
+        )
+
         for event_ticker in candidates:
             try:
                 # Probe V1
                 url = f"{self.V1_API_URL}/series/KXBTCD/events/{event_ticker}"
-                resp = self.session.get(url, timeout=2) # Fast timeout
-                
+                resp = self.session.get(url, timeout=2)  # Fast timeout
+
                 if resp.status_code == 200:
                     data = resp.json()
-                    event = data.get('event', {})
-                    raw_markets = event.get('markets', [])
-                    
+                    event = data.get("event", {})
+                    raw_markets = event.get("markets", [])
+
                     if raw_markets:
                         # logger.info(f"[KalshiProvider] FOUND {event_ticker}: {len(raw_markets)} markets")
-                        
+
                         for m in raw_markets:
                             # Check Expiration (Filter out past markets)
-                            close_str = m.get('close_date')
+                            close_str = m.get("close_date")
                             if close_str:
                                 try:
                                     # Handle ISO with Z
                                     # 2026-02-17T05:00:00Z
                                     # We use naive now() for simplicity if system is local, but API is UTC.
                                     # Better to convert everything to UTC aware.
-                                    close_dt = datetime.fromisoformat(close_str.replace('Z', '+00:00'))
+                                    close_dt = datetime.fromisoformat(
+                                        close_str.replace("Z", "+00:00")
+                                    )
                                     now_utc = datetime.now().astimezone()
-                                    
+
                                     # Buffer: If closed within last 1 minute, consider closed.
                                     if close_dt <= now_utc:
                                         # logger.debug(f"Skipping expired market: {m.get('ticker_name')} (Closed {close_str})")
@@ -353,15 +389,15 @@ class KalshiProvider(DataProvider):
                                     pass
 
                             # Map V1 JSON to MarketData (V1 has both cents and _dollars fields)
-                            symbol = m.get('ticker_name')
+                            symbol = m.get("ticker_name")
                             md = self._parse_market_data(symbol, m, "v1_discovery")
                             # V1 uses close_date instead of close_time
-                            md.extra["close_time"] = m.get('close_date')
-                            md.extra["strike_type"] = m.get('strike_type')
-                            md.extra["sub_title"] = m.get('sub_title')
+                            md.extra["close_time"] = m.get("close_date")
+                            md.extra["strike_type"] = m.get("strike_type")
+                            md.extra["sub_title"] = m.get("sub_title")
                             markets.append(md)
-            except Exception as e:
+            except Exception:
                 # logger.debug(f"Probe failed for {event_ticker}: {e}")
                 pass
-                
+
         return markets

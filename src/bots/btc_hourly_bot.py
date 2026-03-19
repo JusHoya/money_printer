@@ -101,6 +101,7 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     btc_data_hr.extra["close_time"] = k_data_center.extra.get(
                         "close_time"
                     )
+                    btc_data_hr.extra["strike"] = k_data_center.extra.get("strike")
                     btc_data_hr.extra["spot_price"] = btc_data.price
 
                     # Waterfall: ML Hourly → V3 Hourly fallback

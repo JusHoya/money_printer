@@ -87,7 +87,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         else 0.0,
                         volume=k_data_15.volume,
                     )
-                    # Fuse data
+                    # Fuse data: Coinbase spot + Kalshi contract prices
                     original_spot = btc_data.price
                     btc_data.bid = k_data_15.bid
                     btc_data.ask = k_data_15.ask
@@ -95,6 +95,12 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     if btc_data.extra is None:
                         btc_data.extra = {}
                     btc_data.extra["spot_price"] = original_spot
+                    # Pass through Kalshi metadata for strategies
+                    if k_data_15.extra:
+                        btc_data.extra["strike"] = k_data_15.extra.get("strike")
+                        btc_data.extra["close_time"] = k_data_15.extra.get("close_time")
+                        btc_data.extra["no_bid"] = k_data_15.extra.get("no_bid", 0)
+                        btc_data.extra["no_ask"] = k_data_15.extra.get("no_ask", 0)
                     risk_manager.update_market_data(btc_15m, btc_data.price)
                     btc_15m_resolved = True
             else:
