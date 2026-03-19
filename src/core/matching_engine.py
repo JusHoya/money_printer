@@ -303,6 +303,7 @@ class SimulatedExchange:
         contract_side: str = "YES",
         disable_profit_targets: bool = False,
         is_maker: bool = True,
+        strike: float = None,
     ):
         """Records a new position with fee deduction and audit trail.
 
@@ -350,6 +351,7 @@ class SimulatedExchange:
             "strategy_name": strategy_name or "Unknown",
             "last_market_price": entry_price,
             "contract_side": contract_side,
+            "strike": strike,
             "profit_targets": []
             if disable_profit_targets
             else [
@@ -481,7 +483,22 @@ class SimulatedExchange:
                         parts = pos["symbol"].split("-")
                         strike_str = parts[-1]
                         is_above = not strike_str.startswith("B")
-                        strike = float(re.sub(r"[A-Za-z]", "", strike_str))
+                        parsed_strike = float(re.sub(r"[A-Za-z]", "", strike_str))
+
+                        # Use cached strike if available — ticker suffix can be
+                        # a market index (e.g., "-45"), not the real BTC strike
+                        cached_strike = pos.get("strike")
+                        if cached_strike and cached_strike > 1000:
+                            strike = cached_strike
+                        elif (
+                            "KXBTC" in pos["symbol"] or "kxbtcd" in pos["symbol"]
+                        ) and parsed_strike < 1000:
+                            # Parsed value is a market index, not a strike.
+                            # Use entry_price as neutral valuation until real
+                            # market price is cached.
+                            strike = current_spot_price
+                        else:
+                            strike = parsed_strike
 
                         if is_above:
                             diff = current_spot_price - strike

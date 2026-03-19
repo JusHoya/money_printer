@@ -368,6 +368,9 @@ class SignalProcessorMixin:
                 ex = getattr(sig, "expiration_time", None)
                 cs = getattr(sig, "contract_side", "YES")
                 dpt = getattr(sig, "disable_profit_targets", False)
+                # Extract real strike for position tracking (avoids
+                # tanh mispricing from ticker index suffixes)
+                strike_val = getattr(sig, "strike", None)
                 risk_manager.record_execution(
                     est_cost,
                     sig.symbol,
@@ -380,6 +383,7 @@ class SignalProcessorMixin:
                     strategy_name=strategy_name,
                     contract_side=cs,
                     disable_profit_targets=dpt,
+                    strike=strike_val,
                 )
                 traded = True
             else:

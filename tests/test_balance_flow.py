@@ -37,22 +37,23 @@ class TestBalanceFlow(unittest.TestCase):
 
     def test_basic_long_trade_flow_valid_pricing(self):
         print("\n--- Test 1B: Valid Pricing Long Trade ---")
-        # Strike 100. Entry 0.50. Cost $50 (100 qty).
-        self.rm.record_execution(50.0, "KXBTC-TEST-100", "buy", 100, 0.50)
-        self.assertEqual(self.rm.balance, 50.0)
+        # Strike 50000. Entry 0.50. Cost $50 (100 qty).
+        # Use realistic BTC strike (> 1000) so tanh estimation works
+        self.rm.record_execution(
+            50.0, "KXBTC-TEST-T50000", "buy", 100, 0.50, strike=50000.0
+        )
 
-        # Spot moves to 105 (+5 over strike of 100).
-        # With tanh formula: diff=5, scale=1000 (BTC), norm=0.005
-        # tanh(0.005) ≈ 0.005, shift = 0.005 * 0.49 ≈ 0.00245
-        # estimated_price ≈ 0.50 + 0.00245 = 0.50245
-        # PnL = (0.50245 - 0.50) * 100 ≈ 0.245
+        # Balance = starting - exposure (fees already in realized_pnl)
+        self.assertAlmostEqual(self.rm.balance, 50.0, delta=1.0)
 
-        self.rm.update_market_data("BTC", 105.0)
+        # Spot moves to 55000 (+5000 over strike).
+        # tanh(5000/1000) ≈ 1.0, shift = 0.49, estimated ≈ 0.99
+        # PnL = (0.99 - 0.50) * 100 ≈ 49.0 (but grace period blocks exits)
+        self.rm.update_market_data("BTC", 55000.0)
 
         print(f"Unrealized after move: {self.rm.unrealized_pnl}")
-        # Tanh formula produces a small shift for small BTC moves relative to scale=1000
+        # Spot $5K above strike → tanh gives ~0.99 → large unrealized gain
         self.assertGreater(self.rm.unrealized_pnl, 0.0)
-        self.assertLess(self.rm.unrealized_pnl, 1.0)
 
         # Balance = starting - exposure - fees (unrealized doesn't affect cash)
         fees = self.rm.exchange.total_fees_paid

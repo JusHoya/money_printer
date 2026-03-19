@@ -409,6 +409,7 @@ class RiskManager:
         strategy_name: str = None,
         contract_side: str = "YES",
         disable_profit_targets: bool = False,
+        strike: float = None,
     ):
         """Call this AFTER a trade is executed."""
         # OMS HANDOFF
@@ -424,6 +425,7 @@ class RiskManager:
             strategy_name=strategy_name,
             contract_side=contract_side,
             disable_profit_targets=disable_profit_targets,
+            strike=strike,
         )
 
         self._sync_balance()

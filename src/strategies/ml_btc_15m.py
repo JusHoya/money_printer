@@ -55,11 +55,18 @@ class MLBtc15mStrategy(Strategy):
         if market_data.ask >= 1.0:
             return signals
 
-        # Extract strike from ticker (e.g. KXBTC15M-26MAR19-1430-T84250)
-        try:
-            parts = market_data.symbol.split("-")
-            strike_val = float(re.sub(r"[A-Za-z]", "", parts[-1]))
-        except Exception:
+        # Extract strike: prefer extra["strike"] (from floor_strike API field),
+        # fall back to ticker parsing
+        strike_val = extra.get("strike")
+        if not strike_val or strike_val < 1000:
+            try:
+                parts = market_data.symbol.split("-")
+                parsed = float(re.sub(r"[A-Za-z]", "", parts[-1]))
+                if parsed > 1000:
+                    strike_val = parsed
+            except Exception:
+                pass
+        if not strike_val or strike_val < 1000:
             return signals
 
         # Time-to-expiry
@@ -112,16 +119,17 @@ class MLBtc15mStrategy(Strategy):
                     contract_side="YES",
                 )
                 sig.stop_loss = max(0.01, lp - 0.08)
+                sig.strike = strike_val
                 if close_time:
                     sig.expiration_time = close_time
                 sig.disable_profit_targets = tte_s < 300
                 logger.info(
-                    "[ML BTC 15m] BUY YES %s | prob=%.3f ask=%.2f edge=%.3f model=%s",
+                    "[ML BTC 15m] BUY YES %s | prob=%.3f ask=%.2f edge=%.3f strike=$%.0f",
                     market_data.symbol,
                     prob,
                     market_data.ask,
                     edge,
-                    pred.get("model_used", "?"),
+                    strike_val,
                 )
                 signals.append(sig)
                 self._cooldown_until = now + timedelta(seconds=self.cooldown_seconds)
@@ -142,16 +150,17 @@ class MLBtc15mStrategy(Strategy):
                     contract_side="NO",
                 )
                 sig.stop_loss = max(0.01, lp - 0.08)
+                sig.strike = strike_val
                 if close_time:
                     sig.expiration_time = close_time
                 sig.disable_profit_targets = tte_s < 300
                 logger.info(
-                    "[ML BTC 15m] BUY NO %s | prob=%.3f bid=%.2f edge=%.3f model=%s",
+                    "[ML BTC 15m] BUY NO %s | prob=%.3f bid=%.2f edge=%.3f strike=$%.0f",
                     market_data.symbol,
                     prob,
                     market_data.bid,
                     edge,
-                    pred.get("model_used", "?"),
+                    strike_val,
                 )
                 signals.append(sig)
                 self._cooldown_until = now + timedelta(seconds=self.cooldown_seconds)

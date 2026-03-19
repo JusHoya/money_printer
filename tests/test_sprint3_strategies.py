@@ -220,6 +220,7 @@ class TestMLBtc15mStrategy:
     def test_bad_symbol_no_strike(self):
         strat, predictor = self._make_strategy()
         md = make_btc_market(symbol="NOSYMBOL")
+        md.extra.pop("strike", None)  # Remove strike from extra too
         assert strat.analyze(md) == []
 
 
