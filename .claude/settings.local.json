@@ -29,7 +29,27 @@
       "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/test_web_dashboard.py -v 2>&1)",
       "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/test_web_dashboard.py -v --timeout=30 2>&1)",
       "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt -v 2>&1 | tail -30)",
-      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -v 2>&1 | tail -40)"
+      "Bash(cd \"C:/Users/hoyer/WorkSpace/Projects/money_printer\" && PYTHONPATH=. python -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -v 2>&1 | tail -40)",
+      "WebFetch(domain:www.karlwhelan.com)",
+      "WebFetch(domain:www.jbecker.dev)",
+      "WebFetch(domain:jdsemrau.substack.com)",
+      "WebFetch(domain:navnoorbawa.substack.com)",
+      "WebFetch(domain:whirligigbear.substack.com)",
+      "WebFetch(domain:4amclub.substack.com)",
+      "WebFetch(domain:newyorkcityservers.com)",
+      "WebFetch(domain:wethr.net)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.alphascope.app)",
+      "WebFetch(domain:help.kalshi.com)",
+      "WebFetch(domain:deadspin.com)",
+      "WebFetch(domain:cepr.org)",
+      "WebFetch(domain:laikalabs.ai)",
+      "WebFetch(domain:hummingbot.org)",
+      "WebFetch(domain:forecastwatch.com)",
+      "WebFetch(domain:beincrypto.com)",
+      "WebFetch(domain:metamask.io)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:fastercapital.com)"
     ]
   }
 }
