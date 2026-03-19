@@ -11,6 +11,7 @@ from src.core.interfaces import MarketData
 from src.strategies.empirical_edge import (
     EmpiricalEdgeStrategy,
     compute_edge,
+    compute_ev_per_dollar,
     lookup_empirical_rate,
 )
 
@@ -96,6 +97,32 @@ class TestComputeEdge:
         assert edge < 0.02
 
 
+class TestEVPerDollar:
+    def test_overpriced_yes_negative_ev(self):
+        """At 35c YES, actual=17.5% -> EV for YES buyer is negative."""
+        ev = compute_ev_per_dollar(0.35, side="YES")
+        assert ev < 0  # Bad bet to buy YES here
+
+    def test_overpriced_yes_positive_no_ev(self):
+        """At 35c YES bid, NO side should have positive EV."""
+        ev = compute_ev_per_dollar(0.35, side="NO")
+        assert ev > 0  # Good bet to buy NO
+
+    def test_underpriced_yes_positive_ev(self):
+        """At 75c YES, actual=90.9% -> EV for YES buyer is positive."""
+        ev = compute_ev_per_dollar(0.75, side="YES")
+        assert ev > 0
+
+    def test_ev_matches_edge_direction(self):
+        """EV sign should match edge direction."""
+        for price in [0.25, 0.35, 0.45, 0.75, 0.85]:
+            side, edge = compute_edge(price)
+            if side == "YES":
+                assert compute_ev_per_dollar(price, "YES") > 0
+            elif side == "NO":
+                assert compute_ev_per_dollar(price, "NO") > 0
+
+
 # ===========================================================================
 # Strategy signal tests
 # ===========================================================================
@@ -104,7 +131,7 @@ class TestComputeEdge:
 class TestEmpiricalEdgeStrategy:
     def test_buy_no_in_overpriced_yes_zone(self):
         """Contract at 25c YES bid -> empirical says YES wins 10.7% -> BUY NO."""
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.25, ask=0.28, minutes_left=7)
         signals = strat.analyze(md)
         assert len(signals) == 1
@@ -112,7 +139,7 @@ class TestEmpiricalEdgeStrategy:
 
     def test_buy_yes_in_underpriced_zone(self):
         """Contract at 75c YES ask -> empirical says YES wins 90.9% -> BUY YES."""
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.73, ask=0.75, minutes_left=7)
         signals = strat.analyze(md)
         assert len(signals) == 1
@@ -120,7 +147,7 @@ class TestEmpiricalEdgeStrategy:
 
     def test_no_signal_in_efficient_zone(self):
         """At 55c, edge is ~7% (close to threshold) — depends on min_edge."""
-        strat = EmpiricalEdgeStrategy(min_edge=0.10)
+        strat = EmpiricalEdgeStrategy(min_edge=0.10, min_ev_per_dollar=0.10)
         md = _make_market(bid=0.53, ask=0.55, minutes_left=7)
         signals = strat.analyze(md)
         assert len(signals) == 0  # 6.9% edge < 10% threshold
@@ -149,14 +176,14 @@ class TestEmpiricalEdgeStrategy:
         assert len(signals2) == 0  # Cooldown active
 
     def test_strike_set_on_signal(self):
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.25, ask=0.28, minutes_left=7, strike=70332.0)
         signals = strat.analyze(md)
         assert len(signals) == 1
         assert getattr(signals[0], "strike", None) == 70332.0
 
     def test_stop_loss_set(self):
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.25, ask=0.28, minutes_left=7)
         signals = strat.analyze(md)
         assert len(signals) == 1
@@ -165,18 +192,18 @@ class TestEmpiricalEdgeStrategy:
 
     def test_skip_near_settled_market(self):
         """Ask >= 1.0 means already settled."""
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.99, ask=1.00, minutes_left=7)
         assert strat.analyze(md) == []
 
     def test_skip_zero_bid(self):
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.0, ask=0.0, minutes_left=7)
         assert strat.analyze(md) == []
 
     def test_confidence_reflects_empirical_rate(self):
         """Confidence should be based on actual win rate, not market price."""
-        strat = EmpiricalEdgeStrategy(min_edge=0.05)
+        strat = EmpiricalEdgeStrategy(min_edge=0.05, min_ev_per_dollar=0.05)
         md = _make_market(bid=0.73, ask=0.75, minutes_left=7)
         signals = strat.analyze(md)
         assert len(signals) == 1

@@ -59,7 +59,7 @@ def compute_edge(price: float) -> Tuple[Optional[str], float]:
     Returns (side, edge_magnitude) where:
     - side = "YES" if actual > implied (underpriced YES)
     - side = "NO" if actual < implied (overpriced YES / underpriced NO)
-    - edge_magnitude = absolute difference
+    - edge_magnitude = absolute difference in probability
     """
     actual = lookup_empirical_rate(price)
     if actual is None:
@@ -75,6 +75,31 @@ def compute_edge(price: float) -> Tuple[Optional[str], float]:
     return None, 0.0
 
 
+def compute_ev_per_dollar(price: float, side: str = "YES") -> float:
+    """Expected value per dollar wagered using empirical settlement rates.
+
+    For a $1 wager:
+    - Multiplier = 1/price (total payout if correct)
+    - EV = P(win) * multiplier - 1.0
+
+    Returns the expected profit per $1 wagered (positive = profitable).
+    """
+    if price <= 0 or price >= 1.0:
+        return -1.0
+
+    if side == "YES":
+        actual_prob = lookup_empirical_rate(price) or price
+        multiplier = 1.0 / price  # e.g., at $0.30 → 3.33x
+        return actual_prob * multiplier - 1.0
+    else:
+        # NO side: cost = 1-price, win when YES doesn't settle
+        no_cost = 1.0 - price
+        actual_yes = lookup_empirical_rate(price) or price
+        actual_no = 1.0 - actual_yes
+        no_multiplier = 1.0 / no_cost  # e.g., at 70c NO cost → 3.33x
+        return actual_no * no_multiplier - 1.0
+
+
 class EmpiricalEdgeStrategy(Strategy):
     """Trade BTC 15m contracts based on empirical settlement patterns.
 
@@ -84,8 +109,12 @@ class EmpiricalEdgeStrategy(Strategy):
 
     Parameters
     ----------
+    min_ev_per_dollar : float
+        Minimum expected value per $1 wagered (default 0.10 = 10%
+        expected return).  A $100 bet with 0.10 EV expects $110 back.
     min_edge : float
-        Minimum empirical edge to trade (default 0.05 = 5%).
+        Minimum probability edge (default 0.05 = 5%).  Both min_ev
+        AND min_edge must be met for a trade.
     min_minutes_remaining : int
         Only trade contracts with at least this many minutes left
         (default 3). Avoids final-minute volatility.
@@ -98,11 +127,13 @@ class EmpiricalEdgeStrategy(Strategy):
 
     def __init__(
         self,
+        min_ev_per_dollar: float = 0.10,
         min_edge: float = 0.05,
         min_minutes_remaining: int = 3,
         max_minutes_remaining: int = 12,
         cooldown_seconds: int = 120,
     ):
+        self.min_ev_per_dollar = min_ev_per_dollar
         self.min_edge = min_edge
         self.min_minutes = min_minutes_remaining
         self.max_minutes = max_minutes_remaining
@@ -157,15 +188,39 @@ class EmpiricalEdgeStrategy(Strategy):
         # Get strike for position tracking
         strike = extra.get("strike")
 
-        # Compute empirical edge on YES side (using ask = cost to buy YES)
+        # Compute empirical edge AND EV per dollar for both sides
         yes_side, yes_edge = compute_edge(market_data.ask)
+        yes_ev = compute_ev_per_dollar(market_data.ask, side="YES")
+        yes_mult = 1.0 / market_data.ask if market_data.ask > 0 else 0
 
-        # Compute empirical edge on NO side (using 1-bid = cost to buy NO)
         no_cost = 1.0 - market_data.bid
-        no_side, no_edge = compute_edge(market_data.bid)  # Check the bid level
+        no_side, no_edge = compute_edge(market_data.bid)
+        no_ev = compute_ev_per_dollar(market_data.bid, side="NO")
+        no_mult = 1.0 / no_cost if no_cost > 0 else 0
 
-        # Pick the side with more edge
-        if yes_side == "YES" and yes_edge >= self.min_edge:
+        # Both min_edge AND min_ev_per_dollar must be met
+        yes_ok = (
+            yes_side == "YES"
+            and yes_edge >= self.min_edge
+            and yes_ev >= self.min_ev_per_dollar
+        )
+        no_ok = (
+            no_side == "NO"
+            and no_edge >= self.min_edge
+            and no_ev >= self.min_ev_per_dollar
+        )
+
+        # Pick the side with higher EV per dollar
+        if yes_ok and no_ok:
+            best_side = "YES" if yes_ev >= no_ev else "NO"
+        elif yes_ok:
+            best_side = "YES"
+        elif no_ok:
+            best_side = "NO"
+        else:
+            return signals
+
+        if best_side == "YES":
             lp = market_data.ask
             confidence = min(0.95, lookup_empirical_rate(lp) or 0.5)
             sig = TradeSignal(
@@ -181,21 +236,22 @@ class EmpiricalEdgeStrategy(Strategy):
             if close_time:
                 sig.expiration_time = close_time
             logger.info(
-                "[EmpEdge] BUY YES %s @ %.2f | empirical=%.1f%% implied=%.1f%% edge=+%.1f%%",
+                "[EmpEdge] BUY YES %s @ $%.2f | mult=%.2fx | "
+                "empirical=%.1f%% vs market=%.1f%% | EV=$%.2f per $1",
                 sym,
                 lp,
+                yes_mult,
                 (lookup_empirical_rate(lp) or 0) * 100,
                 lp * 100,
-                yes_edge * 100,
+                yes_ev,
             )
             signals.append(sig)
             self._cooldown_until[sym] = now + timedelta(seconds=self.cooldown_seconds)
 
-        elif no_side == "NO" and no_edge >= self.min_edge:
-            # YES is overpriced → buy NO
+        elif best_side == "NO":
             lp = no_cost
             actual_yes = lookup_empirical_rate(market_data.bid) or 0.5
-            confidence = min(0.95, 1.0 - actual_yes)  # P(NO wins)
+            confidence = min(0.95, 1.0 - actual_yes)
             sig = TradeSignal(
                 symbol=sym,
                 side="buy",
@@ -209,12 +265,15 @@ class EmpiricalEdgeStrategy(Strategy):
             if close_time:
                 sig.expiration_time = close_time
             logger.info(
-                "[EmpEdge] BUY NO %s | bid=%.2f empirical_yes=%.1f%% implied_yes=%.1f%% edge=%.1f%%",
+                "[EmpEdge] BUY NO %s | YES@$%.2f NO=$%.2f mult=%.2fx | "
+                "empirical_yes=%.1f%% vs market=%.1f%% | EV=$%.2f per $1",
                 sym,
                 market_data.bid,
+                lp,
+                no_mult,
                 actual_yes * 100,
                 market_data.bid * 100,
-                no_edge * 100,
+                no_ev,
             )
             signals.append(sig)
             self._cooldown_until[sym] = now + timedelta(seconds=self.cooldown_seconds)
