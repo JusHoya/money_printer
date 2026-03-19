@@ -9,9 +9,32 @@ fastapi
 uvicorn[standard]
 websockets
 
-# Requirements for ML
+# Requirements for ML — existing
 scikit-learn
 joblib
 pandas
 numpy
 pillow
+
+# Requirements for ML — V2 (Sprint 0)
+xgboost>=3.2
+lightgbm>=4.6
+torch>=2.10
+optuna>=4.8
+shap>=0.51
+matplotlib>=3.10
+seaborn>=0.13.2
+statsmodels>=0.14.6
+scipy>=1.16
+
+# Requirements for Data Infrastructure (Sprint 0)
+websocket-client>=1.9
+pyarrow>=23.0
+aiohttp>=3.13
+
+# Requirements for Technical Analysis (Sprint 0)
+ta>=0.11
+
+# Requirements for Testing (Sprint 0)
+playwright>=1.40
+pre-commit>=3.6

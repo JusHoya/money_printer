@@ -22,12 +22,12 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from src.bots.registry import BotRegistry
-from src.utils.system_utils import prevent_sleep
-from src.utils.logger import logger
+from src.bots.registry import BotRegistry  # noqa: E402
+from src.utils.system_utils import prevent_sleep  # noqa: E402
+from src.utils.logger import logger  # noqa: E402
 
 # Import bots so they register themselves
-import src.bots  # noqa: F401
+import src.bots  # noqa: F401, E402
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +35,8 @@ import src.bots  # noqa: F401
 # ---------------------------------------------------------------------------
 from scripts.run_dashboard import OrchestratorEngine  # noqa: E402
 
-from src.web.state_manager import StateManager
-from src.web.server import create_app
+from src.web.state_manager import StateManager  # noqa: E402
+from src.web.server import create_app  # noqa: E402
 
 
 def _run_market_loop(engine: OrchestratorEngine):
@@ -107,7 +107,9 @@ def main():
     # ------------------------------------------------------------------ #
     # Start market loop in a background thread
     # ------------------------------------------------------------------ #
-    market_thread = threading.Thread(target=_run_market_loop, args=(engine,), daemon=True)
+    market_thread = threading.Thread(
+        target=_run_market_loop, args=(engine,), daemon=True
+    )
     market_thread.start()
     engine.dashboard.log(f"Market loop started. Bots: {[b.name for b in engine.bots]}")
 
@@ -122,6 +124,7 @@ def main():
     # ------------------------------------------------------------------ #
     url = f"http://{args.host}:{args.port}"
     if not args.no_browser:
+
         def _open_browser():
             time.sleep(1.5)
             webbrowser.open(url)
@@ -134,7 +137,7 @@ def main():
     import uvicorn
 
     logger.info(f"[Web] Starting server at {url}")
-    print(f"\n  Money Printer Web Dashboard → {url}\n  Press Ctrl+C to stop.\n")
+    print(f"\n  Money Printer Web Dashboard -> {url}\n  Press Ctrl+C to stop.\n")
 
     uvicorn.run(
         app,
