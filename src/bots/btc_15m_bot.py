@@ -6,10 +6,9 @@ from src.bots.registry import BotRegistry
 from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
 from src.core.interfaces import TradeSignal
 from src.strategies.crypto_strategy import (
-    Crypto15mTrendStrategyV3,
-    CryptoLongShotFader,
     Crypto15mLateSniper,
 )
+from src.strategies.empirical_edge import EmpiricalEdgeStrategy
 from src.strategies.ml_btc_15m import MLBtc15mStrategy
 from src.strategies.latency_arb import LatencyArbStrategy
 from src.strategies.longshot_fader_v2 import LongshotFaderV2
@@ -29,15 +28,15 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.kalshi = None
         self.coinbase = None
 
-        # ML-driven strategies (Sprint 3) with V3 rule-based fallback
+        # Microstructure-first strategy waterfall (Sprint 5+)
+        # Priority: risk-free arb > empirical edge > latency > time decay > ML fallback
         self.strategies = {
-            "ml_btc_15m": MLBtc15mStrategy(),
-            "latency_arb": LatencyArbStrategy(),
-            "crypto": Crypto15mTrendStrategyV3(),  # V3 fallback
-            "longshot_v2": LongshotFaderV2(),
-            "longshot": CryptoLongShotFader(),  # V1 fallback
-            "time_decay": TimeDecayScalper(),
             "cross_arb": CrossSpreadArbStrategy(),
+            "empirical_edge": EmpiricalEdgeStrategy(min_edge=0.05),
+            "latency_arb": LatencyArbStrategy(),
+            "time_decay": TimeDecayScalper(),
+            "longshot_v2": LongshotFaderV2(),
+            "ml_btc_15m": MLBtc15mStrategy(),  # ML fallback
             "late_sniper": Crypto15mLateSniper(),
         }
 
@@ -130,57 +129,24 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 )
             return []
 
-        # Waterfall: Cross-Spread Arb → ML BTC 15m → Latency Arb → V3 Fallback
-        #   → LongShot Fader V2 → Time Decay → Late Sniper
-        # Cross-spread arb is risk-free, always check first
-        traded = self._process_signals(
-            self.strategies["cross_arb"].analyze(btc_data),
-            strategy_name="Cross-Spread Arb",
-            risk_manager=risk_manager,
-            dashboard=dashboard,
-        )
-        if not traded:
+        # Waterfall: risk-free arb > empirical edge > latency > time decay > longshot > ML > sniper
+        for strat_key, strat_name in [
+            ("cross_arb", "Cross-Spread Arb"),
+            ("empirical_edge", "Empirical Edge"),
+            ("latency_arb", "Latency Arb"),
+            ("time_decay", "Time Decay"),
+            ("longshot_v2", "LongShot Fader V2"),
+            ("ml_btc_15m", "ML BTC 15m"),
+            ("late_sniper", "Late Sniper"),
+        ]:
             traded = self._process_signals(
-                self.strategies["ml_btc_15m"].analyze(btc_data),
-                strategy_name="ML BTC 15m",
+                self.strategies[strat_key].analyze(btc_data),
+                strategy_name=strat_name,
                 risk_manager=risk_manager,
                 dashboard=dashboard,
             )
-        if not traded:
-            traded = self._process_signals(
-                self.strategies["latency_arb"].analyze(btc_data),
-                strategy_name="Latency Arb",
-                risk_manager=risk_manager,
-                dashboard=dashboard,
-            )
-        if not traded:
-            traded = self._process_signals(
-                self.strategies["crypto"].analyze(btc_data),
-                strategy_name="Trend Catcher V3",
-                risk_manager=risk_manager,
-                dashboard=dashboard,
-            )
-        if not traded:
-            traded = self._process_signals(
-                self.strategies["longshot_v2"].analyze(btc_data),
-                strategy_name="LongShot Fader V2",
-                risk_manager=risk_manager,
-                dashboard=dashboard,
-            )
-        if not traded:
-            traded = self._process_signals(
-                self.strategies["time_decay"].analyze(btc_data),
-                strategy_name="Time Decay",
-                risk_manager=risk_manager,
-                dashboard=dashboard,
-            )
-        if not traded:
-            traded = self._process_signals(
-                self.strategies["late_sniper"].analyze(btc_data),
-                strategy_name="Late Sniper",
-                risk_manager=risk_manager,
-                dashboard=dashboard,
-            )
+            if traded:
+                break
 
         if traded:
             self.last_15m_trade_interval = current_interval_id
