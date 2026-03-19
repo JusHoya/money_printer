@@ -3,10 +3,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict
 from src.core.interfaces import TradeSignal
+from src.core.fee_calculator import trade_is_profitable
 from src.utils.logger import logger
-
-# Kalshi maker fee rate (Sprint 3 — full fee_calculator in Sprint 4)
-_MAKER_FEE_RATE = 0.0175
 
 
 class TickerResolverMixin:
@@ -238,19 +236,14 @@ class SignalProcessorMixin:
         """Return True if the signal has positive expected value after fees.
 
         Uses the signal's own ``confidence`` as P(win) and the
-        ``limit_price`` as the cost.  Estimated maker fee per contract:
-        ``0.0175 * P * (1-P)`` where P = limit_price.
-
-        EV per contract = P(win) - cost - fee.
+        ``limit_price`` as the cost.  Delegates to the fee calculator
+        (Sprint 4) for accurate Kalshi maker fee computation.
         """
         conf = getattr(sig, "confidence", 0.0)
         lp = sig.limit_price
         if lp is None or lp <= 0:
             return False
-
-        fee_per_contract = _MAKER_FEE_RATE * lp * (1.0 - lp)
-        ev = conf - lp - fee_per_contract
-        return ev > 0
+        return trade_is_profitable(conf, lp, contracts=1, is_maker=True)
 
     def _is_weather_slot_full(self, symbol, risk_manager):
         """Check if we already have an active trade for this City + Type."""
