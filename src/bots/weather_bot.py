@@ -6,6 +6,7 @@ from src.bots.registry import BotRegistry
 from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
 from src.core.interfaces import TradeSignal
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
+from src.strategies.ml_weather import MLWeatherStrategy
 from src.data.nws_provider import NWSProvider
 from src.utils.logger import logger
 import os
@@ -13,7 +14,6 @@ import os
 
 @BotRegistry.register("weather")
 class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
-
     STATION_MAP = {
         "KNYC": "KXHIGHNY",
         "KLAX": "KXHIGHLAX",
@@ -28,7 +28,9 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.nws = None
         self.nws_stations = ["KNYC", "KLAX", "KMDW", "KMIA"]
 
+        # ML-driven primary + V2 rule-based fallback
         self.strategies = {
+            "ml_weather": MLWeatherStrategy(),
             "weather": WeatherArbitrageStrategyV2(),
         }
 
@@ -50,7 +52,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             if not nws_data:
                 continue
 
-            temp = nws_data.extra.get('temperature_f')
+            temp = nws_data.extra.get("temperature_f")
             kalshi_ticker = self.STATION_MAP.get(station)
             active_ticker = None
 
@@ -58,21 +60,31 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             if self.kalshi and kalshi_ticker:
                 try:
                     active_ticker = self._resolve_smart_ticker(
-                        kalshi_ticker, criteria="sentiment",
-                        kalshi=self.kalshi
+                        kalshi_ticker, criteria="sentiment", kalshi=self.kalshi
                     )
 
                     if active_ticker:
                         k_data = self.kalshi.fetch_latest(active_ticker)
                         if k_data:
-                            max_t = nws_data.extra.get('max_temp_today_f')
-                            best_price = k_data.bid if k_data.bid > 0 else (k_data.ask if k_data.ask > 0 else k_data.price)
+                            max_t = nws_data.extra.get("max_temp_today_f")
+                            best_price = (
+                                k_data.bid
+                                if k_data.bid > 0
+                                else (k_data.ask if k_data.ask > 0 else k_data.price)
+                            )
                             dashboard.update_price(
-                                f"{active_ticker} (Market)", best_price,
-                                bid=k_data.bid, ask=k_data.ask,
-                                no_bid=k_data.extra.get('no_bid', 0.0) if k_data.extra else 0.0,
-                                no_ask=k_data.extra.get('no_ask', 0.0) if k_data.extra else 0.0,
-                                volume=k_data.volume, max_temp=max_t,
+                                f"{active_ticker} (Market)",
+                                best_price,
+                                bid=k_data.bid,
+                                ask=k_data.ask,
+                                no_bid=k_data.extra.get("no_bid", 0.0)
+                                if k_data.extra
+                                else 0.0,
+                                no_ask=k_data.extra.get("no_ask", 0.0)
+                                if k_data.extra
+                                else 0.0,
+                                volume=k_data.volume,
+                                max_temp=max_t,
                             )
 
                             # Fuse data
@@ -91,12 +103,13 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     risk_manager.update_market_data(f"TEMP_{station}", temp)
 
             # Extract PoP for Precip
-            forecasts = nws_data.extra.get('forecast') or []
+            forecasts = nws_data.extra.get("forecast") or []
             pop_prob = 0.0
             for period in forecasts:
-                if period.get('isDaytime'):
-                    val = period.get('probabilityOfPrecipitation', {}).get('value', 0)
-                    if val: pop_prob = val / 100.0
+                if period.get("isDaytime"):
+                    val = period.get("probabilityOfPrecipitation", {}).get("value", 0)
+                    if val:
+                        pop_prob = val / 100.0
                     break
 
             if pop_prob is not None:
@@ -105,10 +118,20 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 else:
                     risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
 
-            self._process_signals(
-                self.strategies['weather'].analyze(nws_data),
-                strategy_name="Meteorologist V1", risk_manager=risk_manager, dashboard=dashboard
+            # Waterfall: ML Weather → V2 rule-based fallback
+            traded = self._process_signals(
+                self.strategies["ml_weather"].analyze(nws_data),
+                strategy_name="ML Weather",
+                risk_manager=risk_manager,
+                dashboard=dashboard,
             )
+            if not traded:
+                self._process_signals(
+                    self.strategies["weather"].analyze(nws_data),
+                    strategy_name="Meteorologist V2",
+                    risk_manager=risk_manager,
+                    dashboard=dashboard,
+                )
 
             time.sleep(1)  # 1 sec between cities
 
