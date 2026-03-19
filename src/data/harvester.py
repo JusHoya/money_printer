@@ -34,11 +34,19 @@ _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 2.0  # seconds; exponential backoff multiplier
 
 # Weather series tickers for major cities
+# MUST match the actual Kalshi series tickers (full suffix, not truncated)
 WEATHER_SERIES = [
     "KXHIGHNY",  # New York
-    "KXHIGHLA",  # Los Angeles
-    "KXHIGHCH",  # Chicago
-    "KXHIGHMI",  # Miami
+    "KXHIGHLAX",  # Los Angeles
+    "KXHIGHCHI",  # Chicago
+    "KXHIGHMIA",  # Miami
+    "KXHIGHDFW",  # Dallas-Fort Worth
+]
+
+# BTC series tickers
+BTC_SERIES = [
+    "KXBTC15M",  # 15-minute contracts
+    "KXBTCD",  # Hourly contracts (kxbtcd on V1 API)
 ]
 
 # Settled market statuses (Kalshi uses several for closed markets)
@@ -257,6 +265,26 @@ class HistoricalHarvester:
         logger.info("[Harvester] BTC 15m harvest complete: %d markets", len(markets))
         return len(markets)
 
+    def harvest_btc_hourly(self, months_back: int = 6) -> int:
+        """Harvest settled BTC hourly markets (KXBTCD series).
+
+        Returns
+        -------
+        int
+            Number of markets harvested.
+        """
+        logger.info(
+            "[Harvester] Harvesting BTC hourly markets (target: %d months back)",
+            months_back,
+        )
+        markets = self.harvest_settled_markets(series_ticker="KXBTCD")
+
+        if markets:
+            self.save_to_parquet(markets, market_type="btc_hourly")
+
+        logger.info("[Harvester] BTC hourly harvest complete: %d markets", len(markets))
+        return len(markets)
+
     def harvest_weather(self, months_back: int = 6) -> int:
         """Harvest settled weather markets for major cities.
 
@@ -295,28 +323,32 @@ class HistoricalHarvester:
         Returns
         -------
         dict
-            Keys: ``btc_15m``, ``weather``, ``total``, ``timestamp``.
+            Keys: ``btc_15m``, ``btc_hourly``, ``weather``, ``total``,
+            ``timestamp``.
         """
         logger.info(
             "[Harvester] === Full harvest starting (months_back=%d) ===", months_back
         )
         start = time.monotonic()
 
-        btc_count = self.harvest_btc_15m(months_back=months_back)
+        btc_15m_count = self.harvest_btc_15m(months_back=months_back)
+        btc_hourly_count = self.harvest_btc_hourly(months_back=months_back)
         weather_count = self.harvest_weather(months_back=months_back)
 
         elapsed = time.monotonic() - start
+        total = btc_15m_count + btc_hourly_count + weather_count
         summary = {
-            "btc_15m": btc_count,
+            "btc_15m": btc_15m_count,
+            "btc_hourly": btc_hourly_count,
             "weather": weather_count,
-            "total": btc_count + weather_count,
+            "total": total,
             "elapsed_seconds": round(elapsed, 1),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         logger.info(
             "[Harvester] === Full harvest complete: %d markets in %.1fs ===",
-            summary["total"],
+            total,
             elapsed,
         )
         return summary
