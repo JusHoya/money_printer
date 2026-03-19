@@ -3,10 +3,14 @@
 Bridges the gap between harvested Parquet settlement data and the
 training pipeline which expects feature DataFrames.
 
+Supports BTC 15m, BTC hourly, and multi-city weather models.
+
 Usage:
-    python scripts/train_models.py
-    python scripts/train_models.py --model btc_xgboost
-    python scripts/train_models.py --model all
+    python scripts/train_models.py                    # Train everything
+    python scripts/train_models.py --model btc_15m    # BTC 15m only
+    python scripts/train_models.py --model btc_hourly # BTC hourly only
+    python scripts/train_models.py --model weather     # Weather only
+    python scripts/train_models.py --model calibrator  # Calibrator only
 """
 
 import argparse
@@ -14,6 +18,7 @@ import logging
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -27,51 +32,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_NON_FEATURE_COLS = ("label", "timestamp", "city")
 
-def load_btc_training_data() -> pd.DataFrame:
-    """Convert BTC settlement Parquet into a training DataFrame.
 
-    Each row is a settled 15-min contract. We extract features that
-    are available from the settlement snapshot and generate binary
-    labels from the ``result`` column.
-    """
-    from src.data.harvester import HistoricalHarvester
+# ======================================================================
+# Data loaders
+# ======================================================================
 
-    df = HistoricalHarvester.load_from_parquet("btc_15m")
-    if df.empty:
-        logger.error("No BTC Parquet data found in data/historical/btc_15m/")
-        return pd.DataFrame()
 
-    logger.info("Loaded %d BTC settlement records", len(df))
+def _parse_strike(ticker: str) -> float:
+    """Extract numeric strike from a Kalshi ticker string."""
+    try:
+        parts = str(ticker).split("-")
+        return float(re.sub(r"[A-Za-z]", "", parts[-1]))
+    except Exception:
+        return np.nan
 
-    # Extract strike from ticker
-    def parse_strike(ticker):
-        try:
-            parts = str(ticker).split("-")
-            return float(re.sub(r"[A-Za-z]", "", parts[-1]))
-        except Exception:
-            return np.nan
 
-    df["strike"] = df["ticker"].apply(parse_strike)
-
-    # Parse numeric fields
-    for col in [
-        "yes_bid_dollars",
-        "yes_ask_dollars",
-        "no_bid_dollars",
-        "no_ask_dollars",
-        "last_price_dollars",
-        "volume_fp",
-        "open_interest_fp",
-    ]:
+def _parse_numeric_columns(df: pd.DataFrame, columns: list) -> pd.DataFrame:
+    """Convert string dollar/volume columns to float."""
+    for col in columns:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
-    # Drop rows without usable data
+
+def _build_btc_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Build training features from a raw BTC settlement DataFrame.
+
+    Works identically for 15m and hourly data — same column structure.
+    """
+    df["strike"] = df["ticker"].apply(_parse_strike)
+    df = _parse_numeric_columns(
+        df,
+        [
+            "yes_bid_dollars",
+            "yes_ask_dollars",
+            "no_bid_dollars",
+            "no_ask_dollars",
+            "last_price_dollars",
+            "volume_fp",
+            "open_interest_fp",
+        ],
+    )
     df = df.dropna(subset=["strike", "expiration_value"])
     df["expiration_value"] = pd.to_numeric(df["expiration_value"], errors="coerce")
 
-    # Feature engineering from settlement data
     out = pd.DataFrame()
     out["close"] = df["expiration_value"].astype(float)
     out["strike"] = df["strike"].astype(float)
@@ -86,7 +92,6 @@ def load_btc_training_data() -> pd.DataFrame:
     out["spread"] = (out["ask"] - out["bid"]).clip(lower=0)
     out["mid_price"] = (out["bid"] + out["ask"]) / 2
 
-    # Time features from close_time
     if "close_time" in df.columns:
         ct = pd.to_datetime(df["close_time"], errors="coerce", utc=True)
         out["hour"] = ct.dt.hour
@@ -94,155 +99,243 @@ def load_btc_training_data() -> pd.DataFrame:
         out["day_of_week"] = ct.dt.dayofweek
         out["timestamp"] = ct
 
-    # Label: did YES win?
     out["label"] = (df["result"].str.lower() == "yes").astype(int)
-
     out = out.dropna(subset=["close", "strike", "label"])
+    return out
+
+
+def load_btc_training_data(market_type: str = "btc_15m") -> pd.DataFrame:
+    """Load BTC settlement data from Parquet and build features.
+
+    Parameters
+    ----------
+    market_type : str
+        ``"btc_15m"`` or ``"btc_hourly"``
+    """
+    from src.data.harvester import HistoricalHarvester
+
+    df = HistoricalHarvester.load_from_parquet(market_type)
+    if df.empty:
+        logger.error("No Parquet data found in data/historical/%s/", market_type)
+        return pd.DataFrame()
+
+    logger.info("Loaded %d %s settlement records", len(df), market_type)
+    out = _build_btc_features(df)
     logger.info(
-        "Prepared %d BTC training rows with %d features", len(out), len(out.columns) - 1
+        "Prepared %d %s training rows with %d features",
+        len(out),
+        market_type,
+        len([c for c in out.columns if c not in _NON_FEATURE_COLS]),
     )
     return out
 
 
 def load_weather_training_data() -> pd.DataFrame:
-    """Convert weather settlement Parquet into a training DataFrame."""
+    """Load ALL weather city data from Parquet and build features.
+
+    Scans ``data/historical/`` for directories starting with ``weather``
+    and concatenates all Parquet files with a ``city`` column.
+    """
     from src.data.harvester import HistoricalHarvester
 
-    df = HistoricalHarvester.load_from_parquet("weather")
-    if df.empty:
+    historical_dir = Path("data/historical")
+    frames = []
+
+    # Find all weather directories (weather/, weather_KXHIGHCHI/, etc.)
+    for d in sorted(historical_dir.iterdir()):
+        if not d.is_dir() or not d.name.startswith("weather"):
+            continue
+        df = HistoricalHarvester.load_from_parquet(d.name)
+        if not df.empty:
+            logger.info("  %s: %d records", d.name, len(df))
+            frames.append(df)
+
+    if not frames:
         logger.error("No weather Parquet data found")
         return pd.DataFrame()
 
-    logger.info("Loaded %d weather settlement records", len(df))
+    df = pd.concat(frames, ignore_index=True)
+    logger.info(
+        "Combined %d weather settlement records from %d sources", len(df), len(frames)
+    )
 
-    def parse_strike(ticker):
-        try:
-            parts = str(ticker).split("-")
-            return float(re.sub(r"[A-Za-z]", "", parts[-1]))
-        except Exception:
-            return np.nan
-
-    df["strike"] = df["ticker"].apply(parse_strike)
-    for col in ["yes_bid_dollars", "yes_ask_dollars", "volume_fp", "expiration_value"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
+    # Build features
+    df["strike"] = df["ticker"].apply(_parse_strike)
+    df = _parse_numeric_columns(
+        df, ["yes_bid_dollars", "yes_ask_dollars", "volume_fp", "expiration_value"]
+    )
     df = df.dropna(subset=["strike"])
 
     out = pd.DataFrame()
     out["strike"] = df["strike"].astype(float)
     out["bid"] = df.get("yes_bid_dollars", pd.Series(0.5)).fillna(0.5).astype(float)
     out["ask"] = df.get("yes_ask_dollars", pd.Series(0.5)).fillna(0.5).astype(float)
+    out["spread"] = (out["ask"] - out["bid"]).clip(lower=0)
     out["volume"] = df.get("volume_fp", pd.Series(0)).fillna(0).astype(float)
     out["label"] = (df["result"].str.lower() == "yes").astype(int)
 
-    # Extract city from ticker
-    out["city"] = df["ticker"].apply(
-        lambda t: "NY"
-        if "NY" in str(t)
-        else "LA"
-        if "LA" in str(t)
-        else "CH"
-        if "CH" in str(t)
-        else "MI"
-        if "MI" in str(t)
-        else "OTHER"
-    )
+    # City extraction from ticker
+    city_map = {
+        "NY": "NY",
+        "LAX": "LA",
+        "LA": "LA",
+        "CHI": "CH",
+        "CH": "CH",
+        "MIA": "MI",
+        "MI": "MI",
+        "DFW": "DFW",
+    }
+
+    def _extract_city(ticker):
+        t = str(ticker).upper()
+        for key, val in city_map.items():
+            if key in t:
+                return val
+        return "OTHER"
+
+    out["city"] = df["ticker"].apply(_extract_city)
+
+    # Encode city as numeric for XGBoost
+    city_codes = {"NY": 0, "LA": 1, "CH": 2, "MI": 3, "DFW": 4, "OTHER": 5}
+    out["city_code"] = out["city"].map(city_codes).fillna(5).astype(int)
+
+    if "close_time" in df.columns:
+        ct = pd.to_datetime(df["close_time"], errors="coerce", utc=True)
+        out["hour"] = ct.dt.hour
+        out["day_of_week"] = ct.dt.dayofweek
+        out["month"] = ct.dt.month
+        out["timestamp"] = ct
 
     out = out.dropna(subset=["strike", "label"])
-    logger.info("Prepared %d weather training rows", len(out))
+    logger.info(
+        "Prepared %d weather training rows (%s)",
+        len(out),
+        out["city"].value_counts().to_dict(),
+    )
     return out
 
 
-def train_btc_xgboost(data: pd.DataFrame) -> dict:
-    """Train BTC XGBoost on settlement features."""
+# ======================================================================
+# Training functions
+# ======================================================================
+
+
+def walk_forward_split(X, y, train_pct=0.70, val_pct=0.15):
+    """Temporal walk-forward split (no lookahead bias).
+
+    Returns (X_train, y_train, X_val, y_val, X_test, y_test).
+    """
+    n = len(X)
+    train_end = int(n * train_pct)
+    val_end = int(n * (train_pct + val_pct))
+
+    if hasattr(X, "iloc"):
+        return (
+            X.iloc[:train_end],
+            y[:train_end],
+            X.iloc[train_end:val_end],
+            y[train_end:val_end],
+            X.iloc[val_end:],
+            y[val_end:],
+        )
+    return (
+        X[:train_end],
+        y[:train_end],
+        X[train_end:val_end],
+        y[train_end:val_end],
+        X[val_end:],
+        y[val_end:],
+    )
+
+
+def train_xgboost(data: pd.DataFrame, save_path: str, label: str = "") -> dict:
+    """Train XGBoost on any settlement feature DataFrame."""
+    from sklearn.metrics import accuracy_score, roc_auc_score
+
     from src.ml.models.btc_xgboost import BTCXGBoostClassifier
 
-    # Use available numeric features
-    feat_cols = [c for c in data.columns if c not in ("label", "timestamp", "city")]
+    feat_cols = [c for c in data.columns if c not in _NON_FEATURE_COLS]
     X = data[feat_cols].fillna(0)
     y = data["label"].values
 
-    # Walk-forward split (70/15/15 by time)
-    n = len(X)
-    train_end = int(n * 0.70)
-    val_end = int(n * 0.85)
-
-    X_train, y_train = X.iloc[:train_end], y[:train_end]
-    X_val, y_val = X.iloc[train_end:val_end], y[train_end:val_end]
-    X_test, y_test = X.iloc[val_end:], y[val_end:]
+    X_train, y_train, X_val, y_val, X_test, y_test = walk_forward_split(X, y)
 
     model = BTCXGBoostClassifier()
     metrics = model.train(X_train, y_train, val_X=X_val, val_y=y_val)
 
-    # Test evaluation
     test_probs = model.predict_proba(X_test)
-    from sklearn.metrics import roc_auc_score, accuracy_score
-
     test_auc = roc_auc_score(y_test, test_probs)
     test_acc = accuracy_score(y_test, (test_probs > 0.5).astype(int))
     metrics["test_auc"] = round(test_auc, 4)
     metrics["test_accuracy"] = round(test_acc, 4)
+    metrics["test_size"] = len(y_test)
 
-    # Save
-    model.save("data/models/btc_xgboost_latest.joblib")
-    logger.info("XGBoost saved. Test AUC=%.4f Accuracy=%.4f", test_auc, test_acc)
+    model.save(save_path)
+    logger.info(
+        "%s XGBoost saved to %s. Test AUC=%.4f Accuracy=%.4f",
+        label,
+        save_path,
+        test_auc,
+        test_acc,
+    )
     return metrics
 
 
-def train_btc_lstm(data: pd.DataFrame) -> dict:
-    """Train BTC LSTM on settlement features."""
+def train_lstm(
+    data: pd.DataFrame,
+    save_path: str,
+    label: str = "",
+    seq_len: int = 20,
+    epochs: int = 20,
+) -> dict:
+    """Train LSTM on any settlement feature DataFrame."""
     from src.ml.models.btc_lstm import BTCLSTMPredictor
 
-    feat_cols = [c for c in data.columns if c not in ("label", "timestamp", "city")]
+    feat_cols = [c for c in data.columns if c not in _NON_FEATURE_COLS]
     X = data[feat_cols].fillna(0)
     y = data["label"].values.astype(np.float32)
 
-    seq_len = 20
     model = BTCLSTMPredictor(
-        input_size=len(feat_cols), hidden_size=32, num_layers=1, sequence_length=seq_len
+        input_size=len(feat_cols),
+        hidden_size=32,
+        num_layers=1,
+        sequence_length=seq_len,
     )
 
-    # Prepare sequences
     X_seq, _ = model.prepare_sequences(X, feat_cols)
     y_seq = y[seq_len : seq_len + len(X_seq)]
 
-    # Walk-forward split
-    n = len(X_seq)
-    train_end = int(n * 0.70)
-    val_end = int(n * 0.85)
+    X_train, y_train, X_val, y_val, X_test, y_test = walk_forward_split(X_seq, y_seq)
 
     metrics = model.train_model(
-        X_seq[:train_end],
-        y_seq[:train_end],
-        val_X=X_seq[train_end:val_end],
-        val_y=y_seq[train_end:val_end],
-        epochs=20,
+        X_train,
+        y_train,
+        val_X=X_val,
+        val_y=y_val,
+        epochs=epochs,
         batch_size=64,
     )
 
-    model.save("data/models/btc_lstm_latest.joblib")
-    logger.info("LSTM saved. Metrics: %s", metrics)
+    model.save(save_path)
+    logger.info("%s LSTM saved to %s. Metrics: %s", label, save_path, metrics)
     return metrics
 
 
-def train_calibrator(data: pd.DataFrame) -> dict:
+def train_calibrator(data: pd.DataFrame, xgb_path: str, save_path: str) -> dict:
     """Train probability calibrator on XGBoost outputs."""
-    from src.ml.models.btc_xgboost import BTCXGBoostClassifier
     from src.ml.calibration import ProbabilityCalibrator
+    from src.ml.models.btc_xgboost import BTCXGBoostClassifier
 
-    model_path = "data/models/btc_xgboost_latest.joblib"
-    if not os.path.exists(model_path):
-        return {"error": "XGBoost model not found — train it first"}
+    if not os.path.exists(xgb_path):
+        return {"error": f"XGBoost model not found at {xgb_path}"}
 
-    xgb = BTCXGBoostClassifier(model_path=model_path)
-    feat_cols = [c for c in data.columns if c not in ("label", "timestamp", "city")]
+    xgb = BTCXGBoostClassifier(model_path=xgb_path)
+    feat_cols = [c for c in data.columns if c not in _NON_FEATURE_COLS]
     X = data[feat_cols].fillna(0)
     y = data["label"].values
 
     # Use last 30% for calibration
-    n = len(X)
-    cal_start = int(n * 0.70)
+    cal_start = int(len(X) * 0.70)
     raw_probs = xgb.predict_proba(X.iloc[cal_start:])
     outcomes = y[cal_start:]
 
@@ -250,9 +343,22 @@ def train_calibrator(data: pd.DataFrame) -> dict:
     cal.fit(raw_probs, outcomes)
     ece = cal.calibration_error(cal.calibrate(raw_probs), outcomes)
 
-    cal.save("data/models/calibrator_latest.joblib")
-    logger.info("Calibrator saved. ECE=%.4f", ece)
-    return {"ece": round(ece, 4)}
+    cal.save(save_path)
+    logger.info("Calibrator saved to %s. ECE=%.4f", save_path, ece)
+    return {"ece": round(ece, 4), "samples": len(outcomes)}
+
+
+# ======================================================================
+# Main
+# ======================================================================
+
+
+ALL_MODELS = [
+    "btc_15m",
+    "btc_hourly",
+    "weather",
+    "calibrator",
+]
 
 
 def main():
@@ -260,30 +366,70 @@ def main():
     parser.add_argument(
         "--model",
         default="all",
-        help="Model to train: all, btc_xgboost, btc_lstm, calibrator",
+        choices=["all"] + ALL_MODELS,
+        help="Model group to train (default: all)",
     )
     args = parser.parse_args()
 
     os.makedirs("data/models", exist_ok=True)
-
-    btc_data = load_btc_training_data()
-    if btc_data.empty:
-        logger.error("No training data — run the harvester first")
-        return
-
     results = {}
 
-    if args.model in ("all", "btc_xgboost"):
-        logger.info("=== Training BTC XGBoost ===")
-        results["btc_xgboost"] = train_btc_xgboost(btc_data)
+    # --- BTC 15m ---
+    if args.model in ("all", "btc_15m"):
+        data_15m = load_btc_training_data("btc_15m")
+        if not data_15m.empty:
+            logger.info("=== Training BTC 15m XGBoost ===")
+            results["btc_15m_xgboost"] = train_xgboost(
+                data_15m, "data/models/btc_xgboost_latest.joblib", "BTC 15m"
+            )
+            logger.info("=== Training BTC 15m LSTM ===")
+            results["btc_15m_lstm"] = train_lstm(
+                data_15m, "data/models/btc_lstm_latest.joblib", "BTC 15m"
+            )
+        else:
+            results["btc_15m"] = {"error": "No data"}
 
-    if args.model in ("all", "btc_lstm"):
-        logger.info("=== Training BTC LSTM ===")
-        results["btc_lstm"] = train_btc_lstm(btc_data)
+    # --- BTC Hourly ---
+    if args.model in ("all", "btc_hourly"):
+        data_hr = load_btc_training_data("btc_hourly")
+        if not data_hr.empty:
+            logger.info("=== Training BTC Hourly XGBoost ===")
+            results["btc_hourly_xgboost"] = train_xgboost(
+                data_hr, "data/models/btc_hourly_xgboost_latest.joblib", "BTC Hourly"
+            )
+            logger.info("=== Training BTC Hourly LSTM ===")
+            results["btc_hourly_lstm"] = train_lstm(
+                data_hr,
+                "data/models/btc_hourly_lstm_latest.joblib",
+                "BTC Hourly",
+                seq_len=30,  # Longer sequences for hourly data
+            )
+        else:
+            results["btc_hourly"] = {"error": "No data"}
 
+    # --- Weather (multi-city) ---
+    if args.model in ("all", "weather"):
+        data_wx = load_weather_training_data()
+        if not data_wx.empty:
+            logger.info("=== Training Weather XGBoost (multi-city) ===")
+            results["weather_xgboost"] = train_xgboost(
+                data_wx, "data/models/weather_xgboost_latest.joblib", "Weather"
+            )
+        else:
+            results["weather"] = {"error": "No data"}
+
+    # --- Calibrator (uses BTC 15m XGBoost) ---
     if args.model in ("all", "calibrator"):
-        logger.info("=== Training Calibrator ===")
-        results["calibrator"] = train_calibrator(btc_data)
+        data_15m = load_btc_training_data("btc_15m")
+        if not data_15m.empty:
+            logger.info("=== Training Calibrator ===")
+            results["calibrator"] = train_calibrator(
+                data_15m,
+                "data/models/btc_xgboost_latest.joblib",
+                "data/models/calibrator_latest.joblib",
+            )
+        else:
+            results["calibrator"] = {"error": "No BTC 15m data for calibration"}
 
     print("\n=== TRAINING RESULTS ===")
     for name, res in results.items():
