@@ -25,7 +25,7 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.strategies = {
             "ml_hourly": MLBtcHourlyStrategy(min_edge=0.02, cooldown_seconds=120),
             "crypto_hr": CryptoHourlyStrategyV3(
-                confidence_margin=20.0, obi_threshold=0.50
+                confidence_margin=20.0, obi_threshold=0.45
             ),
         }
 
