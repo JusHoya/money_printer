@@ -29,9 +29,12 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
         # Microstructure-first strategy waterfall (Sprint 5+)
         # Relaxed thresholds for data collection / ML training bootstrap
+        # EmpiricalEdge: widened to 2-60 min window (contracts open 60+ min early)
         self.strategies = {
             "cross_arb": CrossSpreadArbStrategy(),
-            "empirical_edge": EmpiricalEdgeStrategy(min_edge=0.02),
+            "empirical_edge": EmpiricalEdgeStrategy(
+                min_edge=0.02, min_minutes_remaining=2, max_minutes_remaining=60
+            ),
             "latency_arb": LatencyArbStrategy(),
             "time_decay": TimeDecayScalper(),
             "longshot_v2": LongshotFaderV2(),

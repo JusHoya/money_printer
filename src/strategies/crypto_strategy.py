@@ -863,9 +863,16 @@ class CryptoHourlyStrategyV3(Strategy):
     Targeting 60s BRTI MA, using Reciprocal Math and OBI triggers.
     """
 
-    def __init__(self, confidence_margin: float = 50.0, obi_threshold: float = 0.55):
+    def __init__(
+        self,
+        confidence_margin: float = 50.0,
+        obi_threshold: float = 0.55,
+        cooldown_seconds: int = 180,
+    ):
         self.confidence_margin = confidence_margin
         self.obi_threshold = obi_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._cooldown_until = datetime.min
         self.price_history = []
         self.window_minutes = 20
         self.FIXED_STOP_CENTS = 0.05
@@ -906,6 +913,10 @@ class CryptoHourlyStrategyV3(Strategy):
 
         symbol = market_data.symbol
         if ("KXBTC" not in symbol and "kxbtcd" not in symbol) or "15M" in symbol:
+            return []
+
+        # Cooldown between signals
+        if datetime.now() < self._cooldown_until:
             return []
 
         if not self.price_history:
@@ -1003,6 +1014,11 @@ class CryptoHourlyStrategyV3(Strategy):
                 if close_time:
                     sig.expiration_time = close_time
                 signals.append(sig)
+
+        if signals:
+            self._cooldown_until = datetime.now() + timedelta(
+                seconds=self.cooldown_seconds
+            )
         return signals
 
 
