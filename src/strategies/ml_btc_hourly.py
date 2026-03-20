@@ -27,7 +27,7 @@ class MLBtcHourlyStrategy(Strategy):
     """
 
     # Time windows (minute-of-hour) when we consider trading
-    TRADE_WINDOWS = [(0, 15), (25, 35), (45, 60)]
+    TRADE_WINDOWS = [(0, 20), (25, 40), (45, 60)]
 
     def __init__(
         self,

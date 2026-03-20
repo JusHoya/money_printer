@@ -112,7 +112,54 @@ class TickerResolverMixin:
             if criteria == "time":
                 active_markets.sort(key=lambda x: x.get("expiration_time", "9999"))
                 if active_markets:
-                    best_ticker = active_markets[0].get("ticker")
+                    # For BTC 15m: multiple strikes share the same expiration.
+                    # Group by soonest expiration and pick the ATM strike.
+                    soonest_exp = active_markets[0].get("expiration_time")
+                    same_exp = [
+                        m
+                        for m in active_markets
+                        if m.get("expiration_time") == soonest_exp
+                    ]
+
+                    if len(same_exp) > 1 and coinbase:
+                        spot_price = None
+                        try:
+                            cb_data = coinbase.fetch_latest()
+                            if cb_data:
+                                spot_price = cb_data.price
+                        except Exception:
+                            pass
+
+                        if spot_price:
+
+                            def _strike_dist(m):
+                                fs = m.get("floor_strike")
+                                if fs is not None:
+                                    try:
+                                        return abs(float(fs) - spot_price)
+                                    except (TypeError, ValueError):
+                                        pass
+                                # Fallback: parse from ticker suffix
+                                try:
+                                    parts = m.get("ticker", "").split("-")
+                                    val = float(re.sub(r"[A-Za-z]", "", parts[-1]))
+                                    return abs(val - spot_price)
+                                except Exception:
+                                    return 999999.0
+
+                            same_exp.sort(key=_strike_dist)
+                            best = same_exp[0]
+                            best_ticker = best.get("ticker")
+                            fs = best.get("floor_strike", "?")
+                            logger.info(
+                                f"[Bot] ATM Resolve: {best_ticker} "
+                                f"(strike={fs}, spot={spot_price:.0f}, "
+                                f"{len(same_exp)} candidates)"
+                            )
+                        else:
+                            best_ticker = same_exp[0].get("ticker")
+                    else:
+                        best_ticker = active_markets[0].get("ticker")
 
             elif criteria == "sentiment":
                 now = datetime.now()

@@ -21,9 +21,12 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.coinbase = None
 
         # ML-driven primary + V3 rule-based fallback
+        # Relaxed thresholds for data collection / ML training bootstrap
         self.strategies = {
-            "ml_hourly": MLBtcHourlyStrategy(),
-            "crypto_hr": CryptoHourlyStrategyV3(),
+            "ml_hourly": MLBtcHourlyStrategy(min_edge=0.02, cooldown_seconds=120),
+            "crypto_hr": CryptoHourlyStrategyV3(
+                confidence_margin=20.0, obi_threshold=0.50
+            ),
         }
 
     def setup(self, kalshi, coinbase=None, nws=None, **kwargs):
@@ -104,16 +107,33 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     btc_data_hr.extra["strike"] = k_data_center.extra.get("strike")
                     btc_data_hr.extra["spot_price"] = btc_data.price
 
+                    if self.ticks % 20 == 0:
+                        logger.info(
+                            f"[BTC Hourly] Evaluating {center_ticker} | "
+                            f"spot={btc_data.price:.0f}, "
+                            f"bid={btc_data_hr.bid}, ask={btc_data_hr.ask}, "
+                            f"strike={btc_data_hr.extra.get('strike', '?')}"
+                        )
                     # Waterfall: ML Hourly → V3 Hourly fallback
+                    ml_signals = self.strategies["ml_hourly"].analyze(btc_data_hr)
+                    if ml_signals and self.ticks % 10 == 0:
+                        logger.info(
+                            f"[BTC Hourly] ML Hourly → {len(ml_signals)} signal(s)"
+                        )
                     traded = self._process_signals(
-                        self.strategies["ml_hourly"].analyze(btc_data_hr),
+                        ml_signals,
                         strategy_name="ML BTC Hourly",
                         risk_manager=risk_manager,
                         dashboard=dashboard,
                     )
                     if not traded:
+                        v3_signals = self.strategies["crypto_hr"].analyze(btc_data_hr)
+                        if v3_signals and self.ticks % 10 == 0:
+                            logger.info(
+                                f"[BTC Hourly] Crypto V3 → {len(v3_signals)} signal(s)"
+                            )
                         self._process_signals(
-                            self.strategies["crypto_hr"].analyze(btc_data_hr),
+                            v3_signals,
                             strategy_name="Crypto Hourly V3",
                             risk_manager=risk_manager,
                             dashboard=dashboard,

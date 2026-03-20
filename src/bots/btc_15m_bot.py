@@ -130,6 +130,13 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             return []
 
         # Waterfall: risk-free arb > empirical edge > latency > time decay > longshot > ML > sniper
+        if self.ticks % 20 == 0:
+            logger.info(
+                f"[BTC 15m] Evaluating {btc_data.symbol} | "
+                f"spot={btc_data.extra.get('spot_price', '?')}, "
+                f"bid={btc_data.bid}, ask={btc_data.ask}, "
+                f"strike={btc_data.extra.get('strike', '?')}"
+            )
         for strat_key, strat_name in [
             ("cross_arb", "Cross-Spread Arb"),
             ("empirical_edge", "Empirical Edge"),
@@ -139,8 +146,11 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             ("ml_btc_15m", "ML BTC 15m"),
             ("late_sniper", "Late Sniper"),
         ]:
+            signals = self.strategies[strat_key].analyze(btc_data)
+            if signals and self.ticks % 10 == 0:
+                logger.info(f"[BTC 15m] {strat_name} → {len(signals)} signal(s)")
             traded = self._process_signals(
-                self.strategies[strat_key].analyze(btc_data),
+                signals,
                 strategy_name=strat_name,
                 risk_manager=risk_manager,
                 dashboard=dashboard,
