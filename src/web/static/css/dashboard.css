@@ -644,8 +644,8 @@ td.neu { color: var(--text); }
 }
 .mkt-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: 1fr 50px 42px 42px 42px 42px;
+  gap: 4px;
   align-items: center;
   padding: 6px 14px;
   border-bottom: 1px solid var(--border);
