@@ -28,14 +28,14 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.coinbase = None
 
         # Microstructure-first strategy waterfall (Sprint 5+)
-        # Priority: risk-free arb > empirical edge > latency > time decay > ML fallback
+        # Relaxed thresholds for data collection / ML training bootstrap
         self.strategies = {
             "cross_arb": CrossSpreadArbStrategy(),
-            "empirical_edge": EmpiricalEdgeStrategy(min_edge=0.05),
+            "empirical_edge": EmpiricalEdgeStrategy(min_edge=0.02),
             "latency_arb": LatencyArbStrategy(),
             "time_decay": TimeDecayScalper(),
             "longshot_v2": LongshotFaderV2(),
-            "ml_btc_15m": MLBtc15mStrategy(),  # ML fallback
+            "ml_btc_15m": MLBtc15mStrategy(),
             "late_sniper": Crypto15mLateSniper(),
         }
 

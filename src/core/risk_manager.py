@@ -66,8 +66,8 @@ class RiskManager:
         self.MAX_DAILY_DRAWDOWN_PCT = 0.50
         self.MAX_STRATEGY_DRAWDOWN_PCT = 0.10
         self.MAX_PORTFOLIO_EXPOSURE_PCT = 0.50
-        self.MIN_TRADE_INTERVAL_SEC = 30
-        self.LOSS_COOLDOWN_SEC = 120
+        self.MIN_TRADE_INTERVAL_SEC = 10
+        self.LOSS_COOLDOWN_SEC = 60
         self.loss_cooldown = {}
 
         # Sprint 4: correlation limit

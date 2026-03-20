@@ -513,14 +513,18 @@ class SimulatedExchange:
                         probability_shift = math.tanh(normalized_diff) * 0.49
                         tanh_estimate = max(0.01, min(0.99, 0.50 + probability_shift))
 
-                        # For weather: always prefer real Kalshi market price over tanh.
-                        # Tanh on temperature creates unrealistic profits.
-                        # For BTC: use tanh (spot price is a reasonable proxy),
-                        # but still prefer cached market price on weak signals.
+                        # Prefer real Kalshi market price over tanh for weather
+                        # AND hourly contracts. Tanh creates unrealistic profits
+                        # when the input is temperature or when the orchestrator
+                        # passes contract prices instead of spot prices.
+                        # BTC 15m keeps tanh (spot price is correct input).
                         lmp = pos.get("last_market_price", 0)
                         has_real_price = lmp > 0 and lmp != pos["entry_price"]
+                        is_hourly_or_weather = (
+                            "KXHIGH" in pos["symbol"] or "KXBTCD" in pos["symbol"]
+                        )
 
-                        if "KXHIGH" in pos["symbol"] and has_real_price:
+                        if is_hourly_or_weather and has_real_price:
                             estimated_price = lmp
                         elif abs(probability_shift) < 0.10 and has_real_price:
                             estimated_price = lmp

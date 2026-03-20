@@ -85,6 +85,11 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                             else 0.0,
                             volume=k_data_ladder.volume,
                         )
+                        # Cache real Kalshi price for position valuation
+                        if best_price > 0:
+                            risk_manager.exchange.update_market_price(
+                                ticker, best_price
+                            )
 
                 # Use center ticker for strategy
                 center_ticker = ladder[0]
