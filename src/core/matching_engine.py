@@ -513,13 +513,17 @@ class SimulatedExchange:
                         probability_shift = math.tanh(normalized_diff) * 0.49
                         tanh_estimate = max(0.01, min(0.99, 0.50 + probability_shift))
 
-                        # If tanh gives a weak signal (near 0.50) and we have a real market price,
-                        # prefer the cached market price to avoid phantom 0.50 exits
-                        if (
-                            abs(probability_shift) < 0.10
-                            and pos.get("last_market_price", 0) != pos["entry_price"]
-                        ):
-                            estimated_price = pos["last_market_price"]
+                        # For weather: always prefer real Kalshi market price over tanh.
+                        # Tanh on temperature creates unrealistic profits.
+                        # For BTC: use tanh (spot price is a reasonable proxy),
+                        # but still prefer cached market price on weak signals.
+                        lmp = pos.get("last_market_price", 0)
+                        has_real_price = lmp > 0 and lmp != pos["entry_price"]
+
+                        if "KXHIGH" in pos["symbol"] and has_real_price:
+                            estimated_price = lmp
+                        elif abs(probability_shift) < 0.10 and has_real_price:
+                            estimated_price = lmp
                             logger.debug(
                                 f"[OMS] Using cached market price {estimated_price:.2f} (tanh was {tanh_estimate:.2f})"
                             )

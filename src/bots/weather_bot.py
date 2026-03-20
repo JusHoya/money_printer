@@ -95,9 +95,21 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 except Exception as e:
                     logger.error(f"[Weather] Market Fetch Fail ({kalshi_ticker}): {e}")
 
+            # Use real Kalshi market price for position valuation (not raw temp)
+            kalshi_market_price = None
+            if active_ticker and nws_data.bid > 0:
+                kalshi_market_price = nws_data.bid  # fused from k_data above
+            elif active_ticker and nws_data.price > 0:
+                kalshi_market_price = nws_data.price
+
             if temp:
                 dashboard.update_price(f"{kalshi_ticker or station} (F)", temp)
-                if active_ticker:
+                if active_ticker and kalshi_market_price and kalshi_market_price > 0:
+                    risk_manager.update_market_data(active_ticker, kalshi_market_price)
+                    risk_manager.exchange.update_market_price(
+                        active_ticker, kalshi_market_price
+                    )
+                elif active_ticker:
                     risk_manager.update_market_data(active_ticker, temp)
                 else:
                     risk_manager.update_market_data(f"TEMP_{station}", temp)

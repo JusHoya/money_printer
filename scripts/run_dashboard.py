@@ -5,7 +5,7 @@ import sys
 import argparse
 
 # Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.visualization.dashboard import Dashboard
 from src.data.coinbase_provider import CoinbaseProvider
@@ -95,10 +95,12 @@ class OrchestratorEngine:
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
-        strategy_name = position.get('strategy_name', 'Unknown')
-        pnl = position.get('pnl', 0.0)
+        strategy_name = position.get("strategy_name", "Unknown")
+        pnl = position.get("pnl", 0.0)
         self.dashboard.record_strategy_trade_result(strategy_name, pnl)
-        logger.info(f"[Orchestrator] Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}")
+        logger.info(
+            f"[Orchestrator] Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}"
+        )
 
         # Forward Late Sniper closes for adaptive threshold
         for bot in self.bots:
@@ -120,15 +122,21 @@ class OrchestratorEngine:
                 if self.risk_manager and self.kalshi:
                     active_positions = list(self.risk_manager.exchange.positions)
                     for pos in active_positions:
-                        symbol = pos['symbol']
+                        symbol = pos["symbol"]
                         if "KX" in symbol:
                             try:
                                 k_data = self.kalshi.fetch_latest(symbol)
                                 if k_data:
-                                    real_price = k_data.bid if k_data.bid > 0 else k_data.ask
+                                    real_price = (
+                                        k_data.bid if k_data.bid > 0 else k_data.ask
+                                    )
                                     if real_price > 0:
-                                        self.risk_manager.exchange.update_market_price(symbol, real_price)
-                                    self.risk_manager.update_market_data(symbol, k_data.price)
+                                        self.risk_manager.exchange.update_market_price(
+                                            symbol, real_price
+                                        )
+                                    self.risk_manager.update_market_data(
+                                        symbol, k_data.price
+                                    )
                             except Exception:
                                 pass
 
@@ -141,11 +149,11 @@ class OrchestratorEngine:
                     except Exception as e:
                         logger.error(f"[{bot.name}] Tick error: {e}")
 
-                time.sleep(5)
+                time.sleep(2)
 
             except Exception as e:
                 self.dashboard.log(f"Error in loop: {str(e)}")
-                time.sleep(5)
+                time.sleep(2)
 
     def run(self):
         prevent_sleep()
@@ -180,7 +188,9 @@ class OrchestratorEngine:
         t.daemon = True
         t.start()
 
-        self.dashboard.log(f"Trading Engine STARTED. Bots: {[b.name for b in self.bots]}")
+        self.dashboard.log(
+            f"Trading Engine STARTED. Bots: {[b.name for b in self.bots]}"
+        )
 
         # UI loop
         while self.running:
@@ -190,12 +200,17 @@ class OrchestratorEngine:
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+
     load_dotenv(override=True)
 
     parser = argparse.ArgumentParser(description="Money Printer Trading Dashboard")
-    parser.add_argument("--bot", action="append", dest="bots",
-                        help="Bot to run (can specify multiple). Default: all bots. "
-                             f"Available: {BotRegistry.list_bots()}")
+    parser.add_argument(
+        "--bot",
+        action="append",
+        dest="bots",
+        help="Bot to run (can specify multiple). Default: all bots. "
+        f"Available: {BotRegistry.list_bots()}",
+    )
 
     args = parser.parse_args()
 

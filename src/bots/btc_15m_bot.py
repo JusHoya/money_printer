@@ -23,7 +23,6 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
     def __init__(self):
         Bot.__init__(self, name="BTC 15m")
         TickerResolverMixin.__init__(self)
-        self.last_15m_trade_interval = None
         self.ticks = 0
         self.kalshi = None
         self.coinbase = None
@@ -113,20 +112,11 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         if not btc_15m_resolved:
             return []
 
-        # 15m interval gating
+        # 15m interval gating — allow evaluation from minute 3 onward.
+        # Risk manager (rate limit + cooldowns) controls trade frequency.
         now = datetime.now()
-        current_interval_id = now.hour * 4 + now.minute // 15
         minute_in_interval = now.minute % 15
-        can_trade = (
-            minute_in_interval >= 7
-            and current_interval_id != self.last_15m_trade_interval
-        )
-
-        if not can_trade:
-            if minute_in_interval < 7 and self.ticks % 30 == 0:
-                logger.debug(
-                    f"[BTC 15m Gate] Waiting for minute 7 (currently min {minute_in_interval})"
-                )
+        if minute_in_interval < 3:
             return []
 
         # Waterfall: risk-free arb > empirical edge > latency > time decay > longshot > ML > sniper
@@ -157,9 +147,6 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             )
             if traded:
                 break
-
-        if traded:
-            self.last_15m_trade_interval = current_interval_id
 
         return []
 
