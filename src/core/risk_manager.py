@@ -63,7 +63,7 @@ class RiskManager:
 
         # RULES (base — overridden by bankroll stage)
         self.MAX_RISK_PER_TRADE_PCT = 0.05
-        self.MAX_DAILY_DRAWDOWN_PCT = 0.05
+        self.MAX_DAILY_DRAWDOWN_PCT = 0.50
         self.MAX_STRATEGY_DRAWDOWN_PCT = 0.10
         self.MAX_PORTFOLIO_EXPOSURE_PCT = 0.50
         self.MIN_TRADE_INTERVAL_SEC = 30

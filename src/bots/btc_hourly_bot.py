@@ -99,6 +99,8 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         k_data_center.extra = {}
                     if btc_data_hr.extra is None:
                         btc_data_hr.extra = {}
+                    # Clear Coinbase source so strategies don't treat this as a spot tick
+                    btc_data_hr.extra.pop("source", None)
                     btc_data_hr.extra["no_bid"] = k_data_center.extra.get("no_bid", 0.0)
                     btc_data_hr.extra["no_ask"] = k_data_center.extra.get("no_ask", 0.0)
                     btc_data_hr.extra["close_time"] = k_data_center.extra.get(

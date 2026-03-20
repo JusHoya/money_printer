@@ -62,6 +62,7 @@ def create_app(state_manager, orchestrator) -> FastAPI:
             "</body></html>"
         )
         from fastapi.responses import HTMLResponse
+
         return HTMLResponse(content=html)
 
     @app.get("/api/bots")
@@ -80,14 +81,28 @@ def create_app(state_manager, orchestrator) -> FastAPI:
     @app.post("/api/bots/{name}/start")
     async def start_bot(name: str):
         if not hasattr(orchestrator, "start_bot"):
-            raise HTTPException(status_code=501, detail="start_bot not implemented on orchestrator")
+            raise HTTPException(
+                status_code=501, detail="start_bot not implemented on orchestrator"
+            )
         try:
             orchestrator.start_bot(name)
-            return JSONResponse(content={"status": "ok", "bot": name, "action": "started"})
+            return JSONResponse(
+                content={"status": "ok", "bot": name, "action": "started"}
+            )
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/status")
+    async def get_status():
+        """Full state snapshot — portfolio, positions, strategies, market data."""
+        try:
+            snapshot = state_manager.snapshot()
+            return JSONResponse(content=snapshot)
+        except Exception as e:
+            log.error(f"[api] status error: {e}")
+            return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @app.get("/api/logs/data")
     async def get_data_log():
@@ -99,6 +114,7 @@ def create_app(state_manager, orchestrator) -> FastAPI:
             if not path.exists():
                 return JSONResponse(content=[])
             import csv
+
             with open(path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 rows = list(reader)
@@ -118,7 +134,7 @@ def create_app(state_manager, orchestrator) -> FastAPI:
                 return JSONResponse(content=[])
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            return JSONResponse(content=[l.rstrip("\n") for l in lines[-50:]])
+            return JSONResponse(content=[line.rstrip("\n") for line in lines[-50:]])
         except Exception as e:
             log.error(f"[api] session log error: {e}")
             return JSONResponse(content=[])
@@ -126,10 +142,14 @@ def create_app(state_manager, orchestrator) -> FastAPI:
     @app.post("/api/bots/{name}/stop")
     async def stop_bot(name: str):
         if not hasattr(orchestrator, "stop_bot"):
-            raise HTTPException(status_code=501, detail="stop_bot not implemented on orchestrator")
+            raise HTTPException(
+                status_code=501, detail="stop_bot not implemented on orchestrator"
+            )
         try:
             orchestrator.stop_bot(name)
-            return JSONResponse(content={"status": "ok", "bot": name, "action": "stopped"})
+            return JSONResponse(
+                content={"status": "ok", "bot": name, "action": "stopped"}
+            )
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
