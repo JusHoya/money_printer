@@ -116,6 +116,11 @@ class OrchestratorEngine:
 
     def _run_drawdown_cycle(self):
         """Archive logs, retrain model, reset state for next cycle."""
+        from datetime import datetime as _dt
+
+        # Immediately clear the flag to prevent re-triggering
+        self.risk_manager.drawdown_kill_triggered = False
+
         self._cycle_count += 1
         ts = time.strftime("%Y%m%d_%H%M%S")
         archive_name = f"cycle_{ts}_dd{self._cycle_count}"
@@ -125,14 +130,17 @@ class OrchestratorEngine:
         self.dashboard.log(f"[Cycle] Drawdown hit. Archiving to {archive_name}...")
         logger.info("[Cycle] Archiving session data to %s", archive_dir)
 
-        # Move current log files to archive
+        # COPY (not move) log files — Windows can't move open files.
+        # The dashboard will be re-created with fresh log paths afterward.
         for f in os.listdir("logs"):
             fpath = os.path.join("logs", f)
             if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
-                shutil.move(fpath, os.path.join(archive_dir, f))
+                try:
+                    shutil.copy2(fpath, os.path.join(archive_dir, f))
+                except Exception as exc:
+                    logger.warning("[Cycle] Could not copy %s: %s", f, exc)
 
         # Retrain model
-        self.dashboard.log("[Cycle] Retraining model on all archived data...")
         logger.info("[Cycle] Running train_from_csv.py ...")
         try:
             result = subprocess.run(
@@ -148,34 +156,32 @@ class OrchestratorEngine:
                 env={**os.environ, "PYTHONPATH": "."},
             )
             if result.returncode == 0:
-                # Extract summary line from output
                 for line in result.stdout.splitlines():
                     if "Contracts:" in line or "AUC=" in line:
-                        self.dashboard.log(f"[Cycle] {line.strip()}")
+                        logger.info("[Cycle] %s", line.strip())
                 logger.info("[Cycle] Retraining complete.")
             else:
                 logger.error("[Cycle] Retrain failed: %s", result.stderr[-500:])
-                self.dashboard.alert(
-                    "[Cycle] Retrain FAILED — continuing with old model"
-                )
         except subprocess.TimeoutExpired:
             logger.error("[Cycle] Retrain timed out")
-            self.dashboard.alert("[Cycle] Retrain TIMEOUT")
+        except Exception as exc:
+            logger.error("[Cycle] Retrain error: %s", exc)
 
         # Reset risk manager for new cycle
         new_bal = self.sim_balance if self.sim_balance > 0 else 3000.0
         self.risk_manager.update_balance(new_bal)
         self.risk_manager.daily_pnl = 0.0
-        self.risk_manager.drawdown_kill_triggered = False
         self.risk_manager.strategy_pnl = {}
         self.risk_manager.loss_cooldown = {}
-        self.risk_manager.last_trade_time = __import__("datetime").datetime.min
-        # Clear open positions
+        self.risk_manager.last_trade_time = _dt.min
+        # Clear open positions without triggering close callbacks
         self.risk_manager.exchange.positions.clear()
         self.risk_manager.exchange._next_id = 1
+        self.risk_manager.active_positions = 0
 
-        # Re-init dashboard logging for new session
+        # Re-init dashboard with fresh log files
         self.dashboard = Dashboard()
+        self.risk_manager.exchange.on_close = self._on_trade_close
         self.dashboard.log(
             f"[Cycle] New cycle #{self._cycle_count} started. Balance: ${new_bal:.2f}"
         )
