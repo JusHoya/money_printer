@@ -78,12 +78,19 @@ def main():
         default=0,
         help="Override starting balance for simulation (e.g. 3000)",
     )
+    parser.add_argument(
+        "--auto-cycle",
+        action="store_true",
+        help="Auto-archive, retrain, and restart on drawdown kill switch",
+    )
     args = parser.parse_args()
 
     # ------------------------------------------------------------------ #
     # Build orchestrator
     # ------------------------------------------------------------------ #
     engine = OrchestratorEngine(bot_names=args.bots)
+    engine.auto_cycle = args.auto_cycle
+    engine.sim_balance = args.sim_balance
 
     prevent_sleep()
     engine.dashboard.log("Web Dashboard Initializing...")

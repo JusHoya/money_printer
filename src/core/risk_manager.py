@@ -58,6 +58,7 @@ class RiskManager:
 
         self.last_trade_time = datetime.min
         self.today = date.today()
+        self.drawdown_kill_triggered = False
 
         self.strategy_pnl = {}
 
@@ -317,6 +318,7 @@ class RiskManager:
                 "[Risk] [KILL] KILL SWITCH: Daily Drawdown Limit Hit ($%.2f)",
                 self.daily_pnl,
             )
+            self.drawdown_kill_triggered = True
             return False
 
         # 3.5 Strategy Drawdown Limit

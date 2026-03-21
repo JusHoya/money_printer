@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 import time
 import threading
 import os
@@ -62,6 +64,11 @@ class OrchestratorEngine:
             all_strategies.extend(bot.strategies.keys())
         self.dashboard.active_strategies = all_strategies
 
+        # Auto-cycle config (set by caller)
+        self.auto_cycle = False
+        self.sim_balance = 0.0
+        self._cycle_count = 0
+
         logger.info(f"[Orchestrator] Active bots: {[b.name for b in self.bots]}")
 
     @property
@@ -107,6 +114,73 @@ class OrchestratorEngine:
             if strategy_name == "Late Sniper" and "late_sniper" in bot.strategies:
                 bot.strategies["late_sniper"]._handle_position_close(position)
 
+    def _run_drawdown_cycle(self):
+        """Archive logs, retrain model, reset state for next cycle."""
+        self._cycle_count += 1
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        archive_name = f"cycle_{ts}_dd{self._cycle_count}"
+        archive_dir = os.path.join("logs", "_archive", archive_name)
+        os.makedirs(archive_dir, exist_ok=True)
+
+        self.dashboard.log(f"[Cycle] Drawdown hit. Archiving to {archive_name}...")
+        logger.info("[Cycle] Archiving session data to %s", archive_dir)
+
+        # Move current log files to archive
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
+                shutil.move(fpath, os.path.join(archive_dir, f))
+
+        # Retrain model
+        self.dashboard.log("[Cycle] Retraining model on all archived data...")
+        logger.info("[Cycle] Running train_from_csv.py ...")
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/train_from_csv.py",
+                    "--sample-interval",
+                    "20",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env={**os.environ, "PYTHONPATH": "."},
+            )
+            if result.returncode == 0:
+                # Extract summary line from output
+                for line in result.stdout.splitlines():
+                    if "Contracts:" in line or "AUC=" in line:
+                        self.dashboard.log(f"[Cycle] {line.strip()}")
+                logger.info("[Cycle] Retraining complete.")
+            else:
+                logger.error("[Cycle] Retrain failed: %s", result.stderr[-500:])
+                self.dashboard.alert(
+                    "[Cycle] Retrain FAILED — continuing with old model"
+                )
+        except subprocess.TimeoutExpired:
+            logger.error("[Cycle] Retrain timed out")
+            self.dashboard.alert("[Cycle] Retrain TIMEOUT")
+
+        # Reset risk manager for new cycle
+        new_bal = self.sim_balance if self.sim_balance > 0 else 3000.0
+        self.risk_manager.update_balance(new_bal)
+        self.risk_manager.daily_pnl = 0.0
+        self.risk_manager.drawdown_kill_triggered = False
+        self.risk_manager.strategy_pnl = {}
+        self.risk_manager.loss_cooldown = {}
+        self.risk_manager.last_trade_time = __import__("datetime").datetime.min
+        # Clear open positions
+        self.risk_manager.exchange.positions.clear()
+        self.risk_manager.exchange._next_id = 1
+
+        # Re-init dashboard logging for new session
+        self.dashboard = Dashboard()
+        self.dashboard.log(
+            f"[Cycle] New cycle #{self._cycle_count} started. Balance: ${new_bal:.2f}"
+        )
+        logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
+
     def market_loop(self):
         """Background thread: position updates + bot ticks."""
         last_heartbeat = time.time()
@@ -139,6 +213,12 @@ class OrchestratorEngine:
                                     )
                             except Exception:
                                 pass
+
+                # Auto-cycle: detect drawdown kill switch
+                if self.auto_cycle and self.risk_manager.drawdown_kill_triggered:
+                    self._run_drawdown_cycle()
+                    last_heartbeat = time.time()
+                    continue
 
                 # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:
