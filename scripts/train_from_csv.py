@@ -15,7 +15,7 @@ import math
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -108,9 +108,9 @@ def canon_symbol(symbol: str) -> str:
 
 
 def load_session(
-    data_csv: str, log_paths: List[str]
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
-    """Load one data CSV; return (btc_df, contract_df, strikes)."""
+    data_csv: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load one data CSV; return (btc_df, contract_df)."""
     rows = []
     with open(data_csv, encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -137,14 +137,7 @@ def load_session(
 
     btc_df = pd.DataFrame(btc_rows)
     contract_df = pd.DataFrame(contract_rows)
-
-    if btc_df.empty:
-        log.warning("No BTC-USD rows in %s", data_csv)
-    if contract_df.empty:
-        log.warning("No KXBTC15M rows in %s", data_csv)
-
-    strikes = extract_strikes_from_logs(log_paths)
-    return btc_df, contract_df, strikes
+    return btc_df, contract_df
 
 
 # --------------------------------------------------------------------------- #
@@ -152,54 +145,75 @@ def load_session(
 # --------------------------------------------------------------------------- #
 
 
-def compute_labels(
-    btc_df: pd.DataFrame,
-    contract_symbols: List[str],
-    strikes: Dict[str, float],
+def compute_labels_from_terminal_price(
+    contract_df: pd.DataFrame,
 ) -> Dict[str, int]:
-    """Label each contract: 1 if BTC >= strike at expiry, else 0."""
+    """Infer labels from terminal contract price (>0.90 → YES, <0.10 → NO)."""
     labels: Dict[str, int] = {}
-    for sym in contract_symbols:
-        strike = strikes.get(sym)
-        if strike is None:
-            log.debug("No strike for %s, skipping", sym)
-            continue
-
-        expiry = parse_expiry(sym)
-        if expiry is None:
-            continue
-
-        # Find last BTC price within 120s of expiry
-        mask = btc_df["timestamp"] <= pd.Timestamp(expiry + timedelta(seconds=30))
-        if mask.sum() == 0:
-            continue
-        last_btc = btc_df.loc[mask, "btc_price"].iloc[-1]
-        last_ts = btc_df.loc[mask, "timestamp"].iloc[-1]
-
-        # Must be within 120s of expiry
-        gap = abs((pd.Timestamp(expiry) - last_ts).total_seconds())
-        if gap > 120:
-            log.debug("BTC obs too far from expiry for %s (%.0fs gap)", sym, gap)
-            continue
-
-        label = 1 if last_btc >= strike else 0
-        labels[sym] = label
-        log.debug(
-            "%s: BTC=%.0f vs strike=%.0f → %s (gap=%.0fs)",
-            sym,
-            last_btc,
-            strike,
-            "YES" if label else "NO",
-            gap,
-        )
+    if contract_df.empty:
+        return labels
+    for sym, grp in contract_df.groupby("symbol"):
+        last_price = grp["contract_price"].iloc[-1]
+        if last_price > 0.90:
+            labels[sym] = 1
+        elif last_price < 0.10:
+            labels[sym] = 0
+        # else: ambiguous, skip
 
     log.info(
-        "Labels: %d contracts (%d YES, %d NO)",
+        "Labels (terminal price): %d contracts (%d YES, %d NO)",
         len(labels),
         sum(labels.values()),
         len(labels) - sum(labels.values()),
     )
     return labels
+
+
+def infer_strikes(
+    btc_df: pd.DataFrame,
+    contract_df: pd.DataFrame,
+    log_strikes: Dict[str, float],
+) -> Dict[str, float]:
+    """Get strikes: prefer log-parsed, fall back to inferring from price ≈ 0.50 crossover."""
+    strikes: Dict[str, float] = dict(log_strikes)
+    if btc_df.empty or contract_df.empty:
+        return strikes
+
+    btc_sorted = btc_df.sort_values("timestamp")
+
+    for sym, grp in contract_df.groupby("symbol"):
+        if sym in strikes:
+            continue  # already have from logs
+
+        # Find observation closest to 0.50 price
+        grp = grp.sort_values("timestamp")
+        dist_to_half = (grp["contract_price"] - 0.50).abs()
+        best_idx = dist_to_half.idxmin()
+        best_price = grp.loc[best_idx, "contract_price"]
+
+        # Only use if reasonably close to 0.50 (within 0.30)
+        if abs(best_price - 0.50) > 0.30:
+            continue
+
+        best_ts = grp.loc[best_idx, "timestamp"]
+        # Find nearest BTC price
+        btc_mask = (btc_sorted["timestamp"] >= best_ts - pd.Timedelta(seconds=30)) & (
+            btc_sorted["timestamp"] <= best_ts + pd.Timedelta(seconds=30)
+        )
+        btc_near = btc_sorted.loc[btc_mask]
+        if btc_near.empty:
+            continue
+
+        cidx = (btc_near["timestamp"] - best_ts).abs().idxmin()
+        strikes[sym] = btc_near.loc[cidx, "btc_price"]
+
+    log.info(
+        "Strikes: %d from logs, %d inferred, %d total",
+        len(log_strikes),
+        len(strikes) - len(log_strikes),
+        len(strikes),
+    )
+    return strikes
 
 
 # --------------------------------------------------------------------------- #
@@ -223,7 +237,9 @@ def build_features(
 
     samples = []
     for sym, label in labels.items():
-        strike = strikes[sym]
+        strike = strikes.get(sym, 0)
+        if strike <= 0:
+            continue
         expiry = parse_expiry(sym)
         if expiry is None:
             continue
@@ -439,8 +455,8 @@ def main():
     parser = argparse.ArgumentParser(description="Train BTC 15m model from CSV data")
     parser.add_argument(
         "--data-dir",
-        default="logs/_archive/NewTrainData",
-        help="Directory with data_*.csv and money_printer_*.log files",
+        default="logs/_archive",
+        help="Root dir to scan recursively for data_*.csv files",
     )
     parser.add_argument("--model-dir", default="data/models")
     parser.add_argument("--sample-interval", type=int, default=30)
@@ -451,49 +467,66 @@ def main():
     model_dir = Path(args.model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # Discover files
-    data_csvs = sorted(data_dir.glob("data_*.csv"))
-    log_files = sorted(data_dir.glob("money_printer_*.log"))
+    # Discover files recursively across all subdirectories
+    data_csvs = sorted(data_dir.rglob("data_*.csv"))
+    log_files = sorted(data_dir.rglob("money_printer_*.log"))
 
     if not data_csvs:
         log.error("No data_*.csv files found in %s", data_dir)
         return
 
-    log.info("Found %d data CSVs, %d log files", len(data_csvs), len(log_files))
+    log.info(
+        "Found %d data CSVs, %d log files across %s",
+        len(data_csvs),
+        len(log_files),
+        data_dir,
+    )
+
+    # Parse strikes from any available logs
+    log_strikes = extract_strikes_from_logs([str(p) for p in log_files])
 
     # Load all sessions
     all_btc = []
     all_contract = []
-    all_strikes: Dict[str, float] = {}
 
     for csv_path in data_csvs:
-        log.info("Loading %s ...", csv_path.name)
-        btc_df, contract_df, strikes = load_session(
-            str(csv_path), [str(p) for p in log_files]
-        )
-        all_btc.append(btc_df)
-        all_contract.append(contract_df)
-        all_strikes.update(strikes)
+        btc_df, contract_df = load_session(str(csv_path))
+        if not btc_df.empty:
+            all_btc.append(btc_df)
+        if not contract_df.empty:
+            all_contract.append(contract_df)
 
-    btc_df = pd.concat(all_btc, ignore_index=True).drop_duplicates(subset=["timestamp"])
-    contract_df = pd.concat(all_contract, ignore_index=True)
+    if not all_btc or not all_contract:
+        log.error("No BTC or contract data found")
+        return
 
-    unique_contracts = contract_df["symbol"].unique() if not contract_df.empty else []
+    btc_df = (
+        pd.concat(all_btc, ignore_index=True)
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
+    contract_df = (
+        pd.concat(all_contract, ignore_index=True)
+        .sort_values("timestamp")
+        .reset_index(drop=True)
+    )
+
+    unique_contracts = contract_df["symbol"].unique()
     log.info(
-        "Combined: %d BTC rows, %d contract rows, %d unique contracts, %d strikes",
+        "Combined: %d BTC rows, %d contract rows, %d unique contracts",
         len(btc_df),
         len(contract_df),
         len(unique_contracts),
-        len(all_strikes),
     )
 
-    # Compute labels
-    labels = compute_labels(btc_df, list(unique_contracts), all_strikes)
+    # Compute labels from terminal contract prices (no logs needed)
+    labels = compute_labels_from_terminal_price(contract_df)
     if not labels:
-        log.error(
-            "No contracts could be labeled. Need BTC spot data at contract expiry times."
-        )
+        log.error("No contracts could be labeled.")
         return
+
+    # Infer strikes: log-based where available, price-crossover elsewhere
+    all_strikes = infer_strikes(btc_df, contract_df, log_strikes)
 
     if args.dry_run:
         log.info("Dry run complete. %d labelable contracts.", len(labels))
