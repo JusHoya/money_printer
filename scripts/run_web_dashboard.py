@@ -72,6 +72,12 @@ def main():
         action="store_true",
         help="Do not automatically open the browser",
     )
+    parser.add_argument(
+        "--sim-balance",
+        type=float,
+        default=0,
+        help="Override starting balance for simulation (e.g. 3000)",
+    )
     args = parser.parse_args()
 
     # ------------------------------------------------------------------ #
@@ -103,6 +109,13 @@ def main():
             engine.dashboard.log(f"Piggy Bank Initialized: ${bal:.2f}")
         except Exception as e:
             engine.dashboard.alert(f"Balance Sync Failed: {e}")
+
+    # Override balance for simulation / data collection
+    if args.sim_balance > 0:
+        engine.risk_manager.update_balance(args.sim_balance)
+        engine.dashboard.log(
+            f"Sim Balance Override: ${args.sim_balance:.2f} (training mode)"
+        )
 
     # ------------------------------------------------------------------ #
     # Start market loop in a background thread
