@@ -204,8 +204,11 @@ def infer_strikes(
         if btc_near.empty:
             continue
 
-        cidx = (btc_near["timestamp"] - best_ts).abs().idxmin()
-        strikes[sym] = btc_near.loc[cidx, "btc_price"]
+        try:
+            cidx = (btc_near["timestamp"] - best_ts).abs().idxmin()
+            strikes[sym] = btc_near.loc[cidx, "btc_price"]
+        except Exception:
+            strikes[sym] = btc_near.iloc[0]["btc_price"]
 
     log.info(
         "Strikes: %d from logs, %d inferred, %d total",
@@ -268,8 +271,11 @@ def build_features(
                 t += pd.Timedelta(seconds=sample_interval_s)
                 continue
             # Pick closest
-            idx = (btc_near["timestamp"] - t).abs().idxmin()
-            btc_price = btc_near.loc[idx, "btc_price"]
+            try:
+                idx = (btc_near["timestamp"] - t).abs().idxmin()
+                btc_price = btc_near.loc[idx, "btc_price"]
+            except Exception:
+                btc_price = btc_near.iloc[0]["btc_price"]
 
             # Find nearest contract price (within 30s)
             c_mask = (cdf["timestamp"] >= t - pd.Timedelta(seconds=30)) & (
@@ -279,8 +285,11 @@ def build_features(
             if c_near.empty:
                 t += pd.Timedelta(seconds=sample_interval_s)
                 continue
-            cidx = (c_near["timestamp"] - t).abs().idxmin()
-            contract_price = c_near.loc[cidx, "contract_price"]
+            try:
+                cidx = (c_near["timestamp"] - t).abs().idxmin()
+                contract_price = c_near.loc[cidx, "contract_price"]
+            except Exception:
+                contract_price = c_near.iloc[0]["contract_price"]
 
             # Time to expiry
             tte_s = max(0, (expiry_ts - t).total_seconds())

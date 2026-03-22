@@ -190,7 +190,10 @@ class OrchestratorEngine:
                     with open(meta_path) as mf:
                         train_metrics = _json.load(mf)
             else:
-                logger.error("[Cycle] Retrain failed: %s", result.stderr[-500:])
+                err_msg = (result.stderr or result.stdout or "unknown")[-500:]
+                logger.error(
+                    "[Cycle] Retrain failed (rc=%d): %s", result.returncode, err_msg
+                )
         except subprocess.TimeoutExpired:
             logger.error("[Cycle] Retrain timed out")
         except Exception as exc:
@@ -262,6 +265,51 @@ class OrchestratorEngine:
 
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
+    def _graduate_model(self, hours: float, pnl: float):
+        """Model is profitable after 8+ hours — save and exit training loop."""
+        import json as _json
+
+        self.auto_cycle = False  # Stop the training loop
+
+        # Save model as graduated
+        grad_path = os.path.join("data", "models", "btc_xgboost_graduated.joblib")
+        src_path = os.path.join("data", "models", "btc_xgboost_latest.joblib")
+        if os.path.exists(src_path):
+            shutil.copy2(src_path, grad_path)
+
+        # Save graduation metadata
+        meta = {
+            "graduated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "cycle_count": self._cycle_count,
+            "final_cycle_hours": round(hours, 1),
+            "final_cycle_pnl": round(pnl, 2),
+            "cycle_history": self.cycle_history,
+        }
+        meta_path = os.path.join("data", "models", "graduation_meta.json")
+        with open(meta_path, "w") as f:
+            _json.dump(meta, f, indent=2)
+
+        # Switch to small seed balance
+        self.risk_manager.update_balance(300.0)
+        self.sim_balance = 300.0
+
+        # Alert on dashboard
+        self.dashboard.alert(
+            f"MODEL GRADUATED after {self._cycle_count} cycles! "
+            f"Profitable for {hours:.1f}h (PnL=${pnl:.2f}). "
+            f"Switched to $300 seed. Saved to {grad_path}"
+        )
+        self.dashboard.log(
+            f"[Graduation] Training loop complete. {self._cycle_count} cycles, "
+            f"{len(self.cycle_history)} drawdowns survived."
+        )
+        logger.info(
+            "[Graduation] Model graduated after %d cycles. PnL=$%.2f over %.1fh",
+            self._cycle_count,
+            pnl,
+            hours,
+        )
+
     def market_loop(self):
         """Background thread: position updates + bot ticks."""
         last_heartbeat = time.time()
@@ -300,6 +348,13 @@ class OrchestratorEngine:
                     self._run_drawdown_cycle()
                     last_heartbeat = time.time()
                     continue
+
+                # Graduation check: profitable for 8+ hours → save model and alert
+                if self.auto_cycle:
+                    cycle_age_h = (time.time() - self._cycle_start_time) / 3600
+                    pnl = self.risk_manager.daily_pnl
+                    if cycle_age_h >= 8 and pnl > 0:
+                        self._graduate_model(cycle_age_h, pnl)
 
                 # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:

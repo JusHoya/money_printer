@@ -349,7 +349,7 @@ class SimulatedExchange:
             "trailing_activated": False,
             "expiration_time": expiry_dt,
             "strategy_name": strategy_name or "Unknown",
-            "last_market_price": entry_price,
+            "last_market_price": 0,  # 0 = not yet updated by real market data
             "contract_side": contract_side,
             "strike": strike,
             "profit_targets": []
@@ -519,7 +519,7 @@ class SimulatedExchange:
                         # passes contract prices instead of spot prices.
                         # BTC 15m keeps tanh (spot price is correct input).
                         lmp = pos.get("last_market_price", 0)
-                        has_real_price = lmp > 0 and lmp != pos["entry_price"]
+                        has_real_price = lmp > 0
                         is_hourly_or_weather = (
                             "KXHIGH" in pos["symbol"] or "KXBTCD" in pos["symbol"]
                         )
@@ -609,7 +609,8 @@ class SimulatedExchange:
 
                     if hit:
                         # Use last_market_price for exit, not raw sigmoid estimate
-                        safe_exit = pos.get("last_market_price", pos["entry_price"])
+                        lmp_exit = pos.get("last_market_price", 0)
+                        safe_exit = lmp_exit if lmp_exit > 0 else pos["entry_price"]
                         self._close_position(
                             pos,
                             safe_exit,
@@ -632,7 +633,8 @@ class SimulatedExchange:
                         f"[OMS] PCT STOP triggered for {pos['symbol']} (pnl_pct={pnl_pct:.2%}). Consider adding explicit stop_loss."
                     )
                     # Use last_market_price or entry_price, never raw sigmoid
-                    safe_exit = pos.get("last_market_price", pos["entry_price"])
+                    lmp_pct = pos.get("last_market_price", 0)
+                    safe_exit = lmp_pct if lmp_pct > 0 else pos["entry_price"]
                     self._close_position(pos, safe_exit, reason="STOP_LOSS_PCT")
 
             except Exception as e:
