@@ -171,7 +171,7 @@ class OrchestratorEngine:
                     sys.executable,
                     "scripts/train_from_csv.py",
                     "--sample-interval",
-                    "20",
+                    "60",
                 ],
                 capture_output=True,
                 text=True,
@@ -236,35 +236,50 @@ class OrchestratorEngine:
         self._cycle_start_time = time.time()
         self._profitable_since = None
 
-        # Post diagnostics to new dashboard
-        self.dashboard.log(f"[Cycle] === TRAINING CYCLE #{self._cycle_count} ===")
-        self.dashboard.log(f"[Cycle] Balance reset to ${new_bal:.2f}")
-        # Show cycle trend
+        # Post diagnostics to ALERTS (persistent, visible anytime)
+        cr = cycle_record
+        self.dashboard.alert(
+            f"CYCLE #{cr['cycle']} COMPLETE | "
+            f"{cr['duration_min']:.0f}min | {cr['trades']} trades | "
+            f"{cr['wins']}W/{cr['losses']}L ({cr['win_rate']:.0f}%) | "
+            f"PnL=${cr['pnl']:.0f}"
+        )
+
+        if cr["train_val_auc"] > 0:
+            self.dashboard.alert(
+                f"RETRAINED | {cr['train_contracts']} contracts | "
+                f"val AUC={cr['train_val_auc']:.4f} | "
+                f"{cr['train_samples']} samples"
+            )
+        elif cr["train_contracts"] == 0:
+            self.dashboard.alert("RETRAIN FAILED — model unchanged")
+
+        # Show trend vs previous cycle
         if len(self.cycle_history) >= 2:
             prev = self.cycle_history[-2]
-            curr = self.cycle_history[-1]
-            dur_delta = curr["duration_min"] - prev["duration_min"]
-            wr_delta = curr["win_rate"] - prev["win_rate"]
-            self.dashboard.log(
-                f"[Cycle] Duration trend: {prev['duration_min']:.0f}min → "
-                f"{curr['duration_min']:.0f}min ({dur_delta:+.0f}min)"
-            )
-            self.dashboard.log(
-                f"[Cycle] Win rate trend: {prev['win_rate']:.0f}% → "
-                f"{curr['win_rate']:.0f}% ({wr_delta:+.0f}%)"
-            )
-        if cycle_record["train_val_auc"] > 0:
-            self.dashboard.log(
-                f"[Cycle] Model: {cycle_record['train_contracts']} contracts, "
-                f"val AUC={cycle_record['train_val_auc']:.4f}, "
-                f"{cycle_record['train_samples']} samples"
-            )
-        # Show feature importance if available
+            dur_d = cr["duration_min"] - prev["duration_min"]
+            wr_d = cr["win_rate"] - prev["win_rate"]
+            auc_d = cr["train_val_auc"] - prev["train_val_auc"]
+            trend_parts = []
+            if dur_d != 0:
+                trend_parts.append(f"duration {dur_d:+.0f}min")
+            if wr_d != 0:
+                trend_parts.append(f"winrate {wr_d:+.1f}%")
+            if auc_d != 0 and cr["train_val_auc"] > 0:
+                trend_parts.append(f"AUC {auc_d:+.4f}")
+            if trend_parts:
+                self.dashboard.alert(f"TREND | {' | '.join(trend_parts)}")
+
+        # Show top features learned
         feat_names = train_metrics.get("feature_names", [])
         if feat_names:
-            top3 = feat_names[:3]
-            self.dashboard.log(f"[Cycle] Top features: {', '.join(top3)}")
+            self.dashboard.alert(f"TOP FEATURES | {', '.join(feat_names[:5])}")
 
+        # Log for file record
+        self.dashboard.log(
+            f"[Cycle] #{self._cycle_count} reset to ${new_bal:.2f}. "
+            f"History: {len(self.cycle_history)} cycles."
+        )
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
     def _graduate_model(self, hours: float, pnl: float):

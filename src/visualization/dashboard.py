@@ -119,7 +119,7 @@ class Dashboard:
 
         # UI
         self.alerts.append(full_msg)
-        if len(self.alerts) > 5:
+        if len(self.alerts) > 50:
             self.alerts.pop(0)
 
         # File
