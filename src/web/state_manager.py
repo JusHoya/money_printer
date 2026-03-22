@@ -61,7 +61,9 @@ class StateManager:
 
         return {
             "mode": self._mode,
-            "uptime": self._fmt_uptime_seconds(orch.uptime_seconds) if hasattr(orch, 'uptime_seconds') else "00:00:00",
+            "uptime": self._fmt_uptime_seconds(orch.uptime_seconds)
+            if hasattr(orch, "uptime_seconds")
+            else "00:00:00",
             "portfolio": portfolio,
             "market_data": self._market_data(dashboard),
             "alerts": list(dashboard.alerts) if dashboard else [],
@@ -72,6 +74,8 @@ class StateManager:
             "bots": self._bots(orch),
             "mascot_state": self._mascot_state(dashboard),
             "data_log": self._data_log(dashboard),
+            "cycle_history": getattr(orch, "cycle_history", []),
+            "training_diagnostics": getattr(orch, "_training_diagnostics", {}),
         }
 
     # ------------------------------------------------------------------

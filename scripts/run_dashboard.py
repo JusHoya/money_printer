@@ -68,6 +68,9 @@ class OrchestratorEngine:
         self.auto_cycle = False
         self.sim_balance = 0.0
         self._cycle_count = 0
+        self._cycle_start_time = time.time()
+        self.cycle_history = []  # list of cycle result dicts
+        self._training_diagnostics = {}  # latest training metrics
 
         logger.info(f"[Orchestrator] Active bots: {[b.name for b in self.bots]}")
 
@@ -117,9 +120,24 @@ class OrchestratorEngine:
     def _run_drawdown_cycle(self):
         """Archive logs, retrain model, reset state for next cycle."""
         from datetime import datetime as _dt
+        import json as _json
 
         # Immediately clear the flag to prevent re-triggering
         self.risk_manager.drawdown_kill_triggered = False
+
+        # Record cycle metrics BEFORE reset
+        cycle_duration_s = time.time() - self._cycle_start_time
+        cycle_duration_m = cycle_duration_s / 60
+        cycle_pnl = self.risk_manager.daily_pnl
+        cycle_trades = sum(
+            s.get("signals", 0) for s in self.dashboard.strategy_stats.values()
+        )
+        cycle_wins = sum(
+            s.get("wins", 0) for s in self.dashboard.strategy_stats.values()
+        )
+        cycle_losses = sum(
+            s.get("losses", 0) for s in self.dashboard.strategy_stats.values()
+        )
 
         self._cycle_count += 1
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -127,11 +145,14 @@ class OrchestratorEngine:
         archive_dir = os.path.join("logs", "_archive", archive_name)
         os.makedirs(archive_dir, exist_ok=True)
 
-        self.dashboard.log(f"[Cycle] Drawdown hit. Archiving to {archive_name}...")
+        self.dashboard.log(
+            f"[Cycle] Drawdown hit after {cycle_duration_m:.0f}min "
+            f"({cycle_trades} trades, {cycle_wins}W/{cycle_losses}L, "
+            f"PnL=${cycle_pnl:.2f}). Archiving..."
+        )
         logger.info("[Cycle] Archiving session data to %s", archive_dir)
 
         # COPY (not move) log files — Windows can't move open files.
-        # The dashboard will be re-created with fresh log paths afterward.
         for f in os.listdir("logs"):
             fpath = os.path.join("logs", f)
             if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
@@ -140,8 +161,9 @@ class OrchestratorEngine:
                 except Exception as exc:
                     logger.warning("[Cycle] Could not copy %s: %s", f, exc)
 
-        # Retrain model
+        # Retrain model and capture metrics
         logger.info("[Cycle] Running train_from_csv.py ...")
+        train_metrics = {}
         try:
             result = subprocess.run(
                 [
@@ -160,12 +182,38 @@ class OrchestratorEngine:
                     if "Contracts:" in line or "AUC=" in line:
                         logger.info("[Cycle] %s", line.strip())
                 logger.info("[Cycle] Retraining complete.")
+                # Load saved metrics
+                meta_path = os.path.join(
+                    "data", "models", "btc_xgboost_feature_meta.json"
+                )
+                if os.path.exists(meta_path):
+                    with open(meta_path) as mf:
+                        train_metrics = _json.load(mf)
             else:
                 logger.error("[Cycle] Retrain failed: %s", result.stderr[-500:])
         except subprocess.TimeoutExpired:
             logger.error("[Cycle] Retrain timed out")
         except Exception as exc:
             logger.error("[Cycle] Retrain error: %s", exc)
+
+        # Save cycle record
+        cycle_record = {
+            "cycle": self._cycle_count,
+            "timestamp": ts,
+            "duration_min": round(cycle_duration_m, 1),
+            "pnl": round(cycle_pnl, 2),
+            "trades": cycle_trades,
+            "wins": cycle_wins,
+            "losses": cycle_losses,
+            "win_rate": round(cycle_wins / max(1, cycle_wins + cycle_losses) * 100, 1),
+            "train_contracts": train_metrics.get("contracts_labeled", 0),
+            "train_val_auc": round(
+                train_metrics.get("results", {}).get("val", {}).get("auc", 0), 4
+            ),
+            "train_samples": train_metrics.get("training_samples", 0),
+        }
+        self.cycle_history.append(cycle_record)
+        self._training_diagnostics = train_metrics
 
         # Reset risk manager for new cycle
         new_bal = self.sim_balance if self.sim_balance > 0 else 3000.0
@@ -174,7 +222,6 @@ class OrchestratorEngine:
         self.risk_manager.strategy_pnl = {}
         self.risk_manager.loss_cooldown = {}
         self.risk_manager.last_trade_time = _dt.min
-        # Clear open positions without triggering close callbacks
         self.risk_manager.exchange.positions.clear()
         self.risk_manager.exchange._next_id = 1
         self.risk_manager.active_positions = 0
@@ -182,9 +229,37 @@ class OrchestratorEngine:
         # Re-init dashboard with fresh log files
         self.dashboard = Dashboard()
         self.risk_manager.exchange.on_close = self._on_trade_close
-        self.dashboard.log(
-            f"[Cycle] New cycle #{self._cycle_count} started. Balance: ${new_bal:.2f}"
-        )
+        self._cycle_start_time = time.time()
+
+        # Post diagnostics to new dashboard
+        self.dashboard.log(f"[Cycle] === TRAINING CYCLE #{self._cycle_count} ===")
+        self.dashboard.log(f"[Cycle] Balance reset to ${new_bal:.2f}")
+        # Show cycle trend
+        if len(self.cycle_history) >= 2:
+            prev = self.cycle_history[-2]
+            curr = self.cycle_history[-1]
+            dur_delta = curr["duration_min"] - prev["duration_min"]
+            wr_delta = curr["win_rate"] - prev["win_rate"]
+            self.dashboard.log(
+                f"[Cycle] Duration trend: {prev['duration_min']:.0f}min → "
+                f"{curr['duration_min']:.0f}min ({dur_delta:+.0f}min)"
+            )
+            self.dashboard.log(
+                f"[Cycle] Win rate trend: {prev['win_rate']:.0f}% → "
+                f"{curr['win_rate']:.0f}% ({wr_delta:+.0f}%)"
+            )
+        if cycle_record["train_val_auc"] > 0:
+            self.dashboard.log(
+                f"[Cycle] Model: {cycle_record['train_contracts']} contracts, "
+                f"val AUC={cycle_record['train_val_auc']:.4f}, "
+                f"{cycle_record['train_samples']} samples"
+            )
+        # Show feature importance if available
+        feat_names = train_metrics.get("feature_names", [])
+        if feat_names:
+            top3 = feat_names[:3]
+            self.dashboard.log(f"[Cycle] Top features: {', '.join(top3)}")
+
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
     def market_loop(self):
