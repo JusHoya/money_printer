@@ -69,6 +69,7 @@ class OrchestratorEngine:
         self.sim_balance = 0.0
         self._cycle_count = 0
         self._cycle_start_time = time.time()
+        self._profitable_since = None  # timestamp when PnL last went positive
         self.cycle_history = []  # list of cycle result dicts
         self._training_diagnostics = {}  # latest training metrics
 
@@ -233,6 +234,7 @@ class OrchestratorEngine:
         self.dashboard = Dashboard()
         self.risk_manager.exchange.on_close = self._on_trade_close
         self._cycle_start_time = time.time()
+        self._profitable_since = None
 
         # Post diagnostics to new dashboard
         self.dashboard.log(f"[Cycle] === TRAINING CYCLE #{self._cycle_count} ===")
@@ -349,12 +351,17 @@ class OrchestratorEngine:
                     last_heartbeat = time.time()
                     continue
 
-                # Graduation check: profitable for 8+ hours → save model and alert
+                # Graduation check: 8+ continuous hours of positive PnL
                 if self.auto_cycle:
-                    cycle_age_h = (time.time() - self._cycle_start_time) / 3600
                     pnl = self.risk_manager.daily_pnl
-                    if cycle_age_h >= 8 and pnl > 0:
-                        self._graduate_model(cycle_age_h, pnl)
+                    if pnl > 0:
+                        if self._profitable_since is None:
+                            self._profitable_since = time.time()
+                        profitable_h = (time.time() - self._profitable_since) / 3600
+                        if profitable_h >= 8:
+                            self._graduate_model(profitable_h, pnl)
+                    else:
+                        self._profitable_since = None  # reset clock
 
                 # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:
