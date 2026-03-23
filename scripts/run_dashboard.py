@@ -1,5 +1,4 @@
 import shutil
-import subprocess
 import time
 import threading
 import os
@@ -163,40 +162,102 @@ class OrchestratorEngine:
                     logger.warning("[Cycle] Could not copy %s: %s", f, exc)
 
         # Retrain model and capture metrics
-        logger.info("[Cycle] Running train_from_csv.py ...")
+        logger.info("[Cycle] Retraining model in-process...")
         train_metrics = {}
         try:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "scripts/train_from_csv.py",
-                    "--sample-interval",
-                    "60",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env={**os.environ, "PYTHONPATH": "."},
+            from scripts.train_from_csv import (
+                load_session,
+                extract_strikes_from_logs,
+                compute_labels_from_terminal_price,
+                infer_strikes,
+                build_features,
+                walk_forward_split,
+                train_xgboost,
             )
-            if result.returncode == 0:
-                for line in result.stdout.splitlines():
-                    if "Contracts:" in line or "AUC=" in line:
-                        logger.info("[Cycle] %s", line.strip())
-                logger.info("[Cycle] Retraining complete.")
-                # Load saved metrics
-                meta_path = os.path.join(
-                    "data", "models", "btc_xgboost_feature_meta.json"
+            from pathlib import Path
+            import pandas as pd
+
+            data_dir = Path("logs/_archive")
+            data_csvs = sorted(data_dir.rglob("data_*.csv"))
+            log_files = sorted(data_dir.rglob("money_printer_*.log"))
+            log_strikes = extract_strikes_from_logs([str(p) for p in log_files])
+
+            all_btc, all_contract = [], []
+            for csv_path in data_csvs:
+                btc_df, contract_df = load_session(str(csv_path))
+                if not btc_df.empty:
+                    all_btc.append(btc_df)
+                if not contract_df.empty:
+                    all_contract.append(contract_df)
+
+            if all_btc and all_contract:
+                btc_df = (
+                    pd.concat(all_btc, ignore_index=True)
+                    .sort_values("timestamp")
+                    .reset_index(drop=True)
                 )
-                if os.path.exists(meta_path):
-                    with open(meta_path) as mf:
-                        train_metrics = _json.load(mf)
+                contract_df = (
+                    pd.concat(all_contract, ignore_index=True)
+                    .sort_values("timestamp")
+                    .reset_index(drop=True)
+                )
+
+                labels = compute_labels_from_terminal_price(contract_df)
+                strikes = infer_strikes(btc_df, contract_df, log_strikes)
+                df = build_features(
+                    btc_df, contract_df, strikes, labels, sample_interval_s=60
+                )
+
+                if len(df) >= 20:
+                    X_tr, y_tr, X_v, y_v, X_te, y_te = walk_forward_split(df)
+                    model = train_xgboost(X_tr, y_tr, X_v, y_v)
+
+                    import joblib
+
+                    feat_cols = [c for c in df.columns if c.startswith("feat_")]
+                    joblib.dump(
+                        {"model": model, "feature_names": feat_cols},
+                        "data/models/btc_xgboost_latest.joblib",
+                    )
+
+                    # Compute metrics
+                    from sklearn.metrics import roc_auc_score
+
+                    val_auc = 0.0
+                    try:
+                        val_auc = roc_auc_score(y_v, model.predict_proba(X_v)[:, 1])
+                    except Exception:
+                        pass
+
+                    train_metrics = {
+                        "contracts_labeled": len(labels),
+                        "training_samples": len(df),
+                        "feature_names": feat_cols,
+                        "results": {
+                            "val": {"auc": float(val_auc), "n": len(X_v)},
+                        },
+                        "label_distribution": {
+                            "yes": int(sum(labels.values())),
+                            "no": len(labels) - int(sum(labels.values())),
+                        },
+                    }
+                    # Save metadata
+                    meta_path = os.path.join(
+                        "data", "models", "btc_xgboost_feature_meta.json"
+                    )
+                    with open(meta_path, "w") as mf:
+                        _json.dump(train_metrics, mf, indent=2)
+
+                    logger.info(
+                        "[Cycle] Retrain OK: %d contracts, val AUC=%.4f, %d samples",
+                        len(labels),
+                        val_auc,
+                        len(df),
+                    )
+                else:
+                    logger.warning("[Cycle] Not enough samples (%d) to train", len(df))
             else:
-                err_msg = (result.stderr or result.stdout or "unknown")[-500:]
-                logger.error(
-                    "[Cycle] Retrain failed (rc=%d): %s", result.returncode, err_msg
-                )
-        except subprocess.TimeoutExpired:
-            logger.error("[Cycle] Retrain timed out")
+                logger.warning("[Cycle] No data found for retraining")
         except Exception as exc:
             logger.error("[Cycle] Retrain error: %s", exc)
 
