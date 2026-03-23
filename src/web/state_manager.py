@@ -76,6 +76,7 @@ class StateManager:
             "data_log": self._data_log(dashboard),
             "cycle_history": getattr(orch, "cycle_history", []),
             "training_diagnostics": getattr(orch, "_training_diagnostics", {}),
+            "training_history": getattr(orch, "_training_history", []),
         }
 
     # ------------------------------------------------------------------

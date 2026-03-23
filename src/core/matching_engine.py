@@ -513,26 +513,31 @@ class SimulatedExchange:
                         probability_shift = math.tanh(normalized_diff) * 0.49
                         tanh_estimate = max(0.01, min(0.99, 0.50 + probability_shift))
 
-                        # Prefer real Kalshi market price over tanh for weather
-                        # AND hourly contracts. Tanh creates unrealistic profits
-                        # when the input is temperature or when the orchestrator
-                        # passes contract prices instead of spot prices.
-                        # BTC 15m keeps tanh (spot price is correct input).
+                        # Prefer real Kalshi market price over tanh estimate
+                        # for ALL contract types when available. Tanh creates
+                        # unrealistic profits -- especially for BTC 15m where
+                        # profit targets were firing $0.03-0.08 above reality.
+                        # Tanh is only used as a fallback when no real orderbook
+                        # price has been cached yet.
                         lmp = pos.get("last_market_price", 0)
                         has_real_price = lmp > 0
-                        is_hourly_or_weather = (
-                            "KXHIGH" in pos["symbol"] or "KXBTCD" in pos["symbol"]
-                        )
+                        is_btc_15m = "KXBTC15M" in pos["symbol"]
 
-                        if is_hourly_or_weather and has_real_price:
+                        if has_real_price:
                             estimated_price = lmp
-                        elif abs(probability_shift) < 0.10 and has_real_price:
-                            estimated_price = lmp
-                            logger.debug(
-                                f"[OMS] Using cached market price {estimated_price:.2f} (tanh was {tanh_estimate:.2f})"
-                            )
+                            if is_btc_15m:
+                                logger.debug(
+                                    f"[OMS] BTC 15m using real market price {lmp:.2f} "
+                                    f"(tanh estimate was {tanh_estimate:.2f}, "
+                                    f"diff={abs(lmp - tanh_estimate):.3f})"
+                                )
                         else:
                             estimated_price = tanh_estimate
+                            if is_btc_15m:
+                                logger.debug(
+                                    f"[OMS] BTC 15m falling back to tanh {tanh_estimate:.2f} "
+                                    f"(no real market price cached yet)"
+                                )
                     except Exception as e:
                         logger.warning(
                             f"[OMS] Price calc error for {pos['symbol']}: {e}"
@@ -674,6 +679,16 @@ class SimulatedExchange:
                 else:
                     partial_pnl = (entry - current_price) * exit_qty
 
+                # Compute and deduct exit fee for partial close
+                from src.core.fee_calculator import compute_fee
+
+                exit_fee_result = compute_fee(
+                    current_price, exit_qty, is_maker=pos.get("is_maker", True)
+                )
+                exit_fee = exit_fee_result.fee
+                self.total_fees_paid += exit_fee
+                partial_pnl -= exit_fee
+
                 pos["quantity"] -= exit_qty
                 self.realized_pnl += partial_pnl
 
@@ -683,10 +698,11 @@ class SimulatedExchange:
                 partial_trade["close_time"] = datetime.now()
                 partial_trade["reason"] = f"PROFIT_TARGET (+{target['move']:.2f})"
                 partial_trade["quantity"] = exit_qty
+                partial_trade["exit_fee"] = exit_fee
                 self.closed_trades.append(partial_trade)
 
                 logger.info(
-                    f"[OMS] 🎯 PROFIT TARGET +{target['move']:.2f}: Closed {exit_qty}x {pos['symbol']} | PnL: ${partial_pnl:+.2f}"
+                    f"[OMS] 🎯 PROFIT TARGET +{target['move']:.2f}: Closed {exit_qty}x {pos['symbol']} | PnL: ${partial_pnl:+.2f} (exit fee: ${exit_fee:.2f})"
                 )
 
                 if self.on_close:
@@ -765,10 +781,21 @@ class SimulatedExchange:
             else:
                 total_pnl = (pos["entry_price"] - exit_price) * pos["quantity"]
 
+            # Compute and deduct exit fee
+            from src.core.fee_calculator import compute_fee
+
+            exit_fee_result = compute_fee(
+                exit_price, pos["quantity"], is_maker=pos.get("is_maker", True)
+            )
+            exit_fee = exit_fee_result.fee
+            self.total_fees_paid += exit_fee
+            total_pnl -= exit_fee
+
             pos["exit_price"] = exit_price
             pos["pnl"] = total_pnl
             pos["close_time"] = datetime.now()
             pos["reason"] = reason
+            pos["exit_fee"] = exit_fee
 
             self.realized_pnl += total_pnl
             self.closed_trades.append(pos)
@@ -782,6 +809,7 @@ class SimulatedExchange:
                     "symbol": pos["symbol"],
                     "reason": reason,
                     "exit_price": exit_price,
+                    "exit_fee": exit_fee,
                     "pnl": total_pnl,
                     "timestamp": datetime.now().isoformat(),
                 }
@@ -793,7 +821,9 @@ class SimulatedExchange:
             logger.info(
                 f"      Entry: ${pos['entry_price']:.2f} | Exit: ${exit_price:.2f} | Qty: {pos['quantity']}"
             )
-            logger.info(f"      Realized PnL: ${total_pnl:+.2f} ({label})")
+            logger.info(
+                f"      Realized PnL: ${total_pnl:+.2f} ({label}) (exit fee: ${exit_fee:.2f})"
+            )
 
             if self.on_close:
                 self.on_close(pos)

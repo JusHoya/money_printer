@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_bot(name):
     bot = MagicMock()
     type(bot).name = PropertyMock(return_value=name)
@@ -50,20 +51,35 @@ def mock_orchestrator():
 # StateManager snapshot tests
 # ---------------------------------------------------------------------------
 
+
 class TestStateManagerSnapshot:
     def test_snapshot_has_all_keys(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         expected_keys = {
-            "mode", "uptime", "portfolio", "market_data", "alerts", "logs",
-            "strategy_stats", "positions", "pnl_history", "bots", "mascot_state",
+            "mode",
+            "uptime",
+            "portfolio",
+            "market_data",
+            "alerts",
+            "logs",
+            "strategy_stats",
+            "positions",
+            "pnl_history",
+            "bots",
+            "mascot_state",
             "data_log",
+            "cycle_history",
+            "training_diagnostics",
+            "training_history",
         }
         assert expected_keys == set(snap.keys())
 
     def test_portfolio_with_risk_manager(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         pf = snap["portfolio"]
@@ -76,6 +92,7 @@ class TestStateManagerSnapshot:
 
     def test_portfolio_without_risk_manager(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.risk_manager = None
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
@@ -86,6 +103,7 @@ class TestStateManagerSnapshot:
 
     def test_market_data_includes_fresh(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.dashboard.latest_prices = {
             "BTC-YES": {"price": 0.55, "ts": time.time(), "extra": {}},
         }
@@ -96,6 +114,7 @@ class TestStateManagerSnapshot:
 
     def test_market_data_excludes_stale(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.dashboard.latest_prices = {
             "OLD-SYM": {"price": 0.30, "ts": time.time() - 400, "extra": {}},
         }
@@ -105,6 +124,7 @@ class TestStateManagerSnapshot:
 
     def test_market_data_sorted_by_symbol(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         now = time.time()
         mock_orchestrator.dashboard.latest_prices = {
             "ZZZ": {"price": 0.10, "ts": now, "extra": {}},
@@ -117,6 +137,7 @@ class TestStateManagerSnapshot:
 
     def test_alerts_and_logs(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         assert snap["alerts"] == ["Test alert"]
@@ -124,8 +145,15 @@ class TestStateManagerSnapshot:
 
     def test_strategy_stats_rounding(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.dashboard.strategy_stats = {
-            "V3_Momentum": {"signals": 10, "wins": 6, "losses": 4, "pnl": 1.23456, "active": 2},
+            "V3_Momentum": {
+                "signals": 10,
+                "wins": 6,
+                "losses": 4,
+                "pnl": 1.23456,
+                "active": 2,
+            },
         }
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
@@ -134,6 +162,7 @@ class TestStateManagerSnapshot:
 
     def test_positions_with_age(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.risk_manager.exchange.positions = [
             {
                 "id": "pos1",
@@ -157,6 +186,7 @@ class TestStateManagerSnapshot:
 
     def test_bots_active_status(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.active_bots = {"btc_15m"}  # only btc active
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
@@ -166,6 +196,7 @@ class TestStateManagerSnapshot:
 
     def test_mascot_state_from_dashboard(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.dashboard.mascot.state = "PANIC"
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
@@ -173,6 +204,7 @@ class TestStateManagerSnapshot:
 
     def test_mascot_state_no_dashboard(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.dashboard = None
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
@@ -180,6 +212,7 @@ class TestStateManagerSnapshot:
 
     def test_pnl_history_accumulates(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         sm.snapshot()
         sm.snapshot()
@@ -189,6 +222,7 @@ class TestStateManagerSnapshot:
 
     def test_pnl_history_maxlen(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         for _ in range(510):
             sm.snapshot()
@@ -197,6 +231,7 @@ class TestStateManagerSnapshot:
 
     def test_uptime_format(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         mock_orchestrator.uptime_seconds = 3661.0
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
@@ -207,11 +242,13 @@ class TestStateManagerSnapshot:
 # Uptime timer tests
 # ---------------------------------------------------------------------------
 
+
 class TestUptimeTimer:
     """Test uptime pause/resume logic on OrchestratorEngine."""
 
     def _make_engine_stub(self):
         from scripts.run_dashboard import OrchestratorEngine
+
         engine = object.__new__(OrchestratorEngine)
         engine.bots = [_make_bot("bot_a"), _make_bot("bot_b")]
         engine.active_bots = {"bot_a", "bot_b"}
@@ -276,13 +313,14 @@ class TestUptimeTimer:
 # Server endpoint tests
 # ---------------------------------------------------------------------------
 
-class TestServerEndpoints:
 
+class TestServerEndpoints:
     @pytest.fixture
     def client(self, mock_orchestrator):
         from src.web.state_manager import StateManager
         from src.web.server import create_app
         from fastapi.testclient import TestClient
+
         sm = StateManager(mock_orchestrator)
         app = create_app(sm, mock_orchestrator)
         return TestClient(app)
@@ -347,9 +385,11 @@ class TestServerEndpoints:
 # Bot control flow tests
 # ---------------------------------------------------------------------------
 
+
 class TestBotControlFlow:
     def test_start_adds_to_active(self):
         from scripts.run_dashboard import OrchestratorEngine
+
         engine = object.__new__(OrchestratorEngine)
         engine.bots = [_make_bot("bot_a")]
         engine.active_bots = set()
@@ -360,6 +400,7 @@ class TestBotControlFlow:
 
     def test_stop_removes_from_active(self):
         from scripts.run_dashboard import OrchestratorEngine
+
         engine = object.__new__(OrchestratorEngine)
         engine.bots = [_make_bot("bot_a")]
         engine.active_bots = {"bot_a"}
@@ -370,6 +411,7 @@ class TestBotControlFlow:
 
     def test_double_start_is_idempotent(self):
         from scripts.run_dashboard import OrchestratorEngine
+
         engine = object.__new__(OrchestratorEngine)
         engine.bots = [_make_bot("bot_a")]
         engine.active_bots = {"bot_a"}
@@ -380,6 +422,7 @@ class TestBotControlFlow:
 
     def test_double_stop_is_idempotent(self):
         from scripts.run_dashboard import OrchestratorEngine
+
         engine = object.__new__(OrchestratorEngine)
         engine.bots = [_make_bot("bot_a")]
         engine.active_bots = set()
@@ -393,31 +436,38 @@ class TestBotControlFlow:
 # Formatting helpers tests
 # ---------------------------------------------------------------------------
 
+
 class TestFormattingHelpers:
     def test_fmt_uptime_zero(self):
         from src.web.state_manager import StateManager
+
         assert StateManager._fmt_uptime_seconds(0) == "00:00:00"
 
     def test_fmt_uptime_seconds_only(self):
         from src.web.state_manager import StateManager
+
         assert StateManager._fmt_uptime_seconds(45) == "00:00:45"
 
     def test_fmt_uptime_minutes(self):
         from src.web.state_manager import StateManager
+
         assert StateManager._fmt_uptime_seconds(125) == "00:02:05"
 
     def test_fmt_uptime_hours(self):
         from src.web.state_manager import StateManager
+
         assert StateManager._fmt_uptime_seconds(3661) == "01:01:01"
 
     def test_fmt_uptime_large(self):
         from src.web.state_manager import StateManager
+
         assert StateManager._fmt_uptime_seconds(86400) == "24:00:00"
 
 
 # ---------------------------------------------------------------------------
 # Market Data Flow tests
 # ---------------------------------------------------------------------------
+
 
 class TestMarketDataFlow:
     """Test price updates flow through Dashboard into StateManager snapshots."""
@@ -441,10 +491,20 @@ class TestMarketDataFlow:
         dash.log_dir = str(tmp_path)
         # Init CSV headers
         import csv
-        with open(dash.data_log_path, 'w', newline='', encoding='utf-8') as f:
+
+        with open(dash.data_log_path, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
-        with open(dash.portfolio_log_path, 'w', newline='', encoding='utf-8') as f:
-            csv.writer(f).writerow(["Timestamp", "Equity", "Cash", "Exposure", "Realized_PnL", "Unrealized_PnL"])
+        with open(dash.portfolio_log_path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(
+                [
+                    "Timestamp",
+                    "Equity",
+                    "Cash",
+                    "Exposure",
+                    "Realized_PnL",
+                    "Unrealized_PnL",
+                ]
+            )
 
         mock_orchestrator.dashboard = dash
         sm = StateManager(mock_orchestrator)
@@ -483,6 +543,7 @@ class TestMarketDataFlow:
 # Portfolio Logging tests
 # ---------------------------------------------------------------------------
 
+
 class TestPortfolioLogging:
     """Test that portfolio CSV logging works correctly."""
 
@@ -503,10 +564,19 @@ class TestPortfolioLogging:
         dash.data_log_path = str(tmp_path / "data.csv")
         dash.portfolio_log_path = str(tmp_path / "portfolio.csv")
         dash.session_log_path = str(tmp_path / "session.log")
-        with open(dash.data_log_path, 'w', newline='', encoding='utf-8') as f:
+        with open(dash.data_log_path, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
-        with open(dash.portfolio_log_path, 'w', newline='', encoding='utf-8') as f:
-            csv.writer(f).writerow(["Timestamp", "Equity", "Cash", "Exposure", "Realized_PnL", "Unrealized_PnL"])
+        with open(dash.portfolio_log_path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(
+                [
+                    "Timestamp",
+                    "Equity",
+                    "Cash",
+                    "Exposure",
+                    "Realized_PnL",
+                    "Unrealized_PnL",
+                ]
+            )
         return dash
 
     def _make_risk_manager(self):
@@ -520,19 +590,22 @@ class TestPortfolioLogging:
 
     def test_log_portfolio_writes_csv_row(self, dashboard_with_tmp):
         import csv
+
         dash = dashboard_with_tmp
         rm = self._make_risk_manager()
         dash.log_portfolio(rm)
 
-        with open(dash.portfolio_log_path, 'r', encoding='utf-8') as f:
+        with open(dash.portfolio_log_path, "r", encoding="utf-8") as f:
             rows = list(csv.reader(f))
         assert len(rows) == 2  # header + 1 data row
         # equity = 100 + 30 + (-2) = 128
         assert float(rows[1][1]) == 128.0
         assert float(rows[1][2]) == 100.0  # cash
-        assert float(rows[1][3]) == 30.0   # exposure
+        assert float(rows[1][3]) == 30.0  # exposure
 
-    def test_snapshot_triggers_portfolio_logging(self, mock_orchestrator, dashboard_with_tmp):
+    def test_snapshot_triggers_portfolio_logging(
+        self, mock_orchestrator, dashboard_with_tmp
+    ):
         import csv
         from src.web.state_manager import StateManager
 
@@ -541,28 +614,37 @@ class TestPortfolioLogging:
         sm = StateManager(mock_orchestrator)
         sm.snapshot()
 
-        with open(dash.portfolio_log_path, 'r', encoding='utf-8') as f:
+        with open(dash.portfolio_log_path, "r", encoding="utf-8") as f:
             rows = list(csv.reader(f))
         # header + 1 row from snapshot calling log_portfolio
         assert len(rows) == 2
 
     def test_csv_format_correctness(self, dashboard_with_tmp):
         import csv
+
         dash = dashboard_with_tmp
         rm = self._make_risk_manager()
         dash.log_portfolio(rm)
 
-        with open(dash.portfolio_log_path, 'r', encoding='utf-8') as f:
+        with open(dash.portfolio_log_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
         assert len(rows) == 1
         row = rows[0]
-        assert set(row.keys()) == {"Timestamp", "Equity", "Cash", "Exposure", "Realized_PnL", "Unrealized_PnL"}
+        assert set(row.keys()) == {
+            "Timestamp",
+            "Equity",
+            "Cash",
+            "Exposure",
+            "Realized_PnL",
+            "Unrealized_PnL",
+        }
 
 
 # ---------------------------------------------------------------------------
 # Extended Bot Control Flow tests
 # ---------------------------------------------------------------------------
+
 
 class TestBotControlFlowExtended:
     """Additional bot control flow tests via HTTP endpoints."""
@@ -585,6 +667,7 @@ class TestBotControlFlowExtended:
 
         def fake_start(name):
             orch.active_bots.add(name)
+
         orch.start_bot.side_effect = fake_start
 
         resp = client.post("/api/bots/btc_15m/start")
@@ -597,6 +680,7 @@ class TestBotControlFlowExtended:
 
         def fake_stop(name):
             orch.active_bots.discard(name)
+
         orch.stop_bot.side_effect = fake_stop
 
         resp = client.post("/api/bots/weather/stop")
@@ -615,6 +699,7 @@ class TestBotControlFlowExtended:
 # ---------------------------------------------------------------------------
 # Data Log in Snapshot tests
 # ---------------------------------------------------------------------------
+
 
 class TestDataLogSnapshot:
     """Test that data_log key appears in snapshots with correct entries."""
@@ -637,10 +722,19 @@ class TestDataLogSnapshot:
         dash.data_log_path = str(tmp_path / "data.csv")
         dash.portfolio_log_path = str(tmp_path / "portfolio.csv")
         dash.session_log_path = str(tmp_path / "session.log")
-        with open(dash.data_log_path, 'w', newline='', encoding='utf-8') as f:
+        with open(dash.data_log_path, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
-        with open(dash.portfolio_log_path, 'w', newline='', encoding='utf-8') as f:
-            csv.writer(f).writerow(["Timestamp", "Equity", "Cash", "Exposure", "Realized_PnL", "Unrealized_PnL"])
+        with open(dash.portfolio_log_path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(
+                [
+                    "Timestamp",
+                    "Equity",
+                    "Cash",
+                    "Exposure",
+                    "Realized_PnL",
+                    "Unrealized_PnL",
+                ]
+            )
 
         mock_orchestrator.dashboard = dash
         sm = StateManager(mock_orchestrator)
@@ -669,10 +763,12 @@ class TestDataLogSnapshot:
 
         dash = MagicMock()
         dash.data_log_path = str(tmp_path / "data.csv")
-        with open(dash.data_log_path, 'w', newline='', encoding='utf-8') as f:
+        with open(dash.data_log_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
-            writer.writerow(["2026-03-15T10:00:00", "BTC-USD", "71000.0", "MARKET_DATA", "REAL"])
+            writer.writerow(
+                ["2026-03-15T10:00:00", "BTC-USD", "71000.0", "MARKET_DATA", "REAL"]
+            )
 
         mock_orchestrator.dashboard = dash
         sm = StateManager(mock_orchestrator)
@@ -689,6 +785,7 @@ class TestDataLogSnapshot:
 # ---------------------------------------------------------------------------
 # Log API Endpoints tests
 # ---------------------------------------------------------------------------
+
 
 class TestLogEndpoints:
     """Test the /api/logs/data and /api/logs/session endpoints."""
@@ -709,11 +806,14 @@ class TestLogEndpoints:
 
     def test_data_log_returns_json_array(self, client_with_logs):
         import csv
+
         client, tmp_path, dash = client_with_logs
-        with open(dash.data_log_path, 'w', newline='', encoding='utf-8') as f:
+        with open(dash.data_log_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
-            writer.writerow(["2026-03-15T10:00:00", "BTC-USD", "71000", "MARKET_DATA", "REAL"])
+            writer.writerow(
+                ["2026-03-15T10:00:00", "BTC-USD", "71000", "MARKET_DATA", "REAL"]
+            )
         resp = client.get("/api/logs/data")
         assert resp.status_code == 200
         data = resp.json()
@@ -722,7 +822,7 @@ class TestLogEndpoints:
 
     def test_session_log_returns_json_array(self, client_with_logs):
         client, tmp_path, dash = client_with_logs
-        with open(dash.session_log_path, 'w', encoding='utf-8') as f:
+        with open(dash.session_log_path, "w", encoding="utf-8") as f:
             f.write("Line 1\nLine 2\n")
         resp = client.get("/api/logs/session")
         assert resp.status_code == 200
@@ -733,9 +833,10 @@ class TestLogEndpoints:
 
     def test_empty_data_log_returns_empty_array(self, client_with_logs):
         import csv
+
         client, tmp_path, dash = client_with_logs
         # Write only header
-        with open(dash.data_log_path, 'w', newline='', encoding='utf-8') as f:
+        with open(dash.data_log_path, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
         resp = client.get("/api/logs/data")
         assert resp.status_code == 200
@@ -743,7 +844,7 @@ class TestLogEndpoints:
 
     def test_empty_session_log_returns_empty_array(self, client_with_logs):
         client, tmp_path, dash = client_with_logs
-        with open(dash.session_log_path, 'w', encoding='utf-8') as f:
+        with open(dash.session_log_path, "w", encoding="utf-8"):
             pass  # empty file
         resp = client.get("/api/logs/session")
         assert resp.status_code == 200
@@ -770,23 +871,38 @@ class TestLogEndpoints:
 # Snapshot Completeness tests
 # ---------------------------------------------------------------------------
 
+
 class TestSnapshotCompleteness:
     """Verify snapshot contains all expected keys and is JSON-serializable."""
 
     def test_snapshot_contains_all_expected_keys(self, mock_orchestrator):
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         expected = {
-            "mode", "uptime", "portfolio", "market_data", "alerts", "logs",
-            "strategy_stats", "positions", "pnl_history", "bots",
-            "mascot_state", "data_log",
+            "mode",
+            "uptime",
+            "portfolio",
+            "market_data",
+            "alerts",
+            "logs",
+            "strategy_stats",
+            "positions",
+            "pnl_history",
+            "bots",
+            "mascot_state",
+            "data_log",
+            "cycle_history",
+            "training_diagnostics",
+            "training_history",
         }
         assert expected == set(snap.keys())
 
     def test_snapshot_is_json_serializable(self, mock_orchestrator):
         import json
         from src.web.state_manager import StateManager
+
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         # Should not raise
@@ -799,6 +915,7 @@ class TestSnapshotCompleteness:
 # =========================================================================
 # Live Kalshi API Market Data Tests
 # =========================================================================
+
 
 class TestKalshiMarketDataLive:
     """Integration tests that hit the real Kalshi public API to verify
@@ -817,8 +934,10 @@ class TestKalshiMarketDataLive:
     def provider(self):
         """Unauthenticated provider pointed at public production API."""
         from src.data.kalshi_provider import KalshiProvider
+
         return KalshiProvider(
-            key_id=None, private_key_path=None,
+            key_id=None,
+            private_key_path=None,
             api_url="https://api.elections.kalshi.com/trade-api/v2",
             read_only=True,
         )
@@ -830,6 +949,7 @@ class TestKalshiMarketDataLive:
     def test_parse_price_v2_dollars_field(self):
         """V2 API returns prices as dollar strings like '0.0700'."""
         from src.data.kalshi_provider import KalshiProvider
+
         data = {"yes_bid_dollars": "0.0700", "yes_bid": 7}
         result = KalshiProvider._parse_price(data, "yes_bid_dollars", "yes_bid")
         assert abs(result - 0.07) < 1e-9
@@ -837,6 +957,7 @@ class TestKalshiMarketDataLive:
     def test_parse_price_v1_cents_fallback(self):
         """V1 API may only have cents integer; _parse_price falls back."""
         from src.data.kalshi_provider import KalshiProvider
+
         data = {"yes_bid": 55}  # no _dollars key
         result = KalshiProvider._parse_price(data, "yes_bid_dollars", "yes_bid")
         assert abs(result - 0.55) < 1e-9
@@ -844,6 +965,7 @@ class TestKalshiMarketDataLive:
     def test_parse_price_none_values(self):
         """If both fields are None, returns 0.0."""
         from src.data.kalshi_provider import KalshiProvider
+
         data = {"yes_bid_dollars": None, "yes_bid": None}
         result = KalshiProvider._parse_price(data, "yes_bid_dollars", "yes_bid")
         assert result == 0.0
@@ -851,12 +973,14 @@ class TestKalshiMarketDataLive:
     def test_parse_price_missing_keys(self):
         """If keys are absent entirely, returns 0.0."""
         from src.data.kalshi_provider import KalshiProvider
+
         result = KalshiProvider._parse_price({}, "yes_bid_dollars", "yes_bid")
         assert result == 0.0
 
     def test_parse_market_data_v2_response(self):
         """_parse_market_data correctly reads a V2 API-shaped dict."""
         from src.data.kalshi_provider import KalshiProvider
+
         provider = KalshiProvider(key_id=None, private_key_path=None, read_only=True)
         data = {
             "yes_bid_dollars": "0.4500",
@@ -891,9 +1015,14 @@ class TestKalshiMarketDataLive:
 
         # Discover an active weather market
         url = f"{provider.api_url}/markets"
-        resp = requests.get(url, params={
-            "series_ticker": "KXHIGHNY", "limit": 5,
-        }, timeout=10)
+        resp = requests.get(
+            url,
+            params={
+                "series_ticker": "KXHIGHNY",
+                "limit": 5,
+            },
+            timeout=10,
+        )
         assert resp.status_code == 200, f"Market search failed: {resp.status_code}"
 
         markets = resp.json().get("markets", [])
@@ -912,12 +1041,17 @@ class TestKalshiMarketDataLive:
         assert md.bid >= 0, f"yes_bid should be >= 0, got {md.bid}"
         assert md.ask >= 0, f"yes_ask should be >= 0, got {md.ask}"
         # NO side
-        assert md.extra["no_bid"] >= 0, f"no_bid should be >= 0, got {md.extra['no_bid']}"
-        assert md.extra["no_ask"] >= 0, f"no_ask should be >= 0, got {md.extra['no_ask']}"
+        assert (
+            md.extra["no_bid"] >= 0
+        ), f"no_bid should be >= 0, got {md.extra['no_bid']}"
+        assert (
+            md.extra["no_ask"] >= 0
+        ), f"no_ask should be >= 0, got {md.extra['no_ask']}"
 
         # At least ONE side should have a non-zero price (market has liquidity)
-        has_price = (md.bid > 0 or md.ask > 0 or
-                     md.extra["no_bid"] > 0 or md.extra["no_ask"] > 0)
+        has_price = (
+            md.bid > 0 or md.ask > 0 or md.extra["no_bid"] > 0 or md.extra["no_ask"] > 0
+        )
         assert has_price, (
             f"All prices zero for {ticker}: "
             f"yes_bid={md.bid} yes_ask={md.ask} "
@@ -927,9 +1061,9 @@ class TestKalshiMarketDataLive:
         # Sanity: YES + NO should roughly sum to ~1.0
         if md.bid > 0 and md.extra["no_ask"] > 0:
             complement = md.bid + md.extra["no_ask"]
-            assert 0.9 <= complement <= 1.1, (
-                f"yes_bid + no_ask = {complement}, expected ~1.0"
-            )
+            assert (
+                0.9 <= complement <= 1.1
+            ), f"yes_bid + no_ask = {complement}, expected ~1.0"
 
     @pytest.mark.skipif(
         not pytest.importorskip("requests", reason="requests not installed"),
@@ -941,9 +1075,14 @@ class TestKalshiMarketDataLive:
         import requests
 
         url = f"{provider.api_url}/markets"
-        resp = requests.get(url, params={
-            "series_ticker": "KXBTC15M", "limit": 5,
-        }, timeout=10)
+        resp = requests.get(
+            url,
+            params={
+                "series_ticker": "KXBTC15M",
+                "limit": 5,
+            },
+            timeout=10,
+        )
         assert resp.status_code == 200
 
         markets = resp.json().get("markets", [])
@@ -993,11 +1132,17 @@ class TestKalshiMarketDataLive:
 
         # Use a weather market (reliably active with liquidity)
         url = f"{provider.api_url}/markets"
-        resp = requests.get(url, params={
-            "series_ticker": "KXHIGHNY", "limit": 3,
-        }, timeout=10)
-        markets = [m for m in resp.json().get("markets", [])
-                   if m.get("status") == "active"]
+        resp = requests.get(
+            url,
+            params={
+                "series_ticker": "KXHIGHNY",
+                "limit": 3,
+            },
+            timeout=10,
+        )
+        markets = [
+            m for m in resp.json().get("markets", []) if m.get("status") == "active"
+        ]
         if not markets:
             pytest.skip("No active weather markets available")
 
@@ -1009,8 +1154,12 @@ class TestKalshiMarketDataLive:
         assert isinstance(md.bid, float), f"bid type: {type(md.bid)}"
         assert isinstance(md.ask, float), f"ask type: {type(md.ask)}"
         assert isinstance(md.price, float), f"price type: {type(md.price)}"
-        assert isinstance(md.extra["no_bid"], float), f"no_bid type: {type(md.extra['no_bid'])}"
-        assert isinstance(md.extra["no_ask"], float), f"no_ask type: {type(md.extra['no_ask'])}"
+        assert isinstance(
+            md.extra["no_bid"], float
+        ), f"no_bid type: {type(md.extra['no_bid'])}"
+        assert isinstance(
+            md.extra["no_ask"], float
+        ), f"no_ask type: {type(md.extra['no_ask'])}"
 
     @pytest.mark.skipif(
         not pytest.importorskip("requests", reason="requests not installed"),
@@ -1023,9 +1172,14 @@ class TestKalshiMarketDataLive:
         series_tickers = ["KXHIGHNY", "KXHIGHLAX", "KXHIGHCHI", "KXHIGHMIA"]
         for series in series_tickers:
             url = f"{provider.api_url}/markets"
-            resp = requests.get(url, params={
-                "series_ticker": series, "limit": 3,
-            }, timeout=10)
+            resp = requests.get(
+                url,
+                params={
+                    "series_ticker": series,
+                    "limit": 3,
+                },
+                timeout=10,
+            )
             assert resp.status_code == 200, f"{series}: status {resp.status_code}"
             markets = resp.json().get("markets", [])
             assert len(markets) > 0, f"No markets found for {series}"

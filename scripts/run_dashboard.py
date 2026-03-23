@@ -71,6 +71,7 @@ class OrchestratorEngine:
         self._profitable_since = None  # timestamp when PnL last went positive
         self.cycle_history = []  # list of cycle result dicts
         self._training_diagnostics = {}  # latest training metrics
+        self._training_history = []  # accumulated training history (max 20)
 
         logger.info(f"[Orchestrator] Active bots: {[b.name for b in self.bots]}")
 
@@ -278,6 +279,19 @@ class OrchestratorEngine:
             "train_samples": train_metrics.get("training_samples", 0),
         }
         self.cycle_history.append(cycle_record)
+
+        # Preserve training history across cycles (max 20 entries)
+        self._training_history.append(
+            {
+                "timestamp": _dt.now().isoformat(),
+                "cycle": self._cycle_count,
+                "diagnostics": train_metrics,
+                "cycle_record": cycle_record,
+            }
+        )
+        if len(self._training_history) > 20:
+            self._training_history = self._training_history[-20:]
+
         self._training_diagnostics = train_metrics
 
         # Reset risk manager for new cycle
@@ -291,8 +305,10 @@ class OrchestratorEngine:
         self.risk_manager.exchange._next_id = 1
         self.risk_manager.active_positions = 0
 
-        # Re-init dashboard with fresh log files
+        # Re-init dashboard with fresh log files, preserving alerts
+        prev_alerts = list(self.dashboard.alerts) if self.dashboard else []
         self.dashboard = Dashboard()
+        self.dashboard.alerts = prev_alerts
         self.risk_manager.exchange.on_close = self._on_trade_close
         self._cycle_start_time = time.time()
         self._profitable_since = None

@@ -703,6 +703,96 @@ function updateDataLog(entries) {
 }
 
 /* ========================================================================== */
+/* Training History updater                                                      */
+/* ========================================================================== */
+
+/**
+ * Update training history panel.
+ * HTML: <div id="training-history-list"> inside <div id="training-history-card">
+ * CSS: .th-entry, .th-entry-latest, .th-badge, .th-metric, .th-metric.good, .th-metric.bad
+ *
+ * Each entry in `history` is:
+ *   { timestamp, cycle, diagnostics: {...}, cycle_record: {...} }
+ */
+function updateTrainingHistory(history) {
+  const card  = $('training-history-card');
+  const el    = $('training-history-list');
+  const count = $('training-history-count');
+
+  if (!history || history.length === 0) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+
+  if (card) card.style.display = '';
+  if (count) count.textContent = history.length;
+  if (!el) return;
+
+  // Render newest-first
+  const reversed = history.slice().reverse();
+
+  el.innerHTML = reversed.map((entry, idx) => {
+    const cr = entry.cycle_record || {};
+    const diag = entry.diagnostics || {};
+    const isLatest = idx === 0;
+    const entryCls = isLatest ? 'th-entry th-entry-latest' : 'th-entry';
+
+    // Format timestamp to time only
+    let tsDisplay = '--';
+    if (entry.timestamp) {
+      const d = new Date(entry.timestamp);
+      if (!isNaN(d.getTime())) {
+        tsDisplay = d.toLocaleTimeString('en-US', { hour12: false });
+      } else {
+        tsDisplay = entry.timestamp;
+      }
+    }
+
+    // Win rate color
+    const wr = cr.win_rate || 0;
+    const wrCls = wr >= 60 ? 'good' : wr < 40 ? 'bad' : '';
+
+    // PnL color
+    const pnl = cr.pnl || 0;
+    const pnlCls = pnl > 0 ? 'good' : pnl < 0 ? 'bad' : '';
+
+    // AUC color (>= 0.60 good, < 0.50 bad)
+    const auc = cr.train_val_auc || 0;
+    const aucCls = auc >= 0.60 ? 'good' : auc > 0 && auc < 0.50 ? 'bad' : '';
+
+    // Build ML metrics line if available
+    let mlLine = '';
+    if (auc > 0 || cr.train_samples > 0) {
+      const parts = [];
+      if (auc > 0) parts.push(`<span class="th-metric ${aucCls}">AUC ${auc.toFixed(4)}</span>`);
+      if (cr.train_samples > 0) parts.push(`<span class="th-metric">${cr.train_samples} samples</span>`);
+      if (cr.train_contracts > 0) parts.push(`<span class="th-metric">${cr.train_contracts} contracts</span>`);
+      mlLine = `<div class="th-ml">${parts.join('<span class="th-sep">|</span>')}</div>`;
+    }
+
+    const latestBadge = isLatest ? '<span class="th-badge">LATEST</span>' : '';
+
+    return `<div class="${entryCls}">` +
+      `<div class="th-header">` +
+        `<span class="th-cycle">Cycle #${cr.cycle || entry.cycle || '?'}</span>` +
+        `${latestBadge}` +
+        `<span class="th-ts">${escHtml(tsDisplay)}</span>` +
+      `</div>` +
+      `<div class="th-metrics">` +
+        `<span class="th-metric">${cr.trades || 0} trades</span>` +
+        `<span class="th-sep">|</span>` +
+        `<span class="th-metric ${wrCls}">${cr.wins || 0}W/${cr.losses || 0}L (${wr.toFixed(0)}%)</span>` +
+        `<span class="th-sep">|</span>` +
+        `<span class="th-metric ${pnlCls}">$${pnl.toFixed(2)}</span>` +
+        `<span class="th-sep">|</span>` +
+        `<span class="th-metric">${cr.duration_min || 0}min</span>` +
+      `</div>` +
+      `${mlLine}` +
+    `</div>`;
+  }).join('');
+}
+
+/* ========================================================================== */
 /* Register built-in section updaters                                           */
 /* ========================================================================== */
 
@@ -719,8 +809,9 @@ registerSection('strategy_stats', updateStrategyStats);
 registerSection('positions',      updatePositions);
 registerSection('bots',           updateBots);
 registerSection('mascot_state',   updateMascotState);
-registerSection('pnl_history',    updatePnLChart);
-registerSection('data_log',       updateDataLog);
+registerSection('pnl_history',       updatePnLChart);
+registerSection('data_log',          updateDataLog);
+registerSection('training_history',  updateTrainingHistory);
 
 /* ========================================================================== */
 /* Grid column resizer                                                         */
