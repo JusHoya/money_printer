@@ -2,8 +2,9 @@ import requests
 import base64
 import time
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from src.core.interfaces import DataProvider, MarketData
@@ -330,7 +331,8 @@ class KalshiProvider(DataProvider):
         Uses V1 Event API to probe for active hourly events.
         """
         markets = []
-        now = datetime.now()
+        # Kalshi BTC hourly markets use ET for their event tickers
+        now = datetime.now(ZoneInfo("America/New_York"))
 
         # Candidate hours: Current hour + next 12 hours
         candidates = []
@@ -379,7 +381,7 @@ class KalshiProvider(DataProvider):
                                     close_dt = datetime.fromisoformat(
                                         close_str.replace("Z", "+00:00")
                                     )
-                                    now_utc = datetime.now().astimezone()
+                                    now_utc = datetime.now(timezone.utc)
 
                                     # Buffer: If closed within last 1 minute, consider closed.
                                     if close_dt <= now_utc:
