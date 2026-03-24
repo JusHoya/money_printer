@@ -162,6 +162,27 @@ class OrchestratorEngine:
                 except Exception as exc:
                     logger.warning("[Cycle] Could not copy %s: %s", f, exc)
 
+        # Clean up old CSV/log files from logs/ to prevent duplication.
+        # The current dashboard's active files must be preserved; everything
+        # else has already been safely copied into the archive folder above.
+        current_files = {
+            os.path.abspath(self.dashboard.data_log_path),
+            os.path.abspath(self.dashboard.session_log_path),
+            os.path.abspath(self.dashboard.portfolio_log_path),
+        }
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if not os.path.isfile(fpath):
+                continue
+            if not (f.endswith(".csv") or f.endswith(".log")):
+                continue
+            if os.path.abspath(fpath) in current_files:
+                continue
+            try:
+                os.remove(fpath)
+            except Exception as exc:
+                logger.warning("[Cycle] Could not remove old file %s: %s", f, exc)
+
         # Retrain model and capture metrics
         logger.info("[Cycle] Retraining model in-process...")
         train_metrics = {}
@@ -169,7 +190,7 @@ class OrchestratorEngine:
             from scripts.train_from_csv import (
                 load_session,
                 extract_strikes_from_logs,
-                compute_labels_from_terminal_price,
+                compute_labels_with_settlement,
                 infer_strikes,
                 build_features,
                 walk_forward_split,
@@ -203,7 +224,9 @@ class OrchestratorEngine:
                     .reset_index(drop=True)
                 )
 
-                labels = compute_labels_from_terminal_price(contract_df)
+                labels = compute_labels_with_settlement(
+                    contract_df, kalshi_provider=self.kalshi
+                )
                 strikes = infer_strikes(btc_df, contract_df, log_strikes)
                 df = build_features(
                     btc_df, contract_df, strikes, labels, sample_interval_s=60

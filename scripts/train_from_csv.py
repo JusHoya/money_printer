@@ -15,6 +15,7 @@ import math
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -167,6 +168,174 @@ def compute_labels_from_terminal_price(
         len(labels) - sum(labels.values()),
     )
     return labels
+
+
+# Settlement result cache file (persists across training runs)
+_SETTLEMENT_CACHE_PATH = os.path.join("data", "models", "settlement_cache.json")
+
+
+def _load_settlement_cache() -> Dict[str, int]:
+    """Load cached settlement results from disk."""
+    try:
+        if os.path.exists(_SETTLEMENT_CACHE_PATH):
+            with open(_SETTLEMENT_CACHE_PATH, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as exc:
+        log.warning("Could not load settlement cache: %s", exc)
+    return {}
+
+
+def _save_settlement_cache(cache: Dict[str, int]) -> None:
+    """Persist settlement cache to disk."""
+    try:
+        os.makedirs(os.path.dirname(_SETTLEMENT_CACHE_PATH), exist_ok=True)
+        with open(_SETTLEMENT_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+    except Exception as exc:
+        log.warning("Could not save settlement cache: %s", exc)
+
+
+def compute_labels_with_settlement(
+    contract_df: pd.DataFrame,
+    kalshi_provider=None,
+) -> Dict[str, int]:
+    """Label contracts using terminal price first, then Kalshi API for ambiguous ones.
+
+    For contracts whose last observed price is clearly settled (>0.90 or <0.10),
+    uses the fast terminal-price heuristic.  For ambiguous contracts (price between
+    0.10 and 0.90 -- typically from auto-cycles that ended before settlement),
+    queries the Kalshi API to check if the contract has since settled and uses
+    the definitive settlement result.
+
+    Parameters
+    ----------
+    contract_df : pd.DataFrame
+        Contract price observations with columns ``symbol`` and ``contract_price``.
+    kalshi_provider : KalshiProvider, optional
+        Authenticated Kalshi API client.  If ``None``, falls back to terminal-price
+        only (identical to ``compute_labels_from_terminal_price``).
+
+    Returns
+    -------
+    dict[str, int]
+        Mapping of contract symbol to label (1 = YES, 0 = NO).
+    """
+    # Step 1: Terminal-price heuristic (fast path)
+    labels: Dict[str, int] = {}
+    ambiguous: List[str] = []
+
+    if contract_df.empty:
+        return labels
+
+    for sym, grp in contract_df.groupby("symbol"):
+        last_price = grp["contract_price"].iloc[-1]
+        if last_price > 0.90:
+            labels[sym] = 1
+        elif last_price < 0.10:
+            labels[sym] = 0
+        else:
+            ambiguous.append(sym)
+
+    log.info(
+        "Labels (terminal price): %d resolved, %d ambiguous (%.1f%%)",
+        len(labels),
+        len(ambiguous),
+        100 * len(ambiguous) / max(1, len(labels) + len(ambiguous)),
+    )
+
+    if not ambiguous:
+        return labels
+
+    # Step 2: Check settlement cache for previously resolved contracts
+    cache = _load_settlement_cache()
+    still_ambiguous = []
+    for sym in ambiguous:
+        if sym in cache:
+            labels[sym] = cache[sym]
+        else:
+            still_ambiguous.append(sym)
+
+    if cache and len(still_ambiguous) < len(ambiguous):
+        log.info(
+            "Settlement cache: resolved %d/%d ambiguous contracts",
+            len(ambiguous) - len(still_ambiguous),
+            len(ambiguous),
+        )
+
+    if not still_ambiguous or kalshi_provider is None:
+        if still_ambiguous and kalshi_provider is None:
+            log.warning(
+                "No Kalshi API available — %d ambiguous contracts remain unlabeled",
+                len(still_ambiguous),
+            )
+        _log_label_summary(labels)
+        return labels
+
+    # Step 3: Query Kalshi API for remaining ambiguous contracts
+    api_resolved = 0
+    api_errors = 0
+    api_unsettled = 0
+    min_request_interval = 0.12  # Stay under 10 req/s rate limit
+
+    log.info("Querying Kalshi API for %d ambiguous contracts...", len(still_ambiguous))
+
+    for sym in still_ambiguous:
+        try:
+            # Rate limiting
+            time.sleep(min_request_interval)
+
+            # Fetch raw market data (includes status and result fields)
+            raw = kalshi_provider._fetch_market_raw(sym, kalshi_provider.PUBLIC_API_URL)
+            if not raw:
+                api_errors += 1
+                continue
+
+            status = (raw.get("status") or "").lower()
+            result = (raw.get("result") or "").lower()
+
+            if status in ("settled", "finalized", "closed") and result in ("yes", "no"):
+                label = 1 if result == "yes" else 0
+                labels[sym] = label
+                cache[sym] = label
+                api_resolved += 1
+                log.debug("API settled %s → %s", sym, result.upper())
+            else:
+                # Contract hasn't settled yet — skip it
+                api_unsettled += 1
+                log.debug(
+                    "API: %s not settled (status=%s, result=%s)", sym, status, result
+                )
+
+        except Exception as exc:
+            api_errors += 1
+            log.warning("API error for %s: %s", sym, exc)
+
+    # Save updated cache
+    if api_resolved > 0:
+        _save_settlement_cache(cache)
+
+    log.info(
+        "Kalshi API: %d resolved, %d unsettled, %d errors (of %d queried)",
+        api_resolved,
+        api_unsettled,
+        api_errors,
+        len(still_ambiguous),
+    )
+
+    _log_label_summary(labels)
+    return labels
+
+
+def _log_label_summary(labels: Dict[str, int]) -> None:
+    """Log label count summary."""
+    yes_count = sum(labels.values())
+    no_count = len(labels) - yes_count
+    log.info(
+        "Labels (final): %d contracts (%d YES, %d NO)",
+        len(labels),
+        yes_count,
+        no_count,
+    )
 
 
 def infer_strikes(
@@ -470,6 +639,11 @@ def main():
     parser.add_argument("--model-dir", default="data/models")
     parser.add_argument("--sample-interval", type=int, default=30)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--use-api",
+        action="store_true",
+        help="Query Kalshi API to resolve ambiguous contract labels via settlement data",
+    )
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -528,8 +702,25 @@ def main():
         len(unique_contracts),
     )
 
-    # Compute labels from terminal contract prices (no logs needed)
-    labels = compute_labels_from_terminal_price(contract_df)
+    # Compute labels — use Kalshi API for ambiguous contracts if --use-api
+    kalshi = None
+    if args.use_api:
+        try:
+            from src.data.kalshi_provider import KalshiProvider
+
+            k_id = os.getenv("KALSHI_KEY_ID")
+            k_key = os.getenv("KALSHI_PRIVATE_KEY_PATH")
+            if k_id and k_key:
+                kalshi = KalshiProvider(k_id, k_key, read_only=True)
+                log.info("Kalshi API initialized for settlement lookups")
+            else:
+                log.warning(
+                    "--use-api: KALSHI_KEY_ID / KALSHI_PRIVATE_KEY_PATH not set"
+                )
+        except Exception as exc:
+            log.warning("Could not initialize Kalshi API: %s", exc)
+
+    labels = compute_labels_with_settlement(contract_df, kalshi_provider=kalshi)
     if not labels:
         log.error("No contracts could be labeled.")
         return
