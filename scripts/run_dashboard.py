@@ -328,6 +328,17 @@ class OrchestratorEngine:
         self.risk_manager.exchange._next_id = 1
         self.risk_manager.active_positions = 0
 
+        # Reload retrained model into all running strategies
+        reloaded = 0
+        for bot in self.bots:
+            for strat in bot.strategies.values():
+                pred = getattr(strat, "predictor", None)
+                if pred and hasattr(pred, "load_models"):
+                    pred.load_models()
+                    reloaded += 1
+        if reloaded:
+            logger.info("[Cycle] Reloaded models into %d strategies", reloaded)
+
         # Re-init dashboard with fresh log files, preserving alerts
         prev_alerts = list(self.dashboard.alerts) if self.dashboard else []
         self.dashboard = Dashboard()

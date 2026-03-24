@@ -94,6 +94,14 @@ class FeaturePipeline:
         df = df.copy()
         df = self._normalise_columns(df)
 
+        # Guard: ta indicators need multiple rows (MACD needs 26+, RSI 14+).
+        # With fewer than 2 rows, all features would be NaN and some ta
+        # internals raise numpy IndexErrors.  Short-circuit with NaN columns.
+        if len(df) < 2:
+            for col in self._FEATURE_NAMES:
+                df[col] = np.nan
+            return df
+
         close = df["close"]
         high = df.get("high", close)
         low = df.get("low", close)
