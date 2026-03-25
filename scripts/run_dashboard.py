@@ -16,6 +16,10 @@ from src.core.risk_manager import RiskManager
 from src.bots.registry import BotRegistry
 from src.utils.system_utils import prevent_sleep
 from src.utils.logger import logger
+from src.ml.trade_journal import TradeJournal, TradeOutcome
+from src.ml.online_updater import OnlineModelUpdater
+from src.strategies.counter_trade import CounterTradeAnalyzer
+from src.ml.settlement_resolver import SettlementResolver
 
 # Import bots to trigger registration
 import src.bots  # noqa: F401
@@ -73,7 +77,38 @@ class OrchestratorEngine:
         self._training_diagnostics = {}  # latest training metrics
         self._training_history = []  # accumulated training history (max 20)
 
-        logger.info(f"[Orchestrator] Active bots: {[b.name for b in self.bots]}")
+        # Trade journal — records every closed trade for learning feedback
+        self.trade_journal = TradeJournal()
+
+        # Online model updater — retrains between drawdown cycles
+        self.online_updater = OnlineModelUpdater(
+            predictor=None,  # set after bots are wired up
+            trade_journal=self.trade_journal,
+            kalshi_provider=self.kalshi,
+        )
+
+        # Counter-trade analyzer — LOG-ONLY mode until validated
+        self.counter_analyzer = CounterTradeAnalyzer(live=False)
+
+        # Settlement resolver — background label resolution
+        self.settlement_resolver = SettlementResolver(
+            kalshi_provider=self.kalshi,
+        )
+
+        # Wire online updater to the first available predictor
+        for bot in self.bots:
+            for strat in bot.strategies.values():
+                pred = getattr(strat, "predictor", None)
+                if pred:
+                    self.online_updater._predictor = pred
+                    break
+            if self.online_updater._predictor:
+                break
+
+        logger.info(
+            f"[Orchestrator] Active bots: {[b.name for b in self.bots]} | "
+            f"Journal: {self.trade_journal.get_sample_count()} outcomes"
+        )
 
     @property
     def uptime_seconds(self) -> float:
@@ -112,6 +147,19 @@ class OrchestratorEngine:
         logger.info(
             f"[Orchestrator] Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}"
         )
+
+        # Record to trade journal for learning feedback
+        try:
+            outcome = TradeOutcome.from_position(position)
+            self.trade_journal.record(outcome)
+        except Exception as exc:
+            logger.warning("[Orchestrator] Journal record failed: %s", exc)
+
+        # Trigger online model update check (retrains if enough new data)
+        try:
+            self.online_updater.on_trade_close()
+        except Exception as exc:
+            logger.warning("[Orchestrator] Online update failed: %s", exc)
 
         # Forward Late Sniper closes for adaptive threshold
         for bot in self.bots:
@@ -153,30 +201,46 @@ class OrchestratorEngine:
         )
         logger.info("[Cycle] Archiving session data to %s", archive_dir)
 
-        # COPY (not move) log files — Windows can't move open files.
+        # COPY only NEW files — use a manifest to prevent re-archiving.
+        manifest_path = os.path.join("logs", "_archive", "_archived_files.json")
+        archived_set = set()
+        try:
+            if os.path.exists(manifest_path):
+                import json as _mj
+
+                with open(manifest_path, encoding="utf-8") as _mf:
+                    archived_set = set(_mj.load(_mf))
+        except Exception:
+            pass
+
+        newly_archived = []
         for f in os.listdir("logs"):
             fpath = os.path.join("logs", f)
             if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
                 try:
                     shutil.copy2(fpath, os.path.join(archive_dir, f))
+                    newly_archived.append(f)
                 except Exception as exc:
                     logger.warning("[Cycle] Could not copy %s: %s", f, exc)
 
-        # Clean up old CSV/log files from logs/ to prevent duplication.
-        # The current dashboard's active files must be preserved; everything
-        # else has already been safely copied into the archive folder above.
-        current_files = {
-            os.path.abspath(self.dashboard.data_log_path),
-            os.path.abspath(self.dashboard.session_log_path),
-            os.path.abspath(self.dashboard.portfolio_log_path),
-        }
+        # Update manifest with all known archived filenames
+        archived_set.update(newly_archived)
+        try:
+            import json as _mj
+
+            with open(manifest_path, "w", encoding="utf-8") as _mf:
+                _mj.dump(sorted(archived_set), _mf, indent=2)
+        except Exception:
+            pass
+
+        # Clean up ALL CSV/log files from logs/ — they are now in the archive.
+        # The current dashboard files will be closed soon (new Dashboard below),
+        # so aggressively remove everything we can.
         for f in os.listdir("logs"):
             fpath = os.path.join("logs", f)
             if not os.path.isfile(fpath):
                 continue
             if not (f.endswith(".csv") or f.endswith(".log")):
-                continue
-            if os.path.abspath(fpath) in current_files:
                 continue
             try:
                 os.remove(fpath)
@@ -195,6 +259,7 @@ class OrchestratorEngine:
                 build_features,
                 walk_forward_split,
                 train_xgboost,
+                compute_outcome_weights,
             )
             from pathlib import Path
             import pandas as pd
@@ -204,8 +269,23 @@ class OrchestratorEngine:
             log_files = sorted(data_dir.rglob("money_printer_*.log"))
             log_strikes = extract_strikes_from_logs([str(p) for p in log_files])
 
-            all_btc, all_contract = [], []
+            # Deduplicate by filename — same CSV appears in multiple cycle dirs
+            seen_names = set()
+            unique_csvs = []
             for csv_path in data_csvs:
+                if csv_path.name not in seen_names:
+                    seen_names.add(csv_path.name)
+                    unique_csvs.append(csv_path)
+            skipped = len(data_csvs) - len(unique_csvs)
+            if skipped:
+                logger.info(
+                    "[Cycle] Dedup: %d unique CSVs (skipped %d duplicates)",
+                    len(unique_csvs),
+                    skipped,
+                )
+
+            all_btc, all_contract = [], []
+            for csv_path in unique_csvs:
                 btc_df, contract_df = load_session(str(csv_path))
                 if not btc_df.empty:
                     all_btc.append(btc_df)
@@ -215,13 +295,21 @@ class OrchestratorEngine:
             if all_btc and all_contract:
                 btc_df = (
                     pd.concat(all_btc, ignore_index=True)
+                    .drop_duplicates(subset=["timestamp"])
                     .sort_values("timestamp")
                     .reset_index(drop=True)
                 )
                 contract_df = (
                     pd.concat(all_contract, ignore_index=True)
+                    .drop_duplicates(subset=["timestamp", "symbol"])
                     .sort_values("timestamp")
                     .reset_index(drop=True)
+                )
+                logger.info(
+                    "[Cycle] Training data: %d BTC rows, %d contract rows, %d unique CSVs",
+                    len(btc_df),
+                    len(contract_df),
+                    len(unique_csvs),
                 )
 
                 labels = compute_labels_with_settlement(
@@ -234,7 +322,17 @@ class OrchestratorEngine:
 
                 if len(df) >= 20:
                     X_tr, y_tr, X_v, y_v, X_te, y_te = walk_forward_split(df)
-                    model = train_xgboost(X_tr, y_tr, X_v, y_v)
+
+                    # Compute outcome-weighted samples from trade journal
+                    journal_outcomes = self.trade_journal.load_all()
+                    weights = compute_outcome_weights(df, journal_outcomes)
+                    # Align weights to train split
+                    n_tr = len(X_tr)
+                    weights_tr = weights[:n_tr] if len(weights) >= n_tr else None
+
+                    model = train_xgboost(
+                        X_tr, y_tr, X_v, y_v, sample_weight=weights_tr
+                    )
 
                     import joblib
 
@@ -345,6 +443,26 @@ class OrchestratorEngine:
         self.dashboard.alerts = prev_alerts
         self.risk_manager.exchange.on_close = self._on_trade_close
         self._cycle_start_time = time.time()
+
+        # Second cleanup pass — old dashboard file handles are now closed,
+        # so we can remove orphaned files that Windows may have locked earlier.
+        new_active = {
+            os.path.abspath(self.dashboard.data_log_path),
+            os.path.abspath(self.dashboard.session_log_path),
+            os.path.abspath(self.dashboard.portfolio_log_path),
+        }
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if not os.path.isfile(fpath):
+                continue
+            if not (f.endswith(".csv") or f.endswith(".log")):
+                continue
+            if os.path.abspath(fpath) in new_active:
+                continue
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass  # best effort
         self._profitable_since = None
 
         # Post diagnostics to ALERTS (persistent, visible anytime)
@@ -386,10 +504,38 @@ class OrchestratorEngine:
         if feat_names:
             self.dashboard.alert(f"TOP FEATURES | {', '.join(feat_names[:5])}")
 
+        # Show running sample count from trade journal
+        journal_count = self.trade_journal.get_sample_count()
+        self.dashboard.alert(f"JOURNAL | {journal_count} total trade outcomes recorded")
+
+        # Loss analysis from trade journal
+        try:
+            analysis = self.trade_journal.analyze_losses(n=50)
+            if analysis.get("summary"):
+                self.dashboard.alert(f"LOSS ANALYSIS | {analysis['summary']}")
+        except Exception as exc:
+            logger.warning("[Cycle] Loss analysis failed: %s", exc)
+
+        # Resolve pending settlements in background
+        try:
+            pending = self.settlement_resolver.get_pending_count()
+            if pending > 0:
+                resolved = self.settlement_resolver.resolve_batch(max_queries=30)
+                if resolved:
+                    self.dashboard.alert(
+                        f"SETTLEMENT | Resolved {resolved} ambiguous contracts"
+                    )
+        except Exception as exc:
+            logger.warning("[Cycle] Settlement resolution failed: %s", exc)
+
+        # Reset counter-trade tracker for new cycle
+        self.counter_analyzer.reset_cycle()
+
         # Log for file record
         self.dashboard.log(
             f"[Cycle] #{self._cycle_count} reset to ${new_bal:.2f}. "
-            f"History: {len(self.cycle_history)} cycles."
+            f"History: {len(self.cycle_history)} cycles. "
+            f"Journal: {journal_count} outcomes."
         )
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
@@ -470,6 +616,17 @@ class OrchestratorEngine:
                                     )
                             except Exception:
                                 pass
+
+                # Counter-trade analysis on losing positions (LOG-ONLY by default)
+                for pos in list(self.risk_manager.exchange.positions):
+                    if pos.get("pnl", 0) >= 0:
+                        continue  # only check losers
+                    try:
+                        mkt_price = pos.get("last_market_price", 0)
+                        if mkt_price > 0:
+                            self.counter_analyzer.should_counter(pos, mkt_price)
+                    except Exception:
+                        pass
 
                 # Auto-cycle: detect drawdown kill switch
                 if self.auto_cycle and self.risk_manager.drawdown_kill_triggered:

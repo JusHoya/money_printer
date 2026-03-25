@@ -432,6 +432,16 @@ class SignalProcessorMixin:
                     disable_profit_targets=dpt,
                     strike=strike_val,
                 )
+                # Store ML context in position for trade journal
+                positions = risk_manager.exchange.positions
+                if positions:
+                    positions[-1]["ml_context"] = {
+                        "model_probability": getattr(sig, "model_probability", None),
+                        "model_confidence": sig.confidence,
+                        "model_used": getattr(sig, "model_used", None),
+                        "btc_spot": getattr(sig, "btc_spot", None),
+                        "tte_at_entry": getattr(sig, "tte_at_entry", None),
+                    }
                 traded = True
             else:
                 dashboard.log(f"⚠️ HARVEST: {sig.symbol} (Risky but Recorded)")

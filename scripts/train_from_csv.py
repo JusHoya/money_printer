@@ -229,9 +229,9 @@ def compute_labels_with_settlement(
 
     for sym, grp in contract_df.groupby("symbol"):
         last_price = grp["contract_price"].iloc[-1]
-        if last_price > 0.90:
+        if last_price > 0.85:
             labels[sym] = 1
-        elif last_price < 0.10:
+        elif last_price < 0.15:
             labels[sym] = 0
         else:
             ambiguous.append(sym)
@@ -597,30 +597,100 @@ def walk_forward_split(
 # --------------------------------------------------------------------------- #
 
 
+def compute_outcome_weights(
+    df: pd.DataFrame,
+    journal_outcomes: list,
+    default_weight: float = 1.0,
+    wrong_weight: float = 1.5,
+    wrong_confident_weight: float = 2.0,
+    correct_weight: float = 1.2,
+    max_weight: float = 3.0,
+) -> np.ndarray:
+    """Assign sample weights based on trade outcome feedback.
+
+    Matches training samples to trade journal outcomes by symbol overlap.
+    Weights:
+      - Default: 1.0 (no matching outcome)
+      - Model was CORRECT and profitable: 1.2 (reinforce)
+      - Model was WRONG: 1.5 (focus on failures)
+      - Model was WRONG with HIGH confidence (>0.7): 2.0 (punish overconfidence)
+      - Capped at max_weight to prevent overfitting
+    """
+    weights = np.full(len(df), default_weight)
+    if not journal_outcomes or "symbol" not in df.columns:
+        return weights
+
+    # Build outcome lookup: symbol -> (prediction_correct, model_confidence)
+    outcome_map = {}
+    for o in journal_outcomes:
+        sym = getattr(o, "symbol", None) or (
+            o.get("symbol") if isinstance(o, dict) else None
+        )
+        if not sym:
+            continue
+        correct = getattr(o, "prediction_correct", None)
+        if correct is None and isinstance(o, dict):
+            correct = o.get("prediction_correct")
+        conf = getattr(o, "model_confidence", None)
+        if conf is None and isinstance(o, dict):
+            conf = o.get("model_confidence")
+        outcome_map[sym] = (correct, conf)
+
+    if not outcome_map:
+        return weights
+
+    for i, row in df.iterrows():
+        sym = row.get("symbol", "")
+        if sym not in outcome_map:
+            continue
+        correct, conf = outcome_map[sym]
+        if correct is True:
+            weights[i] = min(correct_weight, max_weight)
+        elif correct is False:
+            if conf is not None and conf > 0.7:
+                weights[i] = min(wrong_confident_weight, max_weight)
+            else:
+                weights[i] = min(wrong_weight, max_weight)
+
+    weighted = int((weights != default_weight).sum())
+    if weighted:
+        log.info(
+            "Outcome weights: %d/%d samples weighted (avg=%.2f)",
+            weighted,
+            len(weights),
+            weights.mean(),
+        )
+    return weights
+
+
 def train_xgboost(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     X_val: pd.DataFrame,
     y_val: pd.Series,
+    sample_weight: Optional[np.ndarray] = None,
 ) -> XGBClassifier:
     """Train conservative XGBoost for small dataset."""
     model = XGBClassifier(
-        max_depth=4,
+        max_depth=3,
         n_estimators=100,
         learning_rate=0.05,
         objective="binary:logistic",
         eval_metric="auc",
         early_stopping_rounds=15,
         subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=3,
+        colsample_bytree=0.7,
+        min_child_weight=5,
+        reg_alpha=0.1,
+        gamma=0.1,
     )
-    model.fit(
-        X_train,
-        y_train,
-        eval_set=[(X_val, y_val)],
-        verbose=False,
-    )
+    fit_kwargs = {
+        "eval_set": [(X_val, y_val)],
+        "verbose": False,
+    }
+    if sample_weight is not None:
+        fit_kwargs["sample_weight"] = sample_weight
+    model.fit(X_train, y_train, **fit_kwargs)
     return model
 
 
@@ -658,9 +728,20 @@ def main():
         log.error("No data_*.csv files found in %s", data_dir)
         return
 
+    # Deduplicate by filename — same CSV can appear in multiple cycle dirs
+    seen_names = set()
+    unique_csvs = []
+    for csv_path in data_csvs:
+        if csv_path.name not in seen_names:
+            seen_names.add(csv_path.name)
+            unique_csvs.append(csv_path)
+    skipped = len(data_csvs) - len(unique_csvs)
+
     log.info(
-        "Found %d data CSVs, %d log files across %s",
+        "Found %d data CSVs (%d unique, %d duplicates skipped), %d log files across %s",
         len(data_csvs),
+        len(unique_csvs),
+        skipped,
         len(log_files),
         data_dir,
     )
@@ -672,7 +753,7 @@ def main():
     all_btc = []
     all_contract = []
 
-    for csv_path in data_csvs:
+    for csv_path in unique_csvs:
         btc_df, contract_df = load_session(str(csv_path))
         if not btc_df.empty:
             all_btc.append(btc_df)
@@ -685,21 +766,24 @@ def main():
 
     btc_df = (
         pd.concat(all_btc, ignore_index=True)
+        .drop_duplicates(subset=["timestamp"])
         .sort_values("timestamp")
         .reset_index(drop=True)
     )
     contract_df = (
         pd.concat(all_contract, ignore_index=True)
+        .drop_duplicates(subset=["timestamp", "symbol"])
         .sort_values("timestamp")
         .reset_index(drop=True)
     )
 
     unique_contracts = contract_df["symbol"].unique()
     log.info(
-        "Combined: %d BTC rows, %d contract rows, %d unique contracts",
+        "Combined: %d BTC rows, %d contract rows, %d unique contracts (from %d unique CSVs)",
         len(btc_df),
         len(contract_df),
         len(unique_contracts),
+        len(unique_csvs),
     )
 
     # Compute labels — use Kalshi API for ambiguous contracts if --use-api

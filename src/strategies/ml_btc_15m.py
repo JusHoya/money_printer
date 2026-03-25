@@ -103,6 +103,7 @@ class MLBtc15mStrategy(Strategy):
         confidence = pred["confidence"]
         fair = pred.get("fair_value", prob)
         rec_price = pred.get("recommended_price", fair)
+        model_used = pred.get("model_used", "analytical")
 
         # --- YES direction ---
         if prob > 0.5:
@@ -123,6 +124,11 @@ class MLBtc15mStrategy(Strategy):
                 if close_time:
                     sig.expiration_time = close_time
                 sig.disable_profit_targets = tte_s < 300
+                # ML context for trade journal
+                sig.model_probability = prob
+                sig.model_used = model_used
+                sig.btc_spot = spot
+                sig.tte_at_entry = tte_s
                 logger.info(
                     "[ML BTC 15m] BUY YES %s | prob=%.3f ask=%.2f edge=%.3f strike=$%.0f",
                     market_data.symbol,
@@ -154,6 +160,11 @@ class MLBtc15mStrategy(Strategy):
                 if close_time:
                     sig.expiration_time = close_time
                 sig.disable_profit_targets = tte_s < 300
+                # ML context for trade journal
+                sig.model_probability = prob
+                sig.model_used = model_used
+                sig.btc_spot = spot
+                sig.tte_at_entry = tte_s
                 logger.info(
                     "[ML BTC 15m] BUY NO %s | prob=%.3f bid=%.2f edge=%.3f strike=$%.0f",
                     market_data.symbol,
