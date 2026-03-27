@@ -244,13 +244,36 @@ class OnlineModelUpdater:
                 return False
 
             # ---------------------------------------------------------- #
-            # 7. Save new model and hot-reload
+            # 7. Save new model, metadata, and hot-reload
             # ---------------------------------------------------------- #
             Path("data/models").mkdir(parents=True, exist_ok=True)
             joblib.dump(
                 {"model": new_model, "feature_names": feat_cols},
                 str(model_path),
             )
+
+            # Save feature metadata so sample count is always visible
+            import json as _json
+
+            train_metrics = {
+                "feature_names": feat_cols,
+                "training_samples": len(df),
+                "contracts_labeled": len(labels),
+                "label_distribution": {
+                    "yes": int(sum(labels.values())),
+                    "no": len(labels) - int(sum(labels.values())),
+                },
+                "results": {
+                    "val": {"auc": float(new_auc), "n": len(eval_X)},
+                },
+            }
+            meta_path = Path("data/models/btc_xgboost_feature_meta.json")
+            try:
+                with open(meta_path, "w") as mf:
+                    _json.dump(train_metrics, mf, indent=2)
+            except Exception:
+                pass
+
             logger.info(
                 "[OnlineUpdater] Model saved to %s (AUC %.4f -> %.4f, %d samples, %d contracts)",
                 model_path,

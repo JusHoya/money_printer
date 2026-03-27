@@ -26,6 +26,9 @@ import src.bots  # noqa: F401
 
 
 class OrchestratorEngine:
+    _TRAINING_STATE_PATH = os.path.join("data", "training_state.json")
+    _PERIODIC_RETRAIN_INTERVAL = 2 * 3600  # 2 hours
+
     def __init__(self, bot_names=None):
         self.dashboard = Dashboard()
         self.running = True
@@ -76,6 +79,10 @@ class OrchestratorEngine:
         self.cycle_history = []  # list of cycle result dicts
         self._training_diagnostics = {}  # latest training metrics
         self._training_history = []  # accumulated training history (max 20)
+        self._last_periodic_retrain = time.time()
+
+        # Load persisted training state from prior runs
+        self._load_training_state()
 
         # Trade journal — records every closed trade for learning feedback
         self.trade_journal = TradeJournal()
@@ -166,10 +173,355 @@ class OrchestratorEngine:
             if strategy_name == "Late Sniper" and "late_sniper" in bot.strategies:
                 bot.strategies["late_sniper"]._handle_position_close(position)
 
+    # ------------------------------------------------------------------
+    # Training state persistence
+    # ------------------------------------------------------------------
+
+    def _load_training_state(self):
+        """Load persisted training history from prior process runs."""
+        import json as _json
+
+        try:
+            if os.path.exists(self._TRAINING_STATE_PATH):
+                with open(self._TRAINING_STATE_PATH, "r") as f:
+                    state = _json.load(f)
+                self._cycle_count = state.get("cycle_count", 0)
+                self.cycle_history = state.get("cycle_history", [])
+                self._training_history = state.get("training_history", [])
+                self._training_diagnostics = state.get("training_diagnostics", {})
+                logger.info(
+                    "[State] Loaded training state: %d cycles, %d history entries, "
+                    "%d last samples",
+                    self._cycle_count,
+                    len(self._training_history),
+                    self._training_diagnostics.get("training_samples", 0),
+                )
+        except Exception as exc:
+            logger.warning("[State] Could not load training state: %s", exc)
+
+    def _save_training_state(self):
+        """Persist training history and cycle history to disk."""
+        import json as _json
+
+        state = {
+            "cycle_count": self._cycle_count,
+            "cycle_history": self.cycle_history[-20:],
+            "training_history": self._training_history[-20:],
+            "training_diagnostics": self._training_diagnostics,
+        }
+        try:
+            os.makedirs(os.path.dirname(self._TRAINING_STATE_PATH), exist_ok=True)
+            with open(self._TRAINING_STATE_PATH, "w") as f:
+                _json.dump(state, f, indent=2)
+        except Exception as exc:
+            logger.warning("[State] Could not save training state: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Shared retrain logic
+    # ------------------------------------------------------------------
+
+    def _retrain_from_all_data(self, include_live=False) -> dict:
+        """Retrain model from all archived (and optionally live) CSV data.
+
+        Returns training metrics dict, empty on failure.
+        """
+        import json as _json
+
+        try:
+            from scripts.train_from_csv import (
+                load_session,
+                extract_strikes_from_logs,
+                compute_labels_with_settlement,
+                infer_strikes,
+                build_features,
+                walk_forward_split,
+                train_xgboost,
+                compute_outcome_weights,
+            )
+            from pathlib import Path
+            import pandas as pd
+
+            archive_dir = Path("logs/_archive")
+            data_csvs = (
+                sorted(archive_dir.rglob("data_*.csv")) if archive_dir.exists() else []
+            )
+            log_files = (
+                sorted(archive_dir.rglob("money_printer_*.log"))
+                if archive_dir.exists()
+                else []
+            )
+
+            # Optionally include live CSVs from logs/ (for periodic/startup retrain)
+            if include_live:
+                logs_dir = Path("logs")
+                if logs_dir.exists():
+                    data_csvs.extend(sorted(logs_dir.glob("data_*.csv")))
+                    log_files.extend(sorted(logs_dir.glob("money_printer_*.log")))
+
+            if not data_csvs:
+                logger.warning("[Retrain] No data CSVs found")
+                return {}
+
+            log_strikes = extract_strikes_from_logs([str(p) for p in log_files])
+
+            # Deduplicate by filename
+            seen_names = set()
+            unique_csvs = []
+            for csv_path in data_csvs:
+                if csv_path.name not in seen_names:
+                    seen_names.add(csv_path.name)
+                    unique_csvs.append(csv_path)
+            skipped = len(data_csvs) - len(unique_csvs)
+            if skipped:
+                logger.info(
+                    "[Retrain] Dedup: %d unique CSVs (skipped %d duplicates)",
+                    len(unique_csvs),
+                    skipped,
+                )
+
+            all_btc, all_contract = [], []
+            for csv_path in unique_csvs:
+                btc_df, contract_df = load_session(str(csv_path))
+                if not btc_df.empty:
+                    all_btc.append(btc_df)
+                if not contract_df.empty:
+                    all_contract.append(contract_df)
+
+            if not all_btc or not all_contract:
+                logger.warning("[Retrain] No BTC or contract data found")
+                return {}
+
+            btc_df = (
+                pd.concat(all_btc, ignore_index=True)
+                .drop_duplicates(subset=["timestamp"])
+                .sort_values("timestamp")
+                .reset_index(drop=True)
+            )
+            contract_df = (
+                pd.concat(all_contract, ignore_index=True)
+                .drop_duplicates(subset=["timestamp", "symbol"])
+                .sort_values("timestamp")
+                .reset_index(drop=True)
+            )
+
+            unique_contracts = contract_df["symbol"].nunique()
+            logger.info(
+                "[Retrain] Data: %d BTC rows, %d contract rows, %d unique contracts, "
+                "%d unique CSVs",
+                len(btc_df),
+                len(contract_df),
+                unique_contracts,
+                len(unique_csvs),
+            )
+
+            labels = compute_labels_with_settlement(
+                contract_df, kalshi_provider=self.kalshi
+            )
+            if not labels:
+                logger.warning("[Retrain] No contracts could be labeled")
+                return {}
+
+            strikes = infer_strikes(btc_df, contract_df, log_strikes)
+            df = build_features(
+                btc_df, contract_df, strikes, labels, sample_interval_s=60
+            )
+
+            if len(df) < 20:
+                logger.warning("[Retrain] Not enough samples (%d) to train", len(df))
+                return {}
+
+            X_tr, y_tr, X_v, y_v, X_te, y_te = walk_forward_split(df)
+
+            # Compute outcome-weighted samples from trade journal
+            journal_outcomes = self.trade_journal.load_all()
+            weights = compute_outcome_weights(df, journal_outcomes)
+            n_tr = len(X_tr)
+            weights_tr = weights[:n_tr] if len(weights) >= n_tr else None
+
+            model = train_xgboost(X_tr, y_tr, X_v, y_v, sample_weight=weights_tr)
+
+            import joblib
+
+            feat_cols = [c for c in df.columns if c.startswith("feat_")]
+            joblib.dump(
+                {"model": model, "feature_names": feat_cols},
+                "data/models/btc_xgboost_latest.joblib",
+            )
+
+            # Compute metrics
+            from sklearn.metrics import roc_auc_score
+
+            val_auc = 0.0
+            try:
+                val_auc = roc_auc_score(y_v, model.predict_proba(X_v)[:, 1])
+            except Exception:
+                pass
+
+            train_metrics = {
+                "contracts_labeled": len(labels),
+                "training_samples": len(df),
+                "unique_contracts_observed": unique_contracts,
+                "unique_csvs": len(unique_csvs),
+                "feature_names": feat_cols,
+                "results": {
+                    "val": {"auc": float(val_auc), "n": len(X_v)},
+                },
+                "label_distribution": {
+                    "yes": int(sum(labels.values())),
+                    "no": len(labels) - int(sum(labels.values())),
+                },
+            }
+
+            # Save metadata
+            meta_path = os.path.join("data", "models", "btc_xgboost_feature_meta.json")
+            with open(meta_path, "w") as mf:
+                _json.dump(train_metrics, mf, indent=2)
+
+            logger.info(
+                "[Retrain] OK: %d labeled of %d observed contracts, "
+                "val AUC=%.4f, %d samples from %d CSVs",
+                len(labels),
+                unique_contracts,
+                val_auc,
+                len(df),
+                len(unique_csvs),
+            )
+            return train_metrics
+
+        except Exception as exc:
+            logger.error("[Retrain] Error: %s", exc)
+            return {}
+
+    def _reload_models_into_strategies(self) -> int:
+        """Hot-reload retrained models into all running strategies."""
+        reloaded = 0
+        for bot in self.bots:
+            for strat in bot.strategies.values():
+                pred = getattr(strat, "predictor", None)
+                if pred and hasattr(pred, "load_models"):
+                    pred.load_models()
+                    reloaded += 1
+        if reloaded:
+            logger.info("[Retrain] Reloaded models into %d strategies", reloaded)
+        return reloaded
+
+    # ------------------------------------------------------------------
+    # Startup archive + retrain
+    # ------------------------------------------------------------------
+
+    def _startup_archive_and_retrain(self):
+        """Archive stale CSVs from previous sessions and retrain from all data."""
+        # Archive any leftover CSVs from logs/ that aren't the current session
+        active_files = {
+            os.path.abspath(self.dashboard.data_log_path),
+            os.path.abspath(self.dashboard.session_log_path),
+            os.path.abspath(self.dashboard.portfolio_log_path),
+        }
+
+        stale_files = []
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if not os.path.isfile(fpath):
+                continue
+            if not (f.endswith(".csv") or f.endswith(".log")):
+                continue
+            if os.path.abspath(fpath) in active_files:
+                continue
+            stale_files.append((f, fpath))
+
+        if stale_files:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            archive_dir = os.path.join("logs", "_archive", f"startup_{ts}")
+            os.makedirs(archive_dir, exist_ok=True)
+
+            archived = 0
+            for f, fpath in stale_files:
+                try:
+                    shutil.copy2(fpath, os.path.join(archive_dir, f))
+                    os.remove(fpath)
+                    archived += 1
+                except Exception as exc:
+                    logger.warning("[Startup] Could not archive %s: %s", f, exc)
+
+            logger.info(
+                "[Startup] Archived %d stale files from previous session(s)",
+                archived,
+            )
+
+        # Retrain from all accumulated data (archive + any live CSVs)
+        prev_samples = self._training_diagnostics.get("training_samples", 0)
+        logger.info("[Startup] Retraining from all accumulated data...")
+        train_metrics = self._retrain_from_all_data(include_live=True)
+
+        if train_metrics:
+            new_samples = train_metrics.get("training_samples", 0)
+            self._training_diagnostics = train_metrics
+            self._reload_models_into_strategies()
+            self._save_training_state()
+
+            growth = new_samples - prev_samples
+            self.dashboard.log(
+                f"[Startup] Retrained: {new_samples} samples "
+                f"({growth:+d} vs last), "
+                f"{train_metrics.get('contracts_labeled', 0)} contracts"
+            )
+            if growth > 0:
+                self.dashboard.alert(
+                    f"STARTUP RETRAIN | {new_samples} samples "
+                    f"(+{growth} new) | "
+                    f"{train_metrics.get('contracts_labeled', 0)} contracts"
+                )
+        else:
+            logger.info("[Startup] No training data available (yet)")
+
+    # ------------------------------------------------------------------
+    # Periodic retrain (every 2 hours)
+    # ------------------------------------------------------------------
+
+    def _periodic_retrain(self):
+        """Retrain from all data including the current live session."""
+        from datetime import datetime as _dt
+
+        prev_samples = self._training_diagnostics.get("training_samples", 0)
+        logger.info("[Periodic] Scheduled retrain from all data (including live)...")
+        train_metrics = self._retrain_from_all_data(include_live=True)
+
+        if train_metrics:
+            new_samples = train_metrics.get("training_samples", 0)
+            self._training_diagnostics = train_metrics
+
+            # Append to training history
+            self._training_history.append(
+                {
+                    "timestamp": _dt.now().isoformat(),
+                    "trigger": "periodic",
+                    "diagnostics": train_metrics,
+                }
+            )
+            if len(self._training_history) > 20:
+                self._training_history = self._training_history[-20:]
+
+            self._reload_models_into_strategies()
+            self._save_training_state()
+
+            growth = new_samples - prev_samples
+            self.dashboard.log(
+                f"[Periodic] Retrained: {new_samples} samples "
+                f"({growth:+d} vs last), "
+                f"{train_metrics.get('contracts_labeled', 0)} contracts"
+            )
+            if growth > 0:
+                self.dashboard.alert(
+                    f"PERIODIC RETRAIN | {new_samples} samples "
+                    f"(+{growth} new) | "
+                    f"{train_metrics.get('contracts_labeled', 0)} contracts"
+                )
+
+        self._last_periodic_retrain = time.time()
+
     def _run_drawdown_cycle(self):
         """Archive logs, retrain model, reset state for next cycle."""
         from datetime import datetime as _dt
-        import json as _json
 
         # Immediately clear the flag to prevent re-triggering
         self.risk_manager.drawdown_kill_triggered = False
@@ -247,141 +599,9 @@ class OrchestratorEngine:
             except Exception as exc:
                 logger.warning("[Cycle] Could not remove old file %s: %s", f, exc)
 
-        # Retrain model and capture metrics
+        # Retrain model from all accumulated archive data
         logger.info("[Cycle] Retraining model in-process...")
-        train_metrics = {}
-        try:
-            from scripts.train_from_csv import (
-                load_session,
-                extract_strikes_from_logs,
-                compute_labels_with_settlement,
-                infer_strikes,
-                build_features,
-                walk_forward_split,
-                train_xgboost,
-                compute_outcome_weights,
-            )
-            from pathlib import Path
-            import pandas as pd
-
-            data_dir = Path("logs/_archive")
-            data_csvs = sorted(data_dir.rglob("data_*.csv"))
-            log_files = sorted(data_dir.rglob("money_printer_*.log"))
-            log_strikes = extract_strikes_from_logs([str(p) for p in log_files])
-
-            # Deduplicate by filename — same CSV appears in multiple cycle dirs
-            seen_names = set()
-            unique_csvs = []
-            for csv_path in data_csvs:
-                if csv_path.name not in seen_names:
-                    seen_names.add(csv_path.name)
-                    unique_csvs.append(csv_path)
-            skipped = len(data_csvs) - len(unique_csvs)
-            if skipped:
-                logger.info(
-                    "[Cycle] Dedup: %d unique CSVs (skipped %d duplicates)",
-                    len(unique_csvs),
-                    skipped,
-                )
-
-            all_btc, all_contract = [], []
-            for csv_path in unique_csvs:
-                btc_df, contract_df = load_session(str(csv_path))
-                if not btc_df.empty:
-                    all_btc.append(btc_df)
-                if not contract_df.empty:
-                    all_contract.append(contract_df)
-
-            if all_btc and all_contract:
-                btc_df = (
-                    pd.concat(all_btc, ignore_index=True)
-                    .drop_duplicates(subset=["timestamp"])
-                    .sort_values("timestamp")
-                    .reset_index(drop=True)
-                )
-                contract_df = (
-                    pd.concat(all_contract, ignore_index=True)
-                    .drop_duplicates(subset=["timestamp", "symbol"])
-                    .sort_values("timestamp")
-                    .reset_index(drop=True)
-                )
-                logger.info(
-                    "[Cycle] Training data: %d BTC rows, %d contract rows, %d unique CSVs",
-                    len(btc_df),
-                    len(contract_df),
-                    len(unique_csvs),
-                )
-
-                labels = compute_labels_with_settlement(
-                    contract_df, kalshi_provider=self.kalshi
-                )
-                strikes = infer_strikes(btc_df, contract_df, log_strikes)
-                df = build_features(
-                    btc_df, contract_df, strikes, labels, sample_interval_s=60
-                )
-
-                if len(df) >= 20:
-                    X_tr, y_tr, X_v, y_v, X_te, y_te = walk_forward_split(df)
-
-                    # Compute outcome-weighted samples from trade journal
-                    journal_outcomes = self.trade_journal.load_all()
-                    weights = compute_outcome_weights(df, journal_outcomes)
-                    # Align weights to train split
-                    n_tr = len(X_tr)
-                    weights_tr = weights[:n_tr] if len(weights) >= n_tr else None
-
-                    model = train_xgboost(
-                        X_tr, y_tr, X_v, y_v, sample_weight=weights_tr
-                    )
-
-                    import joblib
-
-                    feat_cols = [c for c in df.columns if c.startswith("feat_")]
-                    joblib.dump(
-                        {"model": model, "feature_names": feat_cols},
-                        "data/models/btc_xgboost_latest.joblib",
-                    )
-
-                    # Compute metrics
-                    from sklearn.metrics import roc_auc_score
-
-                    val_auc = 0.0
-                    try:
-                        val_auc = roc_auc_score(y_v, model.predict_proba(X_v)[:, 1])
-                    except Exception:
-                        pass
-
-                    train_metrics = {
-                        "contracts_labeled": len(labels),
-                        "training_samples": len(df),
-                        "feature_names": feat_cols,
-                        "results": {
-                            "val": {"auc": float(val_auc), "n": len(X_v)},
-                        },
-                        "label_distribution": {
-                            "yes": int(sum(labels.values())),
-                            "no": len(labels) - int(sum(labels.values())),
-                        },
-                    }
-                    # Save metadata
-                    meta_path = os.path.join(
-                        "data", "models", "btc_xgboost_feature_meta.json"
-                    )
-                    with open(meta_path, "w") as mf:
-                        _json.dump(train_metrics, mf, indent=2)
-
-                    logger.info(
-                        "[Cycle] Retrain OK: %d contracts, val AUC=%.4f, %d samples",
-                        len(labels),
-                        val_auc,
-                        len(df),
-                    )
-                else:
-                    logger.warning("[Cycle] Not enough samples (%d) to train", len(df))
-            else:
-                logger.warning("[Cycle] No data found for retraining")
-        except Exception as exc:
-            logger.error("[Cycle] Retrain error: %s", exc)
+        train_metrics = self._retrain_from_all_data(include_live=False)
 
         # Save cycle record
         cycle_record = {
@@ -427,15 +647,7 @@ class OrchestratorEngine:
         self.risk_manager.active_positions = 0
 
         # Reload retrained model into all running strategies
-        reloaded = 0
-        for bot in self.bots:
-            for strat in bot.strategies.values():
-                pred = getattr(strat, "predictor", None)
-                if pred and hasattr(pred, "load_models"):
-                    pred.load_models()
-                    reloaded += 1
-        if reloaded:
-            logger.info("[Cycle] Reloaded models into %d strategies", reloaded)
+        self._reload_models_into_strategies()
 
         # Re-init dashboard with fresh log files, preserving alerts
         prev_alerts = list(self.dashboard.alerts) if self.dashboard else []
@@ -531,6 +743,9 @@ class OrchestratorEngine:
         # Reset counter-trade tracker for new cycle
         self.counter_analyzer.reset_cycle()
 
+        # Persist training state to disk (survives process restarts)
+        self._save_training_state()
+
         # Log for file record
         self.dashboard.log(
             f"[Cycle] #{self._cycle_count} reset to ${new_bal:.2f}. "
@@ -587,6 +802,12 @@ class OrchestratorEngine:
     def market_loop(self):
         """Background thread: position updates + bot ticks."""
         last_heartbeat = time.time()
+
+        # Startup: archive stale CSVs and retrain from all accumulated data
+        try:
+            self._startup_archive_and_retrain()
+        except Exception as exc:
+            logger.error("[Startup] Archive/retrain failed: %s", exc)
 
         while self.running:
             try:
@@ -645,6 +866,18 @@ class OrchestratorEngine:
                             self._graduate_model(profitable_h, pnl)
                     else:
                         self._profitable_since = None  # reset clock
+
+                # Periodic retrain: every 2 hours, re-label settled contracts
+                # and retrain from all data (including current live session)
+                if (
+                    time.time() - self._last_periodic_retrain
+                    > self._PERIODIC_RETRAIN_INTERVAL
+                ):
+                    try:
+                        self._periodic_retrain()
+                    except Exception as exc:
+                        logger.error("[Periodic] Retrain failed: %s", exc)
+                        self._last_periodic_retrain = time.time()
 
                 # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:
