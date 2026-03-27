@@ -991,7 +991,9 @@ class CryptoHourlyStrategyV3(Strategy):
                     limit_price=implied_yes_ask,
                     confidence=0.8,
                 )
-                sig.stop_loss = 0.50  # Hold through hour
+                sig.stop_loss = max(
+                    0.01, implied_yes_ask - 0.05
+                )  # Actual stop, 5c below entry
                 if close_time:
                     sig.expiration_time = close_time
                 signals.append(sig)
@@ -1009,7 +1011,7 @@ class CryptoHourlyStrategyV3(Strategy):
                     limit_price=no_ask,
                     confidence=0.8,
                 )
-                sig.stop_loss = 0.50  # Hold through hour
+                sig.stop_loss = max(0.01, no_ask - 0.05)  # Actual stop, 5c below entry
                 sig.contract_side = "NO"
                 if close_time:
                     sig.expiration_time = close_time
@@ -1413,7 +1415,7 @@ class Crypto15mLateSniper(Strategy):
             confidence=confidence,
             contract_side=chosen_side,
         )
-        sig.stop_loss = max(0.01, entry_price - 0.08)  # 8 cents below entry
+        sig.stop_loss = max(0.01, entry_price - 0.05)  # Tighten from 8c to 5c
         sig.expiration_time = getattr(market_data, "expiration_time", None) or (
             market_data.extra or {}
         ).get("close_time")
@@ -1456,7 +1458,7 @@ class Crypto15mLateSniper(Strategy):
             confidence=confidence,
             contract_side=self._counter_side,
         )
-        sig.stop_loss = max(0.01, entry_price - 0.08)
+        sig.stop_loss = max(0.01, entry_price - 0.05)  # Tighten from 8c to 5c
         sig.expiration_time = self._counter_expiration
         sig.disable_profit_targets = True
         sig.is_counter_trade = True  # Flag to bypass cooldowns

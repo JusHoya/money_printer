@@ -93,8 +93,8 @@ class LongshotFaderV2(Strategy):
             confidence=confidence,
             contract_side="NO",
         )
-        # Stop loss: if YES price rises to 0.20 (our NO position loses)
-        sig.stop_loss = 0.20
+        # Stop loss: scale to entry, cap at 0.15
+        sig.stop_loss = min(0.15, bid + 0.05)
         sig.expiration_time = extra.get("close_time")
 
         logger.info(

@@ -5,9 +5,6 @@ from src.bots.base import Bot
 from src.bots.registry import BotRegistry
 from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
 from src.core.interfaces import TradeSignal
-from src.strategies.crypto_strategy import (
-    Crypto15mLateSniper,
-)
 from src.strategies.empirical_edge import EmpiricalEdgeStrategy
 from src.strategies.ml_btc_15m import MLBtc15mStrategy
 from src.strategies.latency_arb import LatencyArbStrategy
@@ -39,7 +36,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             "time_decay": TimeDecayScalper(),
             "longshot_v2": LongshotFaderV2(),
             "ml_btc_15m": MLBtc15mStrategy(),
-            "late_sniper": Crypto15mLateSniper(),
+            # "late_sniper": Crypto15mLateSniper(),  # DISABLED: 8% WR, -$8,310 over 113 trades
         }
 
     def setup(self, kalshi, coinbase=None, nws=None, **kwargs):
@@ -137,7 +134,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             ("time_decay", "Time Decay"),
             ("longshot_v2", "LongShot Fader V2"),
             ("ml_btc_15m", "ML BTC 15m"),
-            ("late_sniper", "Late Sniper"),
+            # ("late_sniper", "Late Sniper"),  # DISABLED
         ]:
             signals = self.strategies[strat_key].analyze(btc_data)
             if signals and self.ticks % 10 == 0:

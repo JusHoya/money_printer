@@ -519,7 +519,8 @@ class TestLongshotFaderV2:
         md = make_btc_market(bid=0.06, ask=0.08)
         signals = strat.analyze(md)
         assert len(signals) == 1
-        assert signals[0].stop_loss == 0.20
+        # stop_loss = min(0.15, bid + 0.05) = min(0.15, 0.06+0.05) = 0.11
+        assert signals[0].stop_loss == 0.11
 
 
 # ===========================================================================

@@ -119,7 +119,7 @@ class MLBtc15mStrategy(Strategy):
                     confidence=confidence,
                     contract_side="YES",
                 )
-                sig.stop_loss = max(0.01, lp - 0.08)
+                sig.stop_loss = max(0.01, lp - 0.05)  # Tighten from 8c to 5c
                 sig.strike = strike_val
                 if close_time:
                     sig.expiration_time = close_time
@@ -155,7 +155,7 @@ class MLBtc15mStrategy(Strategy):
                     confidence=confidence,
                     contract_side="NO",
                 )
-                sig.stop_loss = max(0.01, lp - 0.08)
+                sig.stop_loss = max(0.01, lp - 0.05)  # Tighten from 8c to 5c
                 sig.strike = strike_val
                 if close_time:
                     sig.expiration_time = close_time

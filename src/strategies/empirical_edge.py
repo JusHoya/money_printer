@@ -231,7 +231,7 @@ class EmpiricalEdgeStrategy(Strategy):
                 confidence=confidence,
                 contract_side="YES",
             )
-            sig.stop_loss = max(0.01, lp - 0.10)
+            sig.stop_loss = max(0.01, lp - 0.05)  # Tighten from 10c to 5c
             sig.strike = strike
             if close_time:
                 sig.expiration_time = close_time
@@ -260,7 +260,7 @@ class EmpiricalEdgeStrategy(Strategy):
                 confidence=confidence,
                 contract_side="NO",
             )
-            sig.stop_loss = max(0.01, lp - 0.10)
+            sig.stop_loss = max(0.01, lp - 0.05)  # Tighten from 10c to 5c
             sig.strike = strike
             if close_time:
                 sig.expiration_time = close_time
