@@ -399,8 +399,17 @@ def build_features(
     strikes: Dict[str, float],
     labels: Dict[str, int],
     sample_interval_s: int = 30,
+    expiry_buffer_s: int = 15,
 ) -> pd.DataFrame:
-    """Build feature matrix: multiple samples per contract at regular intervals."""
+    """Build feature matrix: multiple samples per contract at regular intervals.
+
+    Parameters
+    ----------
+    expiry_buffer_s : int
+        Stop sampling this many seconds before expiry.  Contracts observed
+        only within this buffer are skipped (outcome already decided).
+        Default 15s (was 60s, which discarded 53% of contracts).
+    """
     if btc_df.empty or contract_df.empty:
         return pd.DataFrame()
 
@@ -408,24 +417,29 @@ def build_features(
     contract_df = contract_df.sort_values("timestamp").reset_index(drop=True)
 
     samples = []
+    skip_no_strike = skip_no_expiry = skip_no_obs = skip_short = 0
     for sym, label in labels.items():
         strike = strikes.get(sym, 0)
         if strike <= 0:
+            skip_no_strike += 1
             continue
         expiry = parse_expiry(sym)
         if expiry is None:
+            skip_no_expiry += 1
             continue
         expiry_ts = pd.Timestamp(expiry)
 
         # Get contract observations for this symbol
         cdf = contract_df[contract_df["symbol"] == sym].copy()
         if cdf.empty:
+            skip_no_obs += 1
             continue
 
-        # Sample window: from first observation to 60s before expiry
+        # Sample window: from first observation to expiry_buffer_s before expiry
         t_start = cdf["timestamp"].iloc[0]
-        t_end = expiry_ts - pd.Timedelta(seconds=60)
+        t_end = expiry_ts - pd.Timedelta(seconds=expiry_buffer_s)
         if t_end <= t_start:
+            skip_short += 1
             continue
 
         # Generate sample times
@@ -556,12 +570,19 @@ def build_features(
             t += pd.Timedelta(seconds=sample_interval_s)
 
     df = pd.DataFrame(samples)
+    used = len(labels) - skip_no_strike - skip_no_expiry - skip_no_obs - skip_short
     if not df.empty:
         log.info(
-            "Built %d samples from %d contracts (%.1f samples/contract)",
+            "Built %d samples from %d/%d contracts (%.1f samples/contract) | "
+            "skipped: %d no_strike, %d short_window, %d no_obs, %d no_expiry",
             len(df),
+            used,
             len(labels),
-            len(df) / max(1, len(labels)),
+            len(df) / max(1, used),
+            skip_no_strike,
+            skip_short,
+            skip_no_obs,
+            skip_no_expiry,
         )
     return df
 
