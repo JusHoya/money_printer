@@ -9,7 +9,9 @@ Usage:
 """
 
 import argparse
+import atexit
 import os
+import signal
 import sys
 import threading
 import time
@@ -123,6 +125,29 @@ def main():
         engine.dashboard.log(
             f"Sim Balance Override: ${args.sim_balance:.2f} (training mode)"
         )
+
+    # ------------------------------------------------------------------ #
+    # Graceful shutdown handlers — archive data before daemon thread dies
+    # ------------------------------------------------------------------ #
+    atexit.register(engine.shutdown)
+
+    _orig_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _handle_sigterm(sig, frame):
+        engine.shutdown()
+        # Re-invoke the original handler so uvicorn still shuts down
+        if callable(_orig_sigterm) and _orig_sigterm not in (
+            signal.SIG_DFL,
+            signal.SIG_IGN,
+        ):
+            _orig_sigterm(sig, frame)
+        else:
+            raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (OSError, ValueError):
+        pass  # Not all platforms support SIGTERM from threads
 
     # ------------------------------------------------------------------ #
     # Start market loop in a background thread

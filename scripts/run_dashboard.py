@@ -217,6 +217,135 @@ class OrchestratorEngine:
             logger.warning("[State] Could not save training state: %s", exc)
 
     # ------------------------------------------------------------------
+    # Graceful shutdown
+    # ------------------------------------------------------------------
+
+    def shutdown(self):
+        """Graceful shutdown: archive current session data and save state.
+
+        Safe to call multiple times (idempotent).
+        """
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
+        self.running = False
+
+        logger.info("[Shutdown] Graceful shutdown initiated...")
+
+        # 1. Archive current CSV/log files (COPY to archive — startup will clean logs/)
+        try:
+            files_to_archive = []
+            if os.path.isdir("logs"):
+                for f in os.listdir("logs"):
+                    fpath = os.path.join("logs", f)
+                    if os.path.isfile(fpath) and (
+                        f.endswith(".csv") or f.endswith(".log")
+                    ):
+                        files_to_archive.append((f, fpath))
+
+            if files_to_archive:
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                archive_dir = os.path.join("logs", "_archive", f"shutdown_{ts}")
+                os.makedirs(archive_dir, exist_ok=True)
+
+                archived = 0
+                for f, fpath in files_to_archive:
+                    try:
+                        shutil.copy2(fpath, os.path.join(archive_dir, f))
+                        archived += 1
+                    except Exception:
+                        pass
+
+                logger.info("[Shutdown] Archived %d files to %s", archived, archive_dir)
+        except Exception as exc:
+            logger.error("[Shutdown] Archive failed: %s", exc)
+
+        # 2. Save training state
+        try:
+            self._save_training_state()
+            logger.info("[Shutdown] Training state saved.")
+        except Exception as exc:
+            logger.error("[Shutdown] Could not save training state: %s", exc)
+
+        # 3. Log final data inventory
+        try:
+            self._log_data_inventory("SHUTDOWN")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Data inventory (debugging aid)
+    # ------------------------------------------------------------------
+
+    def _log_data_inventory(self, context: str = "INVENTORY"):
+        """Log a summary of all persisted data for debugging data-loss issues."""
+        from pathlib import Path
+
+        archive_dir = Path("logs/_archive")
+        journal_path = Path("data/trade_journal.jsonl")
+        state_path = Path(self._TRAINING_STATE_PATH)
+
+        # Count archive subdirectories and CSV files
+        archive_dirs = 0
+        archive_csvs = 0
+        total_csv_bytes = 0
+        if archive_dir.exists():
+            for d in archive_dir.iterdir():
+                if d.is_dir():
+                    archive_dirs += 1
+                    for f in d.glob("data_*.csv"):
+                        archive_csvs += 1
+                        try:
+                            total_csv_bytes += f.stat().st_size
+                        except OSError:
+                            pass
+
+        # Count live CSV files in logs/
+        live_csvs = 0
+        live_csv_bytes = 0
+        logs_dir = Path("logs")
+        if logs_dir.exists():
+            for f in logs_dir.glob("data_*.csv"):
+                live_csvs += 1
+                try:
+                    live_csv_bytes += f.stat().st_size
+                except OSError:
+                    pass
+
+        # Trade journal
+        journal_lines = 0
+        journal_bytes = 0
+        if journal_path.exists():
+            try:
+                journal_bytes = journal_path.stat().st_size
+                with open(journal_path) as jf:
+                    journal_lines = sum(1 for line in jf if line.strip())
+            except OSError:
+                pass
+
+        # Training state
+        state_exists = state_path.exists()
+        prev_samples = self._training_diagnostics.get("training_samples", 0)
+
+        logger.info(
+            "[%s] Data inventory: "
+            "%d archive dirs | %d archived CSVs (%.1f MB) | "
+            "%d live CSVs (%.1f MB) | "
+            "%d journal entries (%.1f KB) | "
+            "training_state=%s | last_samples=%d",
+            context,
+            archive_dirs,
+            archive_csvs,
+            total_csv_bytes / 1024 / 1024,
+            live_csvs,
+            live_csv_bytes / 1024 / 1024,
+            journal_lines,
+            journal_bytes / 1024,
+            "exists" if state_exists else "MISSING",
+            prev_samples,
+        )
+
+    # ------------------------------------------------------------------
     # Shared retrain logic
     # ------------------------------------------------------------------
 
@@ -411,6 +540,9 @@ class OrchestratorEngine:
 
     def _startup_archive_and_retrain(self):
         """Archive stale CSVs from previous sessions and retrain from all data."""
+        # Log data inventory BEFORE archiving to see what survived from last run
+        self._log_data_inventory("STARTUP-BEFORE")
+
         # Archive any leftover CSVs from logs/ that aren't the current session
         active_files = {
             os.path.abspath(self.dashboard.data_log_path),
@@ -473,6 +605,9 @@ class OrchestratorEngine:
                 )
         else:
             logger.info("[Startup] No training data available (yet)")
+
+        # Log data inventory AFTER archiving/retrain for comparison
+        self._log_data_inventory("STARTUP-AFTER")
 
     # ------------------------------------------------------------------
     # Periodic retrain (every 2 hours)
@@ -958,3 +1093,5 @@ if __name__ == "__main__":
         engine.run()
     except KeyboardInterrupt:
         print("\n[System] Shutdown Signal Received.")
+    finally:
+        engine.shutdown()
