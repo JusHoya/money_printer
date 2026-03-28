@@ -76,8 +76,18 @@ _MONTHS = {
 }
 
 
-def parse_expiry(symbol: str) -> Optional[datetime]:
-    """Parse 'KXBTC15M-26MAR201715-15' → datetime(2026, 3, 20, 17, 15)."""
+def parse_expiry(symbol: str, to_utc: bool = True) -> Optional[datetime]:
+    """Parse 'KXBTC15M-26MAR201715-15' → datetime in UTC.
+
+    Kalshi BTC 15-min symbols encode expiry in **Eastern Time**.
+    CSV timestamps from the VM are UTC, so we must convert.
+
+    Parameters
+    ----------
+    to_utc : bool
+        If True (default), convert the parsed ET datetime to UTC.
+        Set False only for unit tests comparing raw parsed values.
+    """
     # Strip display suffix like ' (15m)'
     clean = symbol.split(" ")[0]
     parts = clean.split("-")
@@ -93,7 +103,23 @@ def parse_expiry(symbol: str) -> Optional[datetime]:
         month = _MONTHS.get(mon_str.upper())
         if month is None:
             return None
-        return datetime(2000 + yy, month, dd, hh, mm, 0)
+
+        naive = datetime(2000 + yy, month, dd, hh, mm, 0)
+
+        if not to_utc:
+            return naive
+
+        # Convert Eastern Time → UTC
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
+
+        et = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+        aware = naive.replace(tzinfo=et)
+        return aware.astimezone(utc).replace(tzinfo=None)
+
     except (ValueError, IndexError):
         return None
 
