@@ -1,23 +1,25 @@
 """
 VM Watchdog — Automated error monitor and self-healing loop.
 
-Monitors the Money Printer web dashboard running on a GCE VM for errors,
-uses Claude Code + Playwright MCP to analyze/fix bugs, then deploys fixes
-automatically.
+Runs ON the VM alongside the dashboard. Monitors for errors, uses Claude Code
++ Playwright MCP to analyze/fix bugs, commits/pushes, and restarts the dashboard.
 
 Flow:
-    SSH tunnel → Monitor (process/endpoint/logs) → Detect error →
+    Monitor (process/endpoint/logs) → Detect error →
     Inspect dashboard (Playwright) → Claude fix → Commit/push →
-    VM git pull + restart → Verify (Playwright) → Loop
+    Restart dashboard → Verify (Playwright) → Loop
 
-Usage:
-    python scripts/vm_watchdog.py                   # full autonomous mode
-    python scripts/vm_watchdog.py --dry-run          # detect only, no fixes
-    python scripts/vm_watchdog.py --no-claude         # restart-only on error
-    python scripts/vm_watchdog.py --check-interval 120
+Usage (run in a separate tmux session on the VM):
+    tmux new-session -d -s watchdog 'cd ~/money_printer && source venv/bin/activate && PYTHONPATH=. python3 scripts/vm_watchdog.py'
+
+    python3 scripts/vm_watchdog.py                   # full autonomous mode
+    python3 scripts/vm_watchdog.py --dry-run          # detect only, no fixes
+    python3 scripts/vm_watchdog.py --no-claude         # restart-only on error
+    python3 scripts/vm_watchdog.py --check-interval 120
 """
 
 import argparse
+import glob
 import hashlib
 import json
 import logging
@@ -32,14 +34,11 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # Configuration defaults (overridable via CLI args)
 # ---------------------------------------------------------------------------
-VM_NAME = "money-printer-preschool-20260322"
-VM_ZONE = "us-central1-c"
-VM_REPO_PATH = "/home/hoyer/money_printer"
-VM_VENV_ACTIVATE = "source /home/hoyer/money_printer/venv/bin/activate"
+REPO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TMUX_SESSION = "money"
 
 DASHBOARD_CMD = (
-    f"cd {VM_REPO_PATH} && {VM_VENV_ACTIVATE} && "
+    f"cd {REPO_PATH} && source {REPO_PATH}/venv/bin/activate && "
     "PYTHONPATH=. python3 scripts/run_web_dashboard.py "
     "--auto-cycle --sim-balance 3000 --host 0.0.0.0 --port 8050 --no-browser"
 )
@@ -54,7 +53,6 @@ MAX_TOTAL_FIXES_PER_SESSION = 10
 COOLDOWN_AFTER_FIX_S = 120
 COOLDOWN_AFTER_FAILURE_S = 300
 
-LOCAL_REPO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GIT_BRANCH = "refactor_v0.1"
 
 CLAUDE_TIMEOUT_S = 300
@@ -67,7 +65,7 @@ PLAYWRIGHT_INSPECT_INTERVAL = 10
 # Logging
 # ---------------------------------------------------------------------------
 def setup_watchdog_logger() -> logging.Logger:
-    log_dir = os.path.join(LOCAL_REPO_PATH, "logs")
+    log_dir = os.path.join(REPO_PATH, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
     wdlog = logging.getLogger("vm_watchdog")
@@ -183,130 +181,74 @@ CODE_BUG_PATTERNS = [
     r"AssertionError:",
 ]
 
+
 # ---------------------------------------------------------------------------
-# SSH layer
+# Local command execution
 # ---------------------------------------------------------------------------
-_tunnel_proc: Optional[subprocess.Popen] = None
-
-
-def start_ssh_tunnel(vm_name: str, vm_zone: str) -> subprocess.Popen:
-    """Start a persistent background SSH tunnel: localhost:8050 → VM:8050."""
-    global _tunnel_proc
-    cmd = [
-        "gcloud",
-        "compute",
-        "ssh",
-        vm_name,
-        f"--zone={vm_zone}",
-        "--ssh-flag=-L 8050:localhost:8050",
-        "--ssh-flag=-N",
-        "--ssh-flag=-o ServerAliveInterval=30",
-        "--ssh-flag=-o ServerAliveCountMax=3",
-        "--ssh-flag=-o ExitOnForwardFailure=yes",
-    ]
-    log.info("Starting SSH tunnel: localhost:8050 → VM:8050")
-    _tunnel_proc = subprocess.Popen(
-        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-    )
-    # Give it a moment to establish
-    time.sleep(5)
-    if _tunnel_proc.poll() is not None:
-        stderr = _tunnel_proc.stderr.read().decode() if _tunnel_proc.stderr else ""
-        log.error(f"SSH tunnel failed to start: {stderr}")
-        return _tunnel_proc
-    log.info("SSH tunnel established (PID %d)", _tunnel_proc.pid)
-    return _tunnel_proc
-
-
-def check_tunnel_alive() -> bool:
-    global _tunnel_proc
-    if _tunnel_proc is None:
-        return False
-    return _tunnel_proc.poll() is None
-
-
-def ensure_tunnel(vm_name: str, vm_zone: str):
-    """Restart tunnel if it died."""
-    if not check_tunnel_alive():
-        log.warning("SSH tunnel is down. Restarting...")
-        start_ssh_tunnel(vm_name, vm_zone)
-
-
-def ssh_exec(
-    command: str,
-    vm_name: str,
-    vm_zone: str,
-    timeout: int = 30,
+def run_cmd(
+    command: str, timeout: int = 30, cwd: Optional[str] = None
 ) -> tuple[int, str, str]:
-    """Execute a command on the VM via gcloud SSH."""
-    full_cmd = [
-        "gcloud",
-        "compute",
-        "ssh",
-        vm_name,
-        f"--zone={vm_zone}",
-        f"--command={command}",
-    ]
+    """Run a shell command locally on the VM."""
     try:
         result = subprocess.run(
-            full_cmd,
+            command,
+            shell=True,
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=cwd or REPO_PATH,
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
-        log.warning(f"SSH command timed out ({timeout}s): {command[:80]}")
+        log.warning(f"Command timed out ({timeout}s): {command[:80]}")
         return -1, "", "timeout"
     except Exception as e:
-        log.error(f"SSH exec error: {e}")
+        log.error(f"Command error: {e}")
         return -1, "", str(e)
 
 
 # ---------------------------------------------------------------------------
 # Health detection
 # ---------------------------------------------------------------------------
-def check_process_alive(vm_name: str, vm_zone: str) -> bool:
-    rc, stdout, _ = ssh_exec(
-        "pgrep -f 'run_web_dashboard.py' | head -1",
-        vm_name,
-        vm_zone,
-        timeout=15,
-    )
+def check_process_alive() -> bool:
+    rc, stdout, _ = run_cmd("pgrep -f 'run_web_dashboard.py' | head -1", timeout=5)
     return rc == 0 and stdout.strip() != ""
 
 
-def check_health_endpoint(vm_name: str, vm_zone: str) -> bool:
-    """Probe /api/status from within the VM (avoids tunnel dependency)."""
-    rc, stdout, _ = ssh_exec(
+def check_health_endpoint() -> bool:
+    """Probe /api/status locally."""
+    rc, stdout, _ = run_cmd(
         f"curl -s -o /dev/null -w '%{{http_code}}' "
         f"--max-time {HEALTH_CHECK_TIMEOUT_S} "
         f"http://localhost:{HEALTH_CHECK_PORT}/api/status",
-        vm_name,
-        vm_zone,
-        timeout=HEALTH_CHECK_TIMEOUT_S + 10,
+        timeout=HEALTH_CHECK_TIMEOUT_S + 5,
     )
     return rc == 0 and stdout.strip() == "200"
 
 
-def get_latest_log_tail(vm_name: str, vm_zone: str, lines: int = LOG_TAIL_LINES) -> str:
-    rc, stdout, _ = ssh_exec(
-        f"ls -t {VM_REPO_PATH}/logs/money_printer_*.log 2>/dev/null | head -1 | "
-        f"xargs tail -n {lines} 2>/dev/null",
-        vm_name,
-        vm_zone,
-        timeout=15,
+def get_latest_log_tail(lines: int = LOG_TAIL_LINES) -> str:
+    """Read the tail of the most recent log file directly."""
+    log_dir = os.path.join(REPO_PATH, "logs")
+    log_files = sorted(
+        glob.glob(os.path.join(log_dir, "money_printer_*.log")),
+        key=os.path.getmtime,
+        reverse=True,
     )
-    return stdout if rc == 0 else ""
+    if not log_files:
+        return ""
+    try:
+        with open(log_files[0], encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+            return "".join(all_lines[-lines:])
+    except OSError:
+        return ""
 
 
-def capture_crash_output(vm_name: str, vm_zone: str) -> str:
+def capture_crash_output() -> str:
     """Capture tmux pane scrollback for crash tracebacks."""
-    rc, stdout, _ = ssh_exec(
+    rc, stdout, _ = run_cmd(
         f"tmux capture-pane -t {TMUX_SESSION} -p -S -100 2>/dev/null",
-        vm_name,
-        vm_zone,
-        timeout=10,
+        timeout=5,
     )
     return stdout if rc == 0 else ""
 
@@ -416,7 +358,7 @@ def invoke_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT_S) -> tuple[bool, s
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=LOCAL_REPO_PATH,
+            cwd=REPO_PATH,
         )
         output = result.stdout
         if result.stderr:
@@ -518,7 +460,7 @@ The bot runs on a GCE VM and has encountered a runtime error.
 4. Make the MINIMAL fix needed to resolve this error
 5. Do NOT refactor unrelated code or add unnecessary error handling
 6. Do NOT suppress the error — fix the underlying bug
-7. Run `python -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -x -q` to verify your fix
+7. Run `python3 -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -x -q` to verify your fix
 8. If you cannot determine the root cause, do NOT make speculative changes
 
 ## Repository Layout
@@ -533,14 +475,14 @@ The bot runs on a GCE VM and has encountered a runtime error.
 
 
 # ---------------------------------------------------------------------------
-# Git operations
+# Git operations (all local on the VM)
 # ---------------------------------------------------------------------------
 def git_has_changes() -> bool:
     result = subprocess.run(
         ["git", "status", "--porcelain"],
         capture_output=True,
         text=True,
-        cwd=LOCAL_REPO_PATH,
+        cwd=REPO_PATH,
     )
     return bool(result.stdout.strip())
 
@@ -548,18 +490,10 @@ def git_has_changes() -> bool:
 def git_commit_and_push(error_summary: str, branch: str) -> bool:
     """Stage modified tracked files, commit, and push."""
     # Stage tracked modifications
-    subprocess.run(
-        ["git", "add", "-u"],
-        cwd=LOCAL_REPO_PATH,
-        check=True,
-    )
+    subprocess.run(["git", "add", "-u"], cwd=REPO_PATH, check=True)
     # Also pick up new files Claude may have created in src/ or tests/
     for pattern in ["src/", "scripts/", "tests/"]:
-        subprocess.run(
-            ["git", "add", pattern],
-            cwd=LOCAL_REPO_PATH,
-            capture_output=True,
-        )
+        subprocess.run(["git", "add", pattern], cwd=REPO_PATH, capture_output=True)
 
     # Truncate summary for commit message
     short_summary = re.sub(r"[\[\]]", "", error_summary)[:68]
@@ -568,7 +502,7 @@ def git_commit_and_push(error_summary: str, branch: str) -> bool:
     try:
         subprocess.run(
             ["git", "commit", "-m", commit_msg],
-            cwd=LOCAL_REPO_PATH,
+            cwd=REPO_PATH,
             check=True,
             capture_output=True,
             text=True,
@@ -579,7 +513,7 @@ def git_commit_and_push(error_summary: str, branch: str) -> bool:
 
     result = subprocess.run(
         ["git", "push", "origin", branch],
-        cwd=LOCAL_REPO_PATH,
+        cwd=REPO_PATH,
         capture_output=True,
         text=True,
     )
@@ -592,65 +526,55 @@ def git_commit_and_push(error_summary: str, branch: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# VM restart
+# Dashboard restart (local tmux management)
 # ---------------------------------------------------------------------------
-def vm_pull_and_restart(vm_name: str, vm_zone: str, branch: str) -> bool:
-    """SSH into VM: kill dashboard, git pull, restart in tmux."""
-    # 1. Stop existing process
-    log.info("Stopping dashboard on VM...")
-    ssh_exec(f"tmux send-keys -t {TMUX_SESSION} C-c C-c", vm_name, vm_zone, timeout=5)
+def stop_dashboard() -> None:
+    """Stop the dashboard process in the tmux session."""
+    log.info("Stopping dashboard...")
+    run_cmd(f"tmux send-keys -t {TMUX_SESSION} C-c C-c", timeout=5)
     time.sleep(5)
 
     # Force kill if still running
-    if check_process_alive(vm_name, vm_zone):
-        ssh_exec("pkill -f 'run_web_dashboard.py'", vm_name, vm_zone, timeout=5)
+    if check_process_alive():
+        run_cmd("pkill -f 'run_web_dashboard.py'", timeout=5)
         time.sleep(3)
 
-    # 2. Git pull
-    log.info("Pulling latest code on VM...")
-    rc, stdout, stderr = ssh_exec(
-        f"cd {VM_REPO_PATH} && git pull origin {branch}",
-        vm_name,
-        vm_zone,
-        timeout=30,
-    )
-    if rc != 0:
-        log.error(f"Git pull failed on VM: {stderr}")
-        return False
-    log.info("Git pull: %s", stdout.strip().split("\n")[-1])
+    # Kill the whole session to start fresh
+    if check_process_alive():
+        run_cmd(f"tmux kill-session -t {TMUX_SESSION} 2>/dev/null", timeout=5)
+        time.sleep(2)
 
-    # 3. Ensure tmux session exists
-    ssh_exec(
+
+def start_dashboard() -> bool:
+    """Start the dashboard in a tmux session and verify it's healthy."""
+    # Ensure tmux session exists
+    run_cmd(
         f"tmux new-session -d -s {TMUX_SESSION} 2>/dev/null || true",
-        vm_name,
-        vm_zone,
         timeout=5,
     )
 
-    # 4. Send launch command to tmux
-    log.info("Restarting dashboard in tmux...")
-    rc, _, stderr = ssh_exec(
+    # Send launch command
+    log.info("Starting dashboard in tmux session '%s'...", TMUX_SESSION)
+    rc, _, stderr = run_cmd(
         f"tmux send-keys -t {TMUX_SESSION} '{DASHBOARD_CMD}' Enter",
-        vm_name,
-        vm_zone,
         timeout=10,
     )
     if rc != 0:
-        log.error(f"Failed to send restart command: {stderr}")
+        log.error(f"Failed to send start command: {stderr}")
         return False
 
-    # 5. Wait for startup, then health check
+    # Wait for startup, then health check
     log.info("Waiting 30s for dashboard startup...")
     time.sleep(30)
 
-    if check_health_endpoint(vm_name, vm_zone):
-        log.info("Dashboard restarted and healthy")
+    if check_health_endpoint():
+        log.info("Dashboard started and healthy")
         return True
 
     # Retry after additional wait
     log.info("First health check failed, retrying in 15s...")
     time.sleep(15)
-    alive = check_health_endpoint(vm_name, vm_zone)
+    alive = check_health_endpoint()
     if alive:
         log.info("Dashboard healthy on second attempt")
     else:
@@ -658,13 +582,27 @@ def vm_pull_and_restart(vm_name: str, vm_zone: str, branch: str) -> bool:
     return alive
 
 
+def restart_dashboard(branch: str) -> bool:
+    """Stop dashboard, git pull latest, restart."""
+    stop_dashboard()
+
+    # Git pull latest (in case fix was committed)
+    log.info("Pulling latest code...")
+    rc, stdout, stderr = run_cmd(f"git pull origin {branch}", timeout=30, cwd=REPO_PATH)
+    if rc != 0:
+        log.error(f"Git pull failed: {stderr}")
+        # Continue anyway — the fix might already be local
+    else:
+        log.info("Git pull: %s", stdout.strip().split("\\n")[-1])
+
+    return start_dashboard()
+
+
 # ---------------------------------------------------------------------------
 # Post-fix verification
 # ---------------------------------------------------------------------------
 def verify_fix(
     fingerprint: str,
-    vm_name: str,
-    vm_zone: str,
     use_playwright: bool = True,
     wait_time: int = 120,
 ) -> bool:
@@ -673,7 +611,7 @@ def verify_fix(
     time.sleep(wait_time)
 
     # Check logs for recurrence
-    log_tail = get_latest_log_tail(vm_name, vm_zone, lines=100)
+    log_tail = get_latest_log_tail(lines=100)
     new_error = classify_error(log_tail)
 
     if new_error and new_error.fingerprint == fingerprint:
@@ -698,20 +636,12 @@ def main_loop(args):
         max_per_error=args.max_retries,
         max_total=args.max_fixes,
     )
-    vm_name = args.vm_name
-    vm_zone = args.vm_zone
     branch = args.branch
     cycle_count = 0
 
-    # Start SSH tunnel for Playwright access
-    if not args.dry_run:
-        start_ssh_tunnel(vm_name, vm_zone)
-        time.sleep(2)
-
     log.info(
-        "Watchdog started. VM=%s, zone=%s, interval=%ds, dry_run=%s, no_claude=%s",
-        vm_name,
-        vm_zone,
+        "Watchdog started. repo=%s, interval=%ds, dry_run=%s, no_claude=%s",
+        REPO_PATH,
         args.check_interval,
         args.dry_run,
         args.no_claude,
@@ -721,15 +651,9 @@ def main_loop(args):
         try:
             cycle_count += 1
 
-            # Ensure SSH tunnel is alive (for Playwright)
-            if not args.dry_run:
-                ensure_tunnel(vm_name, vm_zone)
-
             # === PHASE 1: HEALTH CHECK ===
-            process_alive = check_process_alive(vm_name, vm_zone)
-            endpoint_ok = (
-                check_health_endpoint(vm_name, vm_zone) if process_alive else False
-            )
+            process_alive = check_process_alive()
+            endpoint_ok = check_health_endpoint() if process_alive else False
 
             log.debug(
                 "Cycle %d: process=%s, endpoint=%s",
@@ -742,7 +666,7 @@ def main_loop(args):
 
             if process_alive and endpoint_ok:
                 # === PHASE 2: LOG SCAN ===
-                log_tail = get_latest_log_tail(vm_name, vm_zone)
+                log_tail = get_latest_log_tail()
                 error = classify_error(log_tail)
 
                 if error and not error.actionable:
@@ -778,8 +702,8 @@ def main_loop(args):
 
             elif not process_alive:
                 # Process crashed
-                crash_output = capture_crash_output(vm_name, vm_zone)
-                log_tail = get_latest_log_tail(vm_name, vm_zone)
+                crash_output = capture_crash_output()
+                log_tail = get_latest_log_tail()
                 combined = crash_output + "\n" + log_tail
 
                 error = DetectedError(
@@ -799,7 +723,7 @@ def main_loop(args):
                     category="hung",
                     summary="Dashboard alive but /api/status unresponsive",
                     traceback="",
-                    log_context=get_latest_log_tail(vm_name, vm_zone)[-1000:],
+                    log_context=get_latest_log_tail()[-1000:],
                     fingerprint="hung_process",
                     timestamp=datetime.now().isoformat(),
                     actionable=False,
@@ -823,7 +747,7 @@ def main_loop(args):
             # === PHASE 4: NON-ACTIONABLE → JUST RESTART ===
             if not error.actionable:
                 log.info("Non-actionable error — restarting dashboard...")
-                vm_pull_and_restart(vm_name, vm_zone, branch)
+                restart_dashboard(branch)
                 time.sleep(args.cooldown)
                 continue
 
@@ -835,7 +759,7 @@ def main_loop(args):
                 )
                 # Still restart the dashboard if it's down
                 if not process_alive:
-                    vm_pull_and_restart(vm_name, vm_zone, branch)
+                    restart_dashboard(branch)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
 
@@ -843,18 +767,12 @@ def main_loop(args):
 
             # === PHASE 6: STOP DASHBOARD ===
             log.info("Stopping dashboard for fix (attempt %d)...", attempt)
-            ssh_exec(
-                f"tmux send-keys -t {TMUX_SESSION} C-c C-c",
-                vm_name,
-                vm_zone,
-                timeout=5,
-            )
-            time.sleep(5)
+            stop_dashboard()
 
             if args.no_claude:
                 log.info("[NO-CLAUDE] Restarting without fix...")
                 tracker.record_attempt(error.fingerprint, False, error.summary)
-                vm_pull_and_restart(vm_name, vm_zone, branch)
+                restart_dashboard(branch)
                 time.sleep(args.cooldown)
                 continue
 
@@ -870,14 +788,14 @@ def main_loop(args):
             if not claude_ok:
                 log.warning("Claude invocation failed: %s", claude_output[:200])
                 tracker.record_attempt(error.fingerprint, False, error.summary)
-                vm_pull_and_restart(vm_name, vm_zone, branch)
+                restart_dashboard(branch)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
 
             if not git_has_changes():
                 log.warning("Claude did not produce any code changes")
                 tracker.record_attempt(error.fingerprint, False, error.summary)
-                vm_pull_and_restart(vm_name, vm_zone, branch)
+                restart_dashboard(branch)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
 
@@ -886,13 +804,13 @@ def main_loop(args):
             if not git_commit_and_push(error.summary, branch):
                 log.error("Git commit/push failed")
                 tracker.record_attempt(error.fingerprint, False, error.summary)
-                vm_pull_and_restart(vm_name, vm_zone, branch)
+                restart_dashboard(branch)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
 
-            # === PHASE 9: DEPLOY AND RESTART ===
-            if not vm_pull_and_restart(vm_name, vm_zone, branch):
-                log.error("VM restart failed after deploying fix")
+            # === PHASE 9: RESTART DASHBOARD ===
+            if not start_dashboard():
+                log.error("Dashboard restart failed after fix")
                 tracker.record_attempt(error.fingerprint, False, error.summary)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
@@ -900,8 +818,6 @@ def main_loop(args):
             # === PHASE 10: VERIFY FIX ===
             fix_worked = verify_fix(
                 error.fingerprint,
-                vm_name,
-                vm_zone,
                 use_playwright=True,
                 wait_time=args.cooldown,
             )
@@ -924,11 +840,6 @@ def main_loop(args):
             log.exception(f"Watchdog loop error: {e}")
             time.sleep(args.check_interval)
 
-    # Cleanup
-    if _tunnel_proc and _tunnel_proc.poll() is None:
-        log.info("Closing SSH tunnel...")
-        _tunnel_proc.terminate()
-
     # Write session summary
     if tracker.history:
         log.info("=== Session Summary ===")
@@ -950,16 +861,6 @@ def main_loop(args):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="VM Watchdog: monitors Money Printer dashboard and auto-fixes errors"
-    )
-    parser.add_argument(
-        "--vm-name",
-        default=VM_NAME,
-        help=f"GCE VM name (default: {VM_NAME})",
-    )
-    parser.add_argument(
-        "--vm-zone",
-        default=VM_ZONE,
-        help=f"GCE zone (default: {VM_ZONE})",
     )
     parser.add_argument(
         "--check-interval",
