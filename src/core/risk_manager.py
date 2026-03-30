@@ -184,6 +184,17 @@ class RiskManager:
 
         # 3. Fractional Kelly (stage-dependent)
         f_fractional = f * kelly_frac
+
+        # 3.5 Confidence dampening: high confidence is anti-correlated with
+        # profitability (0.7+ conf = 42.9% WR vs 0.5-0.7 = 48.6% WR).
+        # Halve position size when model is overconfident.
+        if confidence > 0.85:
+            f_fractional *= 0.50
+            logger.debug(
+                "[Risk] Confidence dampening: conf=%.2f > 0.85, halved Kelly",
+                confidence,
+            )
+
         if f_fractional <= 0:
             return 0
 

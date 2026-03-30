@@ -9,7 +9,6 @@ from src.strategies.empirical_edge import EmpiricalEdgeStrategy
 from src.strategies.ml_btc_15m import MLBtc15mStrategy
 from src.strategies.latency_arb import LatencyArbStrategy
 from src.strategies.longshot_fader_v2 import LongshotFaderV2
-from src.strategies.time_decay import TimeDecayScalper
 from src.strategies.cross_spread_arb import CrossSpreadArbStrategy
 from src.data.coinbase_provider import CoinbaseProvider
 from src.utils.logger import logger
@@ -33,7 +32,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 min_edge=0.02, min_minutes_remaining=2, max_minutes_remaining=60
             ),
             "latency_arb": LatencyArbStrategy(),
-            "time_decay": TimeDecayScalper(),
+            # "time_decay": DISABLED — 25% WR, -$769 over 20 trades, avg entry 0.91
             "longshot_v2": LongshotFaderV2(),
             "ml_btc_15m": MLBtc15mStrategy(),
             # "late_sniper": Crypto15mLateSniper(),  # DISABLED: 8% WR, -$8,310 over 113 trades
@@ -131,7 +130,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             ("cross_arb", "Cross-Spread Arb"),
             ("empirical_edge", "Empirical Edge"),
             ("latency_arb", "Latency Arb"),
-            ("time_decay", "Time Decay"),
+            # ("time_decay", "Time Decay"),  # DISABLED
             ("longshot_v2", "LongShot Fader V2"),
             ("ml_btc_15m", "ML BTC 15m"),
             # ("late_sniper", "Late Sniper"),  # DISABLED

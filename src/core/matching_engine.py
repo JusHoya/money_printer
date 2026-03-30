@@ -355,8 +355,8 @@ class SimulatedExchange:
             "profit_targets": []
             if disable_profit_targets
             else [
-                {"move": 0.10, "exit_pct": 0.33, "hit": False},
-                {"move": 0.20, "exit_pct": 0.50, "hit": False},
+                {"move": 0.15, "exit_pct": 0.33, "hit": False},
+                {"move": 0.30, "exit_pct": 0.50, "hit": False},
             ],
             "entry_fee": fee_result.fee,
             "is_maker": is_maker,

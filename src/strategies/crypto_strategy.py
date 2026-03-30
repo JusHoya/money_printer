@@ -737,7 +737,7 @@ class Crypto15mTrendStrategyV3(Strategy):
         self.spot_price_history = deque(
             maxlen=window_seconds * 2
         )  # Store timestamped prices
-        self.FIXED_STOP_CENTS = 0.05
+        self.FIXED_STOP_CENTS = 0.15  # $0.15 stop caps loss at ~$15 on 10 contracts
 
     def name(self) -> str:
         return f"Trend Catcher V3 (15m | OBI>{self.obi_threshold})"
@@ -825,8 +825,8 @@ class Crypto15mTrendStrategyV3(Strategy):
                 )
                 sig.stop_loss = implied_yes_ask - self.FIXED_STOP_CENTS
                 sig.trailing_rules = {
-                    "trigger": implied_yes_ask + 0.10,
-                    "new_sl": implied_yes_ask + 0.05,
+                    "trigger": implied_yes_ask + 0.20,
+                    "new_sl": implied_yes_ask + 0.10,
                 }
                 if close_time:
                     sig.expiration_time = close_time
@@ -846,8 +846,8 @@ class Crypto15mTrendStrategyV3(Strategy):
                 )
                 sig.stop_loss = no_ask_price - self.FIXED_STOP_CENTS
                 sig.trailing_rules = {
-                    "trigger": no_ask_price + 0.10,
-                    "new_sl": no_ask_price + 0.05,
+                    "trigger": no_ask_price + 0.20,
+                    "new_sl": no_ask_price + 0.10,
                 }
                 sig.contract_side = "NO"
                 if close_time:
@@ -863,6 +863,11 @@ class CryptoHourlyStrategyV3(Strategy):
     Targeting 60s BRTI MA, using Reciprocal Math and OBI triggers.
     """
 
+    # Minimum minutes before settlement to allow new entries (prevents EARLY_SETTLEMENT)
+    MIN_MINUTES_TO_EXPIRY = 30
+    # Maximum stop loss distance from entry price (contract price units, 0-1)
+    MAX_STOP_DISTANCE = 0.08
+
     def __init__(
         self,
         confidence_margin: float = 50.0,
@@ -875,7 +880,7 @@ class CryptoHourlyStrategyV3(Strategy):
         self._cooldown_until = datetime.min
         self.price_history = []
         self.window_minutes = 20
-        self.FIXED_STOP_CENTS = 0.05
+        self.FIXED_STOP_CENTS = 0.08
 
     def name(self) -> str:
         return f"The Time Traveler V3 (Hourly | OBI>{self.obi_threshold})"
@@ -971,6 +976,31 @@ class CryptoHourlyStrategyV3(Strategy):
 
         close_time = extra.get("close_time")
 
+        # Time-to-expiry guard: skip contracts too close to settlement
+        if close_time:
+            try:
+                if isinstance(close_time, str):
+                    close_dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                    now_utc = datetime.now().astimezone()
+                else:
+                    close_dt = close_time
+                    now_utc = (
+                        datetime.now().astimezone()
+                        if close_dt.tzinfo
+                        else datetime.now()
+                    )
+                minutes_to_expiry = (close_dt - now_utc).total_seconds() / 60.0
+                if minutes_to_expiry < self.MIN_MINUTES_TO_EXPIRY:
+                    logger.info(
+                        f"[HourlyV3] Skipping {symbol}: only {minutes_to_expiry:.0f}m "
+                        f"to expiry (min {self.MIN_MINUTES_TO_EXPIRY}m)"
+                    )
+                    return []
+            except Exception as e:
+                logger.debug(
+                    f"[HourlyV3] Could not parse close_time '{close_time}': {e}"
+                )
+
         logger.info(
             f"[HourlyV3] Eval {symbol}: Pred=${predicted_price:.2f}, Strike=${strike_val}, Margin={abs(predicted_price-strike_val):.2f}, OBI_YES={obi_yes:.3f}, OBI_NO={obi_no:.3f}, Threshold={self.obi_threshold}"
         )
@@ -982,7 +1012,7 @@ class CryptoHourlyStrategyV3(Strategy):
                 and implied_yes_ask > 0
             ):
                 logger.info(
-                    f"[HourlyV3] 🚀 BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val}. OBI: {obi_yes:.2f}, Ask {implied_yes_ask:.2f}."
+                    f"[HourlyV3] BULL SIGNAL: Pred ${predicted_price:.2f} > Strike ${strike_val}. OBI: {obi_yes:.2f}, Ask {implied_yes_ask:.2f}."
                 )
                 sig = TradeSignal(
                     symbol=symbol,
@@ -991,9 +1021,7 @@ class CryptoHourlyStrategyV3(Strategy):
                     limit_price=implied_yes_ask,
                     confidence=0.8,
                 )
-                sig.stop_loss = max(
-                    0.01, implied_yes_ask - 0.05
-                )  # Actual stop, 5c below entry
+                sig.stop_loss = max(0.01, implied_yes_ask - self.MAX_STOP_DISTANCE)
                 if close_time:
                     sig.expiration_time = close_time
                 signals.append(sig)
@@ -1011,7 +1039,7 @@ class CryptoHourlyStrategyV3(Strategy):
                     limit_price=no_ask,
                     confidence=0.8,
                 )
-                sig.stop_loss = max(0.01, no_ask - 0.05)  # Actual stop, 5c below entry
+                sig.stop_loss = max(0.01, no_ask - self.MAX_STOP_DISTANCE)
                 sig.contract_side = "NO"
                 if close_time:
                     sig.expiration_time = close_time
