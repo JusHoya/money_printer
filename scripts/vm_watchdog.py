@@ -58,7 +58,13 @@ GIT_BRANCH = "refactor_v0.1"
 CLAUDE_TIMEOUT_S = 300
 
 # Inspect dashboard via Playwright every N monitoring cycles
-PLAYWRIGHT_INSPECT_INTERVAL = 10
+PLAYWRIGHT_INSPECT_INTERVAL = 15
+
+# Grace period after watchdog start — skip Playwright inspections while
+# the dashboard does its startup retrain (build_features takes ~10-12 min
+# with 14K+ samples).  The watchdog killed a healthy dashboard during
+# retrain on 2026-03-30 because it saw "No bots active" during this phase.
+STARTUP_GRACE_PERIOD_S = 900  # 15 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -638,6 +644,7 @@ def main_loop(args):
     )
     branch = args.branch
     cycle_count = 0
+    start_time = time.time()
 
     log.info(
         "Watchdog started. repo=%s, interval=%ds, dry_run=%s, no_claude=%s",
@@ -675,11 +682,13 @@ def main_loop(args):
                     )
                     error = None
 
-                # Periodic Playwright inspection
+                # Periodic Playwright inspection (skip during startup grace period)
+                in_grace_period = (time.time() - start_time) < STARTUP_GRACE_PERIOD_S
                 if (
                     error is None
                     and not args.no_claude
                     and not args.dry_run
+                    and not in_grace_period
                     and cycle_count % PLAYWRIGHT_INSPECT_INTERVAL == 0
                 ):
                     state = inspect_dashboard()
@@ -748,6 +757,7 @@ def main_loop(args):
             if not error.actionable:
                 log.info("Non-actionable error — restarting dashboard...")
                 restart_dashboard(branch)
+                start_time = time.time()  # reset grace period for startup retrain
                 time.sleep(args.cooldown)
                 continue
 
@@ -814,6 +824,7 @@ def main_loop(args):
                 tracker.record_attempt(error.fingerprint, False, error.summary)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
+            start_time = time.time()  # reset grace period for startup retrain
 
             # === PHASE 10: VERIFY FIX ===
             fix_worked = verify_fix(
