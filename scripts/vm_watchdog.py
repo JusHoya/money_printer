@@ -2,12 +2,13 @@
 VM Watchdog — Automated error monitor and self-healing loop.
 
 Runs ON the VM alongside the dashboard. Monitors for errors, uses Claude Code
-+ Playwright MCP to analyze/fix bugs, commits/pushes, and restarts the dashboard.
+to analyze/fix bugs, commits/pushes, and restarts the dashboard. Periodically
+inspects dashboard health via the /api/status HTTP endpoint.
 
 Flow:
     Monitor (process/endpoint/logs) → Detect error →
-    Inspect dashboard (Playwright) → Claude fix → Commit/push →
-    Restart dashboard → Verify (Playwright) → Loop
+    Inspect dashboard (HTTP API) → Claude fix → Commit/push →
+    Restart dashboard → Verify (HTTP API) → Loop
 
 Usage (run in a separate tmux session on the VM):
     tmux new-session -d -s watchdog 'cd ~/money_printer && source venv/bin/activate && PYTHONPATH=. python3 scripts/vm_watchdog.py'
@@ -27,6 +28,8 @@ import os
 import re
 import subprocess
 import time
+import urllib.request
+import urllib.error
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -57,10 +60,10 @@ GIT_BRANCH = "refactor_v0.1"
 
 CLAUDE_TIMEOUT_S = 300
 
-# Inspect dashboard via Playwright every N monitoring cycles
-PLAYWRIGHT_INSPECT_INTERVAL = 15
+# Inspect dashboard via HTTP /api/status every N monitoring cycles
+HTTP_INSPECT_INTERVAL = 15
 
-# Grace period after watchdog start — skip Playwright inspections while
+# Grace period after watchdog/dashboard start — skip deep inspections while
 # the dashboard does its startup retrain (build_features takes ~10-12 min
 # with 14K+ samples).  The watchdog killed a healthy dashboard during
 # retrain on 2026-03-30 because it saw "No bots active" during this phase.
@@ -328,105 +331,227 @@ def classify_error(log_tail: str) -> Optional[DetectedError]:
 
 
 # ---------------------------------------------------------------------------
-# Claude Code + Playwright MCP integration
+# Dashboard inspection via HTTP API (replaces Playwright MCP)
 # ---------------------------------------------------------------------------
-INSPECT_PROMPT = """\
-Use the Playwright MCP browser tools to inspect the Money Printer dashboard:
-1. Navigate to http://localhost:8050
-2. Take a snapshot of the page content
-3. Report:
-   - Is the dashboard rendering correctly?
-   - What is the current portfolio status (PnL, equity, exposure)?
-   - Are there any error alerts visible in the alerts section?
-   - Are all bots shown as active?
-   - Is there a "DISCONNECTED" overlay?
-4. Return ONLY a JSON object (no markdown fences): {"healthy": true/false, "errors": [...], "summary": "..."}
-"""
-
-VERIFY_PROMPT = """\
-Use Playwright MCP to verify the Money Printer dashboard is healthy after a fix:
-1. Navigate to http://localhost:8050
-2. Wait 5 seconds for data to load via WebSocket
-3. Check that:
-   - The page renders (not blank, no error page)
-   - Portfolio section shows numeric data
-   - No error alerts are visible
-   - At least one bot is listed
-4. Return ONLY a JSON object (no markdown fences): {"healthy": true/false, "details": "..."}
-"""
-
-
-def invoke_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT_S) -> tuple[bool, str]:
-    """Invoke Claude Code CLI in one-shot mode."""
+def _fetch_api_status(timeout: int = HEALTH_CHECK_TIMEOUT_S) -> Optional[dict]:
+    """Fetch /api/status JSON from the local dashboard."""
+    url = f"http://localhost:{HEALTH_CHECK_PORT}/api/status"
     try:
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--dangerously-skip-permissions"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=REPO_PATH,
-        )
-        output = result.stdout
-        if result.stderr:
-            output += "\n" + result.stderr
-        return result.returncode == 0, output
-    except subprocess.TimeoutExpired:
-        log.warning(f"Claude invocation timed out ({timeout}s)")
-        return False, "timeout"
-    except FileNotFoundError:
-        log.error("'claude' CLI not found in PATH")
-        return False, "claude not found"
-    except Exception as e:
-        log.error(f"Claude invocation error: {e}")
-        return False, str(e)
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
+        log.debug("API status fetch failed: %s", e)
+        return None
 
 
 def inspect_dashboard() -> dict:
-    """Use Claude + Playwright MCP to visually inspect the dashboard.
-    Returns parsed JSON result or a fallback dict.
+    """Inspect dashboard health via /api/status HTTP endpoint.
+
+    Checks portfolio, active bots, error alerts, and position health.
+    Returns {"healthy": bool, "errors": [...], "summary": "..."}.
     """
-    log.info("Inspecting dashboard via Playwright MCP...")
-    ok, output = invoke_claude(INSPECT_PROMPT, timeout=120)
-    if not ok:
-        log.warning(f"Playwright inspection failed: {output[:200]}")
-        return {"healthy": None, "errors": [], "summary": "inspection_failed"}
+    log.info("Inspecting dashboard via HTTP API...")
+    status = _fetch_api_status()
 
-    # Try to parse JSON from Claude's output
-    try:
-        # Claude may wrap in markdown fences; strip them
-        cleaned = re.sub(r"```json?\s*", "", output)
-        cleaned = re.sub(r"```\s*", "", cleaned)
-        # Find the JSON object
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-    except (json.JSONDecodeError, AttributeError):
-        pass
+    if status is None:
+        log.warning("Dashboard /api/status unreachable")
+        return {
+            "healthy": None,
+            "errors": ["api_unreachable"],
+            "summary": "inspection_failed",
+        }
 
-    log.warning("Could not parse Playwright inspection output")
-    return {"healthy": None, "errors": [], "summary": output[:500]}
+    errors = []
+
+    # Check bots are active
+    bots = status.get("bots", [])
+    active_bots = [b for b in bots if b.get("active")]
+    if not active_bots:
+        errors.append("no_active_bots")
+
+    # Check portfolio exists and has reasonable values
+    portfolio = status.get("portfolio", {})
+    equity = portfolio.get("equity", 0)
+    if equity <= 0:
+        errors.append(f"zero_equity: {equity}")
+
+    # Check for error alerts (skip startup retrain alerts)
+    alerts = status.get("alerts", [])
+    error_alerts = [
+        a for a in alerts if "ERROR" in a.upper() and "RETRAIN" not in a.upper()
+    ]
+    if error_alerts:
+        errors.append(f"error_alerts: {len(error_alerts)}")
+
+    # Check positions for anomalies (e.g., massive unrealized losses)
+    unrealized = portfolio.get("unrealized_pnl", 0)
+    if equity > 0 and unrealized < -(equity * 0.5):
+        errors.append(f"extreme_unrealized_loss: {unrealized:.2f}")
+
+    healthy = len(errors) == 0
+
+    summary_parts = [
+        f"equity=${equity:.2f}",
+        f"bots={len(active_bots)}/{len(bots)}",
+        f"realized_pnl=${portfolio.get('realized_pnl', 0):.2f}",
+        f"unrealized=${unrealized:.2f}",
+        f"exposure={portfolio.get('exposure_pct', 0):.1f}%",
+    ]
+    summary = " | ".join(summary_parts)
+
+    if healthy:
+        log.info("Dashboard healthy: %s", summary)
+    else:
+        log.warning("Dashboard issues: %s | errors=%s", summary, errors)
+
+    return {"healthy": healthy, "errors": errors, "summary": summary}
 
 
 def verify_dashboard_health() -> bool:
-    """Use Claude + Playwright MCP to verify dashboard health post-deploy."""
-    log.info("Verifying dashboard health via Playwright MCP...")
-    ok, output = invoke_claude(VERIFY_PROMPT, timeout=120)
-    if not ok:
-        log.warning(f"Playwright verification failed: {output[:200]}")
+    """Verify dashboard is healthy after a fix via HTTP API."""
+    log.info("Verifying dashboard health via HTTP API...")
+    status = _fetch_api_status()
+    if status is None:
+        log.warning("Dashboard unreachable during verification")
         return False
 
-    try:
-        cleaned = re.sub(r"```json?\s*", "", output)
-        cleaned = re.sub(r"```\s*", "", cleaned)
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if match:
-            result = json.loads(match.group())
-            return result.get("healthy", False)
-    except (json.JSONDecodeError, AttributeError):
-        pass
+    bots = status.get("bots", [])
+    active_bots = [b for b in bots if b.get("active")]
+    portfolio = status.get("portfolio", {})
+    equity = portfolio.get("equity", 0)
 
-    # If we can't parse, assume unhealthy
-    return False
+    healthy = len(active_bots) > 0 and equity > 0
+    if healthy:
+        log.info(
+            "Verification passed: %d active bots, equity=$%.2f",
+            len(active_bots),
+            equity,
+        )
+    else:
+        log.warning(
+            "Verification failed: %d active bots, equity=$%.2f",
+            len(active_bots),
+            equity,
+        )
+    return healthy
+
+
+# ---------------------------------------------------------------------------
+# Claude Code integration (CLI with API fallback)
+# ---------------------------------------------------------------------------
+_claude_cli_available: Optional[bool] = None  # cached after first check
+
+
+def _check_claude_cli() -> bool:
+    """Check if Claude Code CLI is installed and authenticated."""
+    global _claude_cli_available
+    if _claude_cli_available is not None:
+        return _claude_cli_available
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", "Reply with just: OK", "--dangerously-skip-permissions"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=REPO_PATH,
+        )
+        _claude_cli_available = (
+            result.returncode == 0 and "login" not in result.stdout.lower()
+        )
+        if not _claude_cli_available:
+            log.warning(
+                "Claude CLI not authenticated. Bug fixing will use API fallback "
+                "(diagnostic-only, no auto-fix). Run 'claude /login' on the VM "
+                "to enable full auto-fix mode."
+            )
+        else:
+            log.info("Claude CLI authenticated — full auto-fix mode enabled")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        _claude_cli_available = False
+        log.warning("Claude CLI not available. Bug fixing disabled.")
+
+    return _claude_cli_available
+
+
+def _invoke_claude_api(prompt: str) -> tuple[bool, str]:
+    """Fallback: call Anthropic Messages API directly via urllib (no SDK needed).
+
+    Returns diagnostic analysis only — cannot edit files.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        # Try loading from .env
+        env_path = os.path.join(REPO_PATH, ".env")
+        if os.path.exists(env_path):
+            with open(env_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("ANTHROPIC_API_KEY="):
+                        api_key = line.split("=", 1)[1].strip().strip("\"'")
+                        break
+
+    if not api_key:
+        return False, "ANTHROPIC_API_KEY not found in environment or .env"
+
+    body = json.dumps(
+        {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+    ).encode()
+
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=CLAUDE_TIMEOUT_S) as resp:
+            result = json.loads(resp.read().decode())
+            text = result.get("content", [{}])[0].get("text", "")
+            return True, text
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        log.error("Anthropic API error %d: %s", e.code, error_body[:200])
+        return False, f"API error {e.code}: {error_body[:200]}"
+    except Exception as e:
+        log.error("Anthropic API call failed: %s", e)
+        return False, str(e)
+
+
+def invoke_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT_S) -> tuple[bool, str]:
+    """Invoke Claude — tries CLI first (can edit files), falls back to API (diagnostic only)."""
+    if _check_claude_cli():
+        try:
+            result = subprocess.run(
+                ["claude", "-p", prompt, "--dangerously-skip-permissions"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=REPO_PATH,
+            )
+            output = result.stdout
+            if result.stderr:
+                output += "\n" + result.stderr
+            return result.returncode == 0, output
+        except subprocess.TimeoutExpired:
+            log.warning("Claude CLI timed out (%ds)", timeout)
+            return False, "timeout"
+        except Exception as e:
+            log.error("Claude CLI error: %s", e)
+            # Fall through to API
+
+    # API fallback — diagnostic analysis only
+    log.info("Using Anthropic API fallback (diagnostic-only, cannot edit files)")
+    return _invoke_claude_api(prompt)
 
 
 def build_fix_prompt(error: DetectedError, dashboard_state: dict) -> str:
@@ -435,7 +560,7 @@ def build_fix_prompt(error: DetectedError, dashboard_state: dict) -> str:
 
     if dashboard_state and dashboard_state.get("summary"):
         dashboard_info = f"""
-## Dashboard State (from Playwright inspection)
+## Dashboard State (from /api/status)
 {json.dumps(dashboard_state, indent=2)}
 """
 
@@ -460,14 +585,13 @@ The bot runs on a GCE VM and has encountered a runtime error.
 ```
 {dashboard_info}
 ## Instructions
-1. Use Playwright MCP to navigate to http://localhost:8050 and inspect the current dashboard state for additional context
-2. Read the error carefully and identify the root cause in the source code
-3. Find and read the relevant source file(s)
-4. Make the MINIMAL fix needed to resolve this error
-5. Do NOT refactor unrelated code or add unnecessary error handling
-6. Do NOT suppress the error — fix the underlying bug
-7. Run `python3 -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -x -q` to verify your fix
-8. If you cannot determine the root cause, do NOT make speculative changes
+1. Read the error carefully and identify the root cause in the source code
+2. Find and read the relevant source file(s)
+3. Make the MINIMAL fix needed to resolve this error
+4. Do NOT refactor unrelated code or add unnecessary error handling
+5. Do NOT suppress the error — fix the underlying bug
+6. Run `python3 -m pytest tests/ --ignore=tests/test_output_cooldown.txt --ignore=tests/fixtures/ -x -q` to verify your fix
+7. If you cannot determine the root cause, do NOT make speculative changes
 
 ## Repository Layout
 - src/bots/ — Bot implementations (btc_15m.py, btc_hourly.py, weather.py)
@@ -609,7 +733,6 @@ def restart_dashboard(branch: str) -> bool:
 # ---------------------------------------------------------------------------
 def verify_fix(
     fingerprint: str,
-    use_playwright: bool = True,
     wait_time: int = 120,
 ) -> bool:
     """Wait, then check that the same error doesn't reappear."""
@@ -624,11 +747,10 @@ def verify_fix(
         log.warning("Same error recurred — fix did NOT work")
         return False
 
-    # Playwright visual verification
-    if use_playwright:
-        if not verify_dashboard_health():
-            log.warning("Playwright reports dashboard unhealthy")
-            return False
+    # HTTP health verification
+    if not verify_dashboard_health():
+        log.warning("HTTP health check reports dashboard unhealthy")
+        return False
 
     log.info("Fix verified — no recurrence detected")
     return True
@@ -653,6 +775,10 @@ def main_loop(args):
         args.dry_run,
         args.no_claude,
     )
+
+    # Pre-check Claude CLI auth at startup so we warn once, not every cycle
+    if not args.no_claude and not args.dry_run:
+        _check_claude_cli()
 
     while True:
         try:
@@ -682,28 +808,26 @@ def main_loop(args):
                     )
                     error = None
 
-                # Periodic Playwright inspection (skip during startup grace period)
+                # Periodic HTTP inspection (skip during startup grace period)
                 in_grace_period = (time.time() - start_time) < STARTUP_GRACE_PERIOD_S
                 if (
                     error is None
-                    and not args.no_claude
-                    and not args.dry_run
                     and not in_grace_period
-                    and cycle_count % PLAYWRIGHT_INSPECT_INTERVAL == 0
+                    and cycle_count % HTTP_INSPECT_INTERVAL == 0
                 ):
                     state = inspect_dashboard()
                     if state.get("healthy") is False:
                         errors = state.get("errors", [])
                         error = DetectedError(
                             category="ui_error",
-                            summary=f"Playwright detected UI errors: {errors}",
+                            summary=f"HTTP inspection detected issues: {errors}",
                             traceback="",
                             log_context=str(state),
                             fingerprint=_compute_fingerprint(str(errors)),
                             timestamp=datetime.now().isoformat(),
                             actionable=True,
                         )
-                        log.warning("Playwright detected UI error: %s", errors)
+                        log.warning("HTTP inspection detected issues: %s", errors)
 
                 if error is None:
                     time.sleep(args.check_interval)
@@ -829,7 +953,6 @@ def main_loop(args):
             # === PHASE 10: VERIFY FIX ===
             fix_worked = verify_fix(
                 error.fingerprint,
-                use_playwright=True,
                 wait_time=args.cooldown,
             )
             tracker.record_attempt(error.fingerprint, fix_worked, error.summary)
