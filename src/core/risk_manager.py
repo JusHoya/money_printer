@@ -68,14 +68,26 @@ class RiskManager:
         self.MAX_STRATEGY_DRAWDOWN_PCT = 0.10
         self.MAX_PORTFOLIO_EXPOSURE_PCT = 0.50
         self.MIN_TRADE_INTERVAL_SEC = 10
-        self.LOSS_COOLDOWN_SEC = 60
+        self.LOSS_COOLDOWN_SEC = 900
         self.loss_cooldown = {}
+
+        # Sprint 6: daily trade cap to force selectivity
+        self.MAX_DAILY_TRADES = 40
+        self.daily_trade_count = 0
 
         # Sprint 4: correlation limit
         self.MAX_SAME_DIRECTION_BTC = 2
 
         # Sprint 4: optional circuit breaker (set by orchestrator)
         self.circuit_breaker = None
+
+        # Sprint 6: historical win rates for calibrated Kelly sizing
+        self.strategy_win_rates: dict = {}  # strategy_name -> (wins, total)
+
+        # Sprint 6: escalating cooldown after consecutive losses
+        self.consecutive_losses: dict = {}  # strategy_name -> count
+        self.ESCALATING_COOLDOWNS = [120, 300, 1800]  # 2min, 5min, 30min
+        self.strategy_cooldown: dict = {}  # strategy_name -> cooldown_until
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
@@ -94,15 +106,37 @@ class RiskManager:
             f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f} | Strategy: {strategy_name}"
         )
 
-        # Per-symbol loss cooldown to prevent re-entry after stop-loss
+        # Sprint 6: Track per-strategy win rates for calibrated Kelly
+        wins, total = self.strategy_win_rates.get(strategy_name, (0, 0))
+        total += 1
+        if pnl > 0:
+            wins += 1
+        self.strategy_win_rates[strategy_name] = (wins, total)
+
+        # Sprint 6: Escalating cooldown after consecutive losses
+        if pnl > 0:
+            self.consecutive_losses[strategy_name] = 0
+        else:
+            streak = self.consecutive_losses.get(strategy_name, 0) + 1
+            self.consecutive_losses[strategy_name] = streak
+            idx = min(streak - 1, len(self.ESCALATING_COOLDOWNS) - 1)
+            cooldown_secs = self.ESCALATING_COOLDOWNS[idx]
+            cooldown_until = datetime.now() + timedelta(seconds=cooldown_secs)
+            self.strategy_cooldown[strategy_name] = cooldown_until
+            logger.info(
+                f"[Risk] ⚠️ Strategy Cooldown: {strategy_name} streak={streak} "
+                f"locked {cooldown_secs}s until {cooldown_until.strftime('%H:%M:%S')}"
+            )
+
+        # Per-symbol loss cooldown to prevent re-entry on same market
         if pnl < 0:
             symbol = position.get("symbol", "")
-            # Extract series prefix (e.g. KXBTC15M from KXBTC15M-26FEB151330-30)
-            prefix = symbol.split("-")[0] if "-" in symbol else symbol
+            # Ban exact ticker (not series prefix) to prevent re-entry on same market
+            # while still allowing trades on other markets in the same series
             cooldown_until = datetime.now() + timedelta(seconds=self.LOSS_COOLDOWN_SEC)
-            self.loss_cooldown[prefix] = cooldown_until
+            self.loss_cooldown[symbol] = cooldown_until
             logger.info(
-                f"[Risk] ⚠️ Loss Cooldown: {prefix} locked until {cooldown_until.strftime('%H:%M:%S')}"
+                f"[Risk] ⚠️ Loss Cooldown: {symbol} locked until {cooldown_until.strftime('%H:%M:%S')}"
             )
 
     def _sync_balance(self):
@@ -149,24 +183,22 @@ class RiskManager:
             self.today = date.today()
             self.daily_pnl = 0.0
             self.strategy_pnl = {}
+            self.daily_trade_count = 0
             # Reset exchange realized PnL for the new day?
             # In simulation, we usually keep cumulative, but for 'Daily' reporting:
             # Let's just update the baseline.
             self.starting_balance_day = self.balance
             logger.info("[RiskManager] [NEW DAY] Daily PnL reset.")
 
-    def calculate_kelly_size(self, confidence: float, price: float) -> int:
+    def calculate_kelly_size(
+        self, confidence: float, price: float, strategy_name: str = ""
+    ) -> int:
         """Position sizing using Quarter-Kelly with bankroll-stage awareness.
 
-        Formula: f* = p - q/b, then apply stage-specific Kelly fraction
-        and hard caps that scale with portfolio value.
-
-        Bankroll stages (from PRD Section 10):
-        - Seed ($0-500): 10% max trade, 0.25x Kelly
-        - Early ($500-2k): 5% max trade, 0.25x Kelly
-        - Growth ($2k-10k): 5% max trade, 0.30x Kelly
-        - Scale ($10k-50k): 5% max trade, 0.35x Kelly
-        - Compound ($50k+): 2.5% max trade, 0.25x Kelly
+        Sprint 6: Uses historical win rate (not raw model confidence) to
+        prevent oversizing. Research (Bertsimas & Mundru 2024): when model
+        confidence is 0.95 but actual WR is 0.45, full-Kelly sizing is
+        catastrophic. Blend historical WR with dampened confidence.
         """
         if price <= 0 or price >= 1.0:
             return 0
@@ -177,8 +209,15 @@ class RiskManager:
         # 1. Odds
         b = (1.0 - price) / price
 
-        # 2. Raw Kelly
-        p = confidence
+        # 2. Calibrated probability using historical win rate
+        # Blend: 60% historical WR + 40% dampened confidence
+        historical_wr = 0.50  # Neutral prior until we have data
+        if strategy_name and strategy_name in self.strategy_win_rates:
+            wins, total = self.strategy_win_rates[strategy_name]
+            if total >= 20:  # Need sufficient sample
+                historical_wr = wins / total
+
+        p = 0.6 * historical_wr + 0.4 * confidence
         q = 1.0 - p
         f = p - (q / b)
 
@@ -187,13 +226,8 @@ class RiskManager:
 
         # 3.5 Confidence dampening: high confidence is anti-correlated with
         # profitability (0.7+ conf = 42.9% WR vs 0.5-0.7 = 48.6% WR).
-        # Halve position size when model is overconfident.
         if confidence > 0.85:
             f_fractional *= 0.50
-            logger.debug(
-                "[Risk] Confidence dampening: conf=%.2f > 0.85, halved Kelly",
-                confidence,
-            )
 
         if f_fractional <= 0:
             return 0
@@ -212,7 +246,8 @@ class RiskManager:
             max_short_qty = int(10.0 / (1.0 - price))
             quantity = min(quantity, max_short_qty)
 
-        return max(1, min(quantity, 500))
+        # Sprint 6: Hard cap at 50 contracts (research: 120-170 was way too high)
+        return max(1, min(quantity, 50))
 
     def get_current_exposure(self, category: Optional[str] = None) -> float:
         """
@@ -244,13 +279,38 @@ class RiskManager:
         category: str = "general",
         strategy_name: str = None,
         expiration_time=None,
+        symbol: str = "",
     ) -> bool:
         """Returns True if the order is safe to execute.
 
         Sprint 4 additions: circuit breaker integration, correlation
         limit, bankroll-stage max positions.
+        Sprint 6 additions: daily trade cap, exact-ticker cooldown,
+        escalating strategy cooldown, entry price filter.
         """
         self._reset_daily_stats_if_needed()
+
+        # Daily trade cap
+        if self.daily_trade_count >= self.MAX_DAILY_TRADES:
+            logger.info(
+                f"[Risk] REJECT: Daily trade cap reached ({self.MAX_DAILY_TRADES})"
+            )
+            return False
+
+        # Sprint 6: Escalating strategy cooldown
+        if strategy_name and strategy_name in self.strategy_cooldown:
+            now = datetime.now()
+            if now < self.strategy_cooldown[strategy_name]:
+                remaining = (
+                    self.strategy_cooldown[strategy_name] - now
+                ).total_seconds()
+                logger.info(
+                    f"[Risk] [REJECT] Strategy cooldown: {strategy_name} "
+                    f"({remaining:.0f}s remaining)"
+                )
+                return False
+            else:
+                del self.strategy_cooldown[strategy_name]
 
         # 0. Circuit breaker (Sprint 4)
         if self.circuit_breaker is not None:
@@ -401,12 +461,24 @@ class RiskManager:
             )
             return False
 
-        # 7. Per-Symbol Loss Cooldown (clean expired)
+        # 7. Per-Symbol Loss Cooldown (clean expired, then check)
         now = datetime.now()
         expired = [k for k, v in self.loss_cooldown.items() if now >= v]
         for k in expired:
             del self.loss_cooldown[k]
 
+        if symbol:
+            # Check exact ticker match
+            if symbol in self.loss_cooldown:
+                logger.info(f"[Risk] [REJECT] Loss cooldown active for {symbol}")
+                return False
+            # Secondary guard: check series prefix
+            prefix = symbol.split("-")[0] if "-" in symbol else symbol
+            if prefix in self.loss_cooldown:
+                logger.info(f"[Risk] [REJECT] Loss cooldown active for series {prefix}")
+                return False
+
+        self.daily_trade_count += 1
         return True
 
     def record_execution(

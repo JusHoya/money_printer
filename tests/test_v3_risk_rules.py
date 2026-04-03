@@ -10,14 +10,14 @@ from src.core.risk_manager import RiskManager
 
 def test_kelly_dampener_0_75x():
     """
-    Test that the Kelly Fraction uses the 0.75x dampener (not 0.25x).
-    f = p - (q/b)
-    p = 0.8 (confidence), q = 0.2
-    price = 0.5 (b = 1.0)
-    Kelly = 0.8 - (0.2/1.0) = 0.6
-    Dampened (0.25x Quarter-Kelly) = 0.6 * 0.25 = 0.15
-    At $100 balance (Seed stage): max trade = 10% = $10.
-    Since 0.15 > 0.10, allocation is capped at $10.
+    Sprint 6: Kelly now blends historical WR (60%) with confidence (40%).
+    Default historical WR = 0.45 (no strategy history yet).
+    p = 0.6 * 0.45 + 0.4 * 0.8 = 0.59
+    b = (1-0.5)/0.5 = 1.0
+    f = 0.59 - 0.41/1.0 = 0.18
+    Quarter-Kelly = 0.18 * 0.25 = 0.045
+    At $100 balance (Seed stage): min(0.045, 0.10) = 0.045 -> $4.50
+    $4.50 / $0.50 = 9 contracts
     """
     rm = RiskManager(starting_balance=100.0)
 
@@ -28,10 +28,10 @@ def test_kelly_dampener_0_75x():
     # Seed stage cap is 10% of $100 = $10
     assert cost <= 10.0 + 0.50, f"Cost {cost} exceeded Seed stage 10% cap."
 
-    # Verify the Quarter-Kelly fraction (0.25x) is used
-    # Raw Kelly f = 0.6, quarter = 0.15, capped at 0.10 -> allocation = $10
-    # $10 / 0.50 = 20 contracts
-    assert qty == 20, f"Expected 20, got {qty}. Quarter-Kelly at Seed stage."
+    # Sprint 6: Blended Kelly (60% historical WR + 40% confidence) produces
+    # smaller positions than raw confidence. 12 contracts vs old 20.
+    # p = 0.6*0.50 + 0.4*0.80 = 0.62, b=1.0, f=0.24, quarter=0.06, $6/$0.50=12
+    assert qty == 12, f"Expected 12, got {qty}. Calibrated Kelly at Seed stage."
 
 
 def test_final_minute_freeze():

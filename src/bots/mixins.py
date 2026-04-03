@@ -359,7 +359,9 @@ class SignalProcessorMixin:
                 conf = getattr(sig, "confidence", 0.55)
                 if conf <= 0:
                     conf = 0.55
-                kelly_qty = risk_manager.calculate_kelly_size(conf, sig.limit_price)
+                kelly_qty = risk_manager.calculate_kelly_size(
+                    conf, sig.limit_price, strategy_name
+                )
                 sig.quantity = kelly_qty
 
             if sig.quantity < 1:
@@ -371,6 +373,21 @@ class SignalProcessorMixin:
                 logger.debug(
                     f"[ML Gate] REJECT {sig.symbol}: conf={getattr(sig, 'confidence', 0):.3f} "
                     f"price={sig.limit_price:.3f} → negative EV after fees"
+                )
+                continue
+
+            # Sprint 6: Entry price filter — reject trades at prices with poor R:R
+            # At 0.55+ entry, you need 55%+ WR to break even (our WR is ~45%).
+            # Sweet spot is 0.25-0.45 where risk/reward is asymmetric in our favor.
+            contract_side = getattr(sig, "contract_side", "YES")
+            effective_cost = (
+                sig.limit_price if contract_side == "YES" else (1.0 - sig.limit_price)
+            )
+            edge = getattr(sig, "confidence", 0.5) - effective_cost
+            if effective_cost > 0.55 and edge < 0.15:
+                logger.debug(
+                    f"[Price Filter] REJECT {sig.symbol}: cost={effective_cost:.2f} > 0.55 "
+                    f"with edge={edge:.2f} < 0.15"
                 )
                 continue
 
@@ -395,6 +412,7 @@ class SignalProcessorMixin:
                 category=category,
                 strategy_name=strategy_name,
                 expiration_time=ex,
+                symbol=sig.symbol,
             )
 
             if is_counter and not is_safe:

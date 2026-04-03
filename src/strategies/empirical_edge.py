@@ -127,8 +127,8 @@ class EmpiricalEdgeStrategy(Strategy):
 
     def __init__(
         self,
-        min_ev_per_dollar: float = 0.10,
-        min_edge: float = 0.05,
+        min_ev_per_dollar: float = 0.15,
+        min_edge: float = 0.10,
         min_minutes_remaining: int = 3,
         max_minutes_remaining: int = 12,
         cooldown_seconds: int = 120,

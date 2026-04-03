@@ -23,7 +23,7 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # ML-driven primary + V3 rule-based fallback
         # Relaxed thresholds for data collection / ML training bootstrap
         self.strategies = {
-            "ml_hourly": MLBtcHourlyStrategy(min_edge=0.02, cooldown_seconds=120),
+            "ml_hourly": MLBtcHourlyStrategy(min_edge=0.08, cooldown_seconds=120),
             "crypto_hr": CryptoHourlyStrategyV3(
                 confidence_margin=20.0, obi_threshold=0.45
             ),

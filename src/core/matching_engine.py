@@ -456,6 +456,11 @@ class SimulatedExchange:
             age = age_seconds / 60
             in_grace_period = age_seconds < 30
 
+            # Short-duration binary contracts: expiry IS the stop-loss.
+            # Research (Whelan et al.): stops on near-expiry binaries crystallize
+            # losses from normal price oscillation, not thesis invalidation.
+            is_short_duration = "KXBTC15M" in pos["symbol"]
+
             # Check Time Limit (Legacy fallback)
             if age >= self.TIME_LIMIT_MIN:
                 # Use estimated option price, NOT raw spot price
@@ -583,7 +588,12 @@ class SimulatedExchange:
                     continue
 
                 # --- STOP LOSS / TRAILING LOGIC (Price Based) ---
-                if pos["stop_loss"] > 0 and not in_grace_period:
+                # Skip stops for short-duration binary contracts — expiry IS the stop.
+                if (
+                    pos["stop_loss"] > 0
+                    and not in_grace_period
+                    and not is_short_duration
+                ):
                     # 1. Check Trailing Trigger
                     if pos.get("trailing_rules") and not pos["trailing_activated"]:
                         trig = pos["trailing_rules"].get("trigger", 999)
@@ -623,8 +633,8 @@ class SimulatedExchange:
                         )
                         continue
 
-                # Fallback: PCT Based Stops (also skip during grace period)
-                if in_grace_period:
+                # Fallback: PCT Based Stops (skip during grace period and for short-duration contracts)
+                if in_grace_period or is_short_duration:
                     continue
                 pnl_pct = (
                     pos["pnl"] / (pos["entry_price"] * pos["quantity"])

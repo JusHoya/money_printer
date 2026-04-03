@@ -194,7 +194,9 @@ class BacktestEngine:
             conf = getattr(signal, "confidence", 0.55)
             if conf <= 0:
                 conf = 0.55
-            qty = self.risk_manager.calculate_kelly_size(conf, signal.limit_price)
+            qty = self.risk_manager.calculate_kelly_size(
+                conf, signal.limit_price, strategy_name
+            )
             signal.quantity = qty
 
         if signal.quantity < 1:

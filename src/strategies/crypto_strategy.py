@@ -726,7 +726,7 @@ class Crypto15mTrendStrategyV3(Strategy):
 
     def __init__(
         self,
-        obi_threshold: float = 0.55,
+        obi_threshold: float = 0.60,
         confirmation_delay: int = 120,
         window_seconds: int = 60,
     ):
@@ -871,7 +871,7 @@ class CryptoHourlyStrategyV3(Strategy):
     def __init__(
         self,
         confidence_margin: float = 50.0,
-        obi_threshold: float = 0.55,
+        obi_threshold: float = 0.60,
         cooldown_seconds: int = 180,
     ):
         self.confidence_margin = confidence_margin

@@ -29,7 +29,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.strategies = {
             "cross_arb": CrossSpreadArbStrategy(),
             "empirical_edge": EmpiricalEdgeStrategy(
-                min_edge=0.02, min_minutes_remaining=2, max_minutes_remaining=60
+                min_edge=0.08, min_minutes_remaining=2, max_minutes_remaining=60
             ),
             "latency_arb": LatencyArbStrategy(),
             # "time_decay": DISABLED — 25% WR, -$769 over 20 trades, avg entry 0.91
@@ -111,11 +111,14 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         if not btc_15m_resolved:
             return []
 
-        # 15m interval gating — allow evaluation from minute 3 onward.
+        # Entry timing windows for 15-min contracts:
+        #   Early window  (min 1-4):  max time for thesis to play out
+        #   Dead zone     (min 5-9):  worst of both worlds — skip
+        #   Late window   (min 10-13): max info available, theta favors sellers
         # Risk manager (rate limit + cooldowns) controls trade frequency.
         now = datetime.now()
         minute_in_interval = now.minute % 15
-        if minute_in_interval < 3:
+        if minute_in_interval < 1 or 5 <= minute_in_interval <= 9:
             return []
 
         # Waterfall: risk-free arb > empirical edge > latency > time decay > longshot > ML > sniper
