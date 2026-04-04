@@ -44,8 +44,8 @@ class TestShortDurationStopSkip:
             len(ex.positions) == 1
         ), "KXBTC15M position was stopped out but should hold to expiry"
 
-    def test_hourly_still_has_stop_loss(self):
-        """Non-15m contracts (hourly BTC) should still respect stop-losses."""
+    def test_hourly_also_skips_stop_loss(self):
+        """Hourly BTC contracts (KXBTCD) should also skip stops — same bounded-loss logic."""
         ex = SimulatedExchange()
         ex.open_position("KXBTCD-26APR0220-T67000", "buy", 0.70, 10, stop_loss=0.50)
         assert len(ex.positions) == 1
@@ -57,10 +57,8 @@ class TestShortDurationStopSkip:
 
         ex.update_market("BTC", 66000.0)
 
-        # Hourly contract SHOULD be stopped out
-        assert (
-            len(ex.positions) == 0
-        ), "Hourly BTC position should have been stopped out"
+        # Hourly contract should NOT be stopped out — hold to expiry
+        assert len(ex.positions) == 1, "Hourly BTC should also hold to expiry"
 
     def test_btc15m_still_expires(self):
         """KXBTC15M should still close on expiration even without stop-loss."""
