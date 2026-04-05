@@ -466,8 +466,8 @@ class SimulatedExchange:
                 or "kxbtcd" in pos["symbol"]
             )
 
-            # Check Time Limit (Legacy fallback)
-            if age >= self.TIME_LIMIT_MIN:
+            # Check Time Limit (Legacy fallback — skip for binary events, they expire naturally)
+            if age >= self.TIME_LIMIT_MIN and not is_binary_event:
                 # Use estimated option price, NOT raw spot price
                 self._close_position(
                     pos,
@@ -568,8 +568,9 @@ class SimulatedExchange:
                     pos["pnl"] = (pos["entry_price"] - display_price) * pos["quantity"]
 
                 # --- EARLY SETTLEMENT (Liquidity/Heuristic) ---
-                # If price is pegged at 0.99 or 0.01 for a sustained period (10m), assume market has decided.
-                if age >= 10:
+                # Skip for binary events — let EXPIRATION handle settlement naturally.
+                # Early settlement was 97.5% losses (-$511) and removes any reversal chance.
+                if age >= 10 and not is_binary_event:
                     if (pos["side"] == "buy" and estimated_price >= 0.99) or (
                         pos["side"] == "sell" and estimated_price <= 0.01
                     ):
@@ -586,9 +587,12 @@ class SimulatedExchange:
                         continue
 
                 # --- PROFIT TARGET LADDER (Partial Exits) ---
-                # Skip during grace period to prevent instant tanh gaming
-                if not in_grace_period and self._check_profit_targets(
-                    pos, display_price
+                # Skip for binary events — let them settle at $0 or $1 for symmetric payoffs.
+                # Profit targets capped avg win at $3.77 while losses ran to $12.77.
+                if (
+                    not in_grace_period
+                    and not is_binary_event
+                    and self._check_profit_targets(pos, display_price)
                 ):
                     continue
 
