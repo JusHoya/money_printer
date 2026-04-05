@@ -35,6 +35,9 @@ aiohttp>=3.13
 # Requirements for Technical Analysis (Sprint 0)
 ta>=0.11
 
+# Requirements for Aviation Weather (Sprint 6)
+metar>=2.0
+
 # Requirements for Testing (Sprint 0)
 playwright>=1.40
 pre-commit>=3.6

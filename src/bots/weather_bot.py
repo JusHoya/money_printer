@@ -8,12 +8,14 @@ from src.core.interfaces import TradeSignal
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
 from src.strategies.ml_weather import MLWeatherStrategy
 from src.data.nws_provider import NWSProvider
+from src.data.metar_provider import METARProvider
 from src.utils.logger import logger
 import os
 
 
 @BotRegistry.register("weather")
 class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
+    # Legacy NWS station mapping (kept for backwards compatibility / forecasts)
     STATION_MAP = {
         "KNYC": "KXHIGHNY",
         "KLAX": "KXHIGHLAX",
@@ -21,11 +23,31 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         "KMIA": "KXHIGHMIA",
     }
 
+    # Airport ASOS stations for METAR data (faster, higher precision)
+    METAR_STATIONS = ["KJFK", "KLAX", "KORD", "KMIA"]
+
+    # Map METAR stations to Kalshi tickers
+    METAR_TO_KALSHI = {
+        "KJFK": "KXHIGHNY",
+        "KLAX": "KXHIGHLAX",
+        "KORD": "KXHIGHCHI",
+        "KMIA": "KXHIGHMIA",
+    }
+
+    # Map METAR stations back to NWS stations (for forecasts)
+    METAR_TO_NWS = {
+        "KJFK": "KNYC",
+        "KLAX": "KLAX",
+        "KORD": "KMDW",
+        "KMIA": "KMIA",
+    }
+
     def __init__(self):
         Bot.__init__(self, name="Weather")
         TickerResolverMixin.__init__(self)
         self.kalshi = None
         self.nws = None
+        self.metar = None
         self.nws_stations = ["KNYC", "KLAX", "KMDW", "KMIA"]
 
         # ML-driven primary + V2 rule-based fallback
@@ -43,20 +65,66 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             self.nws = NWSProvider(nws_ua, self.nws_stations)
             self.nws.connect()
 
+        # Initialize METAR provider for faster temperature observations
+        self.metar = METARProvider(self.METAR_STATIONS)
+        self.metar.connect()
+
     def tick(self, risk_manager, dashboard) -> List[TradeSignal]:
         if not self.nws:
             return []
 
-        for station in self.nws_stations:
-            nws_data = self.nws.fetch_latest(station)
-            if not nws_data:
-                continue
-
-            temp = nws_data.extra.get("temperature_f")
-            kalshi_ticker = self.STATION_MAP.get(station)
+        for metar_station in self.METAR_STATIONS:
+            kalshi_ticker = self.METAR_TO_KALSHI.get(metar_station)
+            nws_station = self.METAR_TO_NWS.get(metar_station)
             active_ticker = None
 
-            # Fetch live Kalshi price
+            # --- Fetch observation data (METAR primary, NWS fallback) ---
+            obs_data = None
+            if self.metar:
+                try:
+                    metar_data = self.metar.fetch_latest(metar_station)
+                    if metar_data:
+                        age = (
+                            time.time() - metar_data.timestamp.timestamp()
+                            if metar_data.timestamp
+                            else 0
+                        )
+                        logger.info(
+                            f"[Weather] Using METAR data for {metar_station} (age: {age:.0f}s)"
+                        )
+                        obs_data = metar_data
+                except Exception as e:
+                    logger.warning(
+                        f"[Weather] METAR fetch failed for {metar_station}: {e}"
+                    )
+
+            # Fallback to NWS if METAR unavailable
+            if obs_data is None and nws_station:
+                nws_data = self.nws.fetch_latest(nws_station)
+                if nws_data:
+                    logger.info(f"[Weather] Falling back to NWS data for {nws_station}")
+                    obs_data = nws_data
+
+            if not obs_data:
+                continue
+
+            # --- Merge NWS forecast into METAR observation ---
+            # Strategies expect extra["forecast"] for 7-day forecast data.
+            # METAR gives better temps; NWS gives forecasts.
+            if obs_data is not None and nws_station:
+                nws_forecast_data = self.nws.fetch_latest(nws_station)
+                if nws_forecast_data and nws_forecast_data.extra:
+                    forecast = nws_forecast_data.extra.get("forecast")
+                    if forecast and (
+                        not obs_data.extra or not obs_data.extra.get("forecast")
+                    ):
+                        if obs_data.extra is None:
+                            obs_data.extra = {}
+                        obs_data.extra["forecast"] = forecast
+
+            temp = obs_data.extra.get("temperature_f") if obs_data.extra else None
+
+            # --- Fetch live Kalshi price and fuse ---
             if self.kalshi and kalshi_ticker:
                 try:
                     active_ticker = self._resolve_smart_ticker(
@@ -66,7 +134,11 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     if active_ticker:
                         k_data = self.kalshi.fetch_latest(active_ticker)
                         if k_data:
-                            max_t = nws_data.extra.get("max_temp_today_f")
+                            max_t = (
+                                obs_data.extra.get("max_temp_today_f")
+                                if obs_data.extra
+                                else None
+                            )
                             best_price = (
                                 k_data.bid
                                 if k_data.bid > 0
@@ -87,23 +159,23 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                                 max_temp=max_t,
                             )
 
-                            # Fuse data
-                            nws_data.bid = k_data.bid
-                            nws_data.ask = k_data.ask
-                            nws_data.price = k_data.price
-                            nws_data.symbol = active_ticker
+                            # Fuse Kalshi prices into observation data
+                            obs_data.bid = k_data.bid
+                            obs_data.ask = k_data.ask
+                            obs_data.price = k_data.price
+                            obs_data.symbol = active_ticker
                 except Exception as e:
                     logger.error(f"[Weather] Market Fetch Fail ({kalshi_ticker}): {e}")
 
             # Use real Kalshi market price for position valuation (not raw temp)
             kalshi_market_price = None
-            if active_ticker and nws_data.bid > 0:
-                kalshi_market_price = nws_data.bid  # fused from k_data above
-            elif active_ticker and nws_data.price > 0:
-                kalshi_market_price = nws_data.price
+            if active_ticker and obs_data.bid > 0:
+                kalshi_market_price = obs_data.bid  # fused from k_data above
+            elif active_ticker and obs_data.price > 0:
+                kalshi_market_price = obs_data.price
 
             if temp:
-                dashboard.update_price(f"{kalshi_ticker or station} (F)", temp)
+                dashboard.update_price(f"{kalshi_ticker or metar_station} (F)", temp)
                 if active_ticker and kalshi_market_price and kalshi_market_price > 0:
                     risk_manager.update_market_data(active_ticker, kalshi_market_price)
                     risk_manager.exchange.update_market_price(
@@ -112,10 +184,10 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 elif active_ticker:
                     risk_manager.update_market_data(active_ticker, temp)
                 else:
-                    risk_manager.update_market_data(f"TEMP_{station}", temp)
+                    risk_manager.update_market_data(f"TEMP_{metar_station}", temp)
 
             # Extract PoP for Precip
-            forecasts = nws_data.extra.get("forecast") or []
+            forecasts = (obs_data.extra.get("forecast") or []) if obs_data.extra else []
             pop_prob = 0.0
             for period in forecasts:
                 if period.get("isDaytime"):
@@ -128,18 +200,18 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 if active_ticker:
                     risk_manager.update_market_data(f"{active_ticker}_PRECIP", pop_prob)
                 else:
-                    risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
+                    risk_manager.update_market_data(f"PRECIP_{metar_station}", pop_prob)
 
             # Waterfall: ML Weather → V2 rule-based fallback
             traded = self._process_signals(
-                self.strategies["ml_weather"].analyze(nws_data),
+                self.strategies["ml_weather"].analyze(obs_data),
                 strategy_name="ML Weather",
                 risk_manager=risk_manager,
                 dashboard=dashboard,
             )
             if not traded:
                 self._process_signals(
-                    self.strategies["weather"].analyze(nws_data),
+                    self.strategies["weather"].analyze(obs_data),
                     strategy_name="Meteorologist V2",
                     risk_manager=risk_manager,
                     dashboard=dashboard,
