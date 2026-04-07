@@ -5,7 +5,6 @@ from src.bots.base import Bot
 from src.bots.registry import BotRegistry
 from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
 from src.core.interfaces import TradeSignal
-from src.strategies.empirical_edge import EmpiricalEdgeStrategy
 from src.strategies.ml_btc_15m import MLBtc15mStrategy
 from src.strategies.latency_arb import LatencyArbStrategy
 from src.strategies.longshot_fader_v2 import LongshotFaderV2
@@ -25,12 +24,9 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
         # Microstructure-first strategy waterfall (Sprint 5+)
         # Relaxed thresholds for data collection / ML training bootstrap
-        # EmpiricalEdge: widened to 2-60 min window (contracts open 60+ min early)
         self.strategies = {
             "cross_arb": CrossSpreadArbStrategy(),
-            "empirical_edge": EmpiricalEdgeStrategy(
-                min_edge=0.08, min_minutes_remaining=2, max_minutes_remaining=60
-            ),
+            # "empirical_edge": DISABLED — 2231 trades, -$38,452 PnL, 47.8% WR, expectancy -$17.24/trade
             "latency_arb": LatencyArbStrategy(),
             # "time_decay": DISABLED — 25% WR, -$769 over 20 trades, avg entry 0.91
             "longshot_v2": LongshotFaderV2(),
@@ -121,7 +117,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         if minute_in_interval < 1 or 5 <= minute_in_interval <= 9:
             return []
 
-        # Waterfall: risk-free arb > empirical edge > latency > time decay > longshot > ML > sniper
+        # Waterfall: risk-free arb > latency > time decay > longshot > ML > sniper
         if self.ticks % 20 == 0:
             logger.info(
                 f"[BTC 15m] Evaluating {btc_data.symbol} | "
@@ -131,7 +127,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             )
         for strat_key, strat_name in [
             ("cross_arb", "Cross-Spread Arb"),
-            ("empirical_edge", "Empirical Edge"),
+            # ("empirical_edge", "Empirical Edge"),  # DISABLED — see strategies dict
             ("latency_arb", "Latency Arb"),
             # ("time_decay", "Time Decay"),  # DISABLED
             ("longshot_v2", "LongShot Fader V2"),
