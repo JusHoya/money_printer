@@ -9,17 +9,25 @@ Sprint 2, Task 2.10 of Money Printer V2.
 import logging
 import math
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from src.core.interfaces import MarketData
+from src.ml.btc_features import BTC_FEATURE_NAMES, build_btc_sample_features
 from src.ml.features import FeaturePipeline
 
 logger = logging.getLogger(__name__)
+
+
+# Maximum entries kept in the shared spot/contract price history deques.
+# 10 minutes of 1-second samples plus headroom.
+_BTC_HISTORY_MAXLEN = 900
+_CONTRACT_HISTORY_MAXLEN = 240
 
 
 class ModelPredictor:
@@ -45,6 +53,15 @@ class ModelPredictor:
 
         # Track model metadata
         self._model_status: Dict[str, dict] = {}
+
+        # Rolling history for BTC momentum/volatility and contract slope
+        # features.  Populated every time ``predict_btc`` is called with a
+        # valid spot/contract price, then consumed by the shared feature
+        # builder on the next call.  Each entry is ``(epoch_seconds, price)``.
+        self._btc_spot_history: Deque[Tuple[float, float]] = deque(
+            maxlen=_BTC_HISTORY_MAXLEN
+        )
+        self._btc_contract_history: Dict[str, Deque[Tuple[float, float]]] = {}
 
         # Attempt to load any existing models
         self.load_models()
@@ -172,6 +189,39 @@ class ModelPredictor:
             return None
 
     # ------------------------------------------------------------------
+    # BTC model schema introspection
+    # ------------------------------------------------------------------
+
+    def _xgboost_feature_order(self) -> List[str]:
+        """Return the BTC XGBoost model's expected feature order.
+
+        Checks the wrapper's saved ``feature_names``, the underlying
+        sklearn estimator's ``feature_names_in_``, and finally falls back
+        to the canonical order in :data:`BTC_FEATURE_NAMES`.
+        """
+        if self._xgboost is None:
+            return list(BTC_FEATURE_NAMES)
+        wrapper_names = getattr(self._xgboost, "_feature_names", None) or getattr(
+            self._xgboost, "feature_names", None
+        )
+        if wrapper_names:
+            return [str(n) for n in wrapper_names]
+        inner = getattr(self._xgboost, "_model", None)
+        if inner is not None and hasattr(inner, "feature_names_in_"):
+            return [str(n) for n in inner.feature_names_in_]
+        return list(BTC_FEATURE_NAMES)
+
+    def _expected_btc_features(self) -> Optional[set]:
+        """Return the set of feature names the loaded XGBoost expects.
+
+        ``None`` means the model did not expose its schema, in which case
+        we skip the strict mismatch check and rely on XGBoost's own
+        error path.
+        """
+        order = self._xgboost_feature_order()
+        return set(order) if order else None
+
+    # ------------------------------------------------------------------
     # Generic prediction
     # ------------------------------------------------------------------
 
@@ -204,42 +254,28 @@ class ModelPredictor:
         """
         t0 = time.perf_counter()
 
-        # Build a single-row DataFrame for feature computation
-        record = {
-            "timestamp": market_data.timestamp,
-            "close": market_data.price,
-            "volume": market_data.volume,
-            "bid": market_data.bid,
-            "ask": market_data.ask,
-        }
-        if market_data.extra:
-            for key in ("high", "low", "open", "expiry"):
-                if key in market_data.extra:
-                    record[key] = market_data.extra[key]
-
-        df = pd.DataFrame([record])
-
-        # Compute features
-        try:
-            df = self._feature_pipeline.compute_features(df)
-            feature_cols = [c for c in df.columns if c.startswith("feat_")]
-            features_computed = len(feature_cols)
-        except Exception as exc:
-            logger.warning("Feature computation failed: %s", exc)
-            feature_cols = []
-            features_computed = 0
-
         # Route to market-specific prediction
         if market_type == "btc":
             strike = (market_data.extra or {}).get("strike", market_data.price)
             tte = time_to_expiry or (market_data.extra or {}).get(
                 "time_to_expiry", 900.0
             )
-            result = self._predict_btc_internal(df, feature_cols, strike, tte)
+            # Delegate to predict_btc so both paths share the same 16-feature
+            # schema, history tracking, and schema-assert fallback.
+            btc_result = self.predict_btc(market_data, strike, tte)
+            result = {
+                "probability": btc_result["probability"],
+                "confidence": btc_result["confidence"],
+                "recommended_price": btc_result["recommended_price"],
+                "model_used": btc_result.get("model_used", "analytical_fallback"),
+            }
+            features_computed = len(BTC_FEATURE_NAMES)
         elif market_type == "weather":
             result = self._predict_weather_fallback(market_data)
+            features_computed = 0
         else:
             result = self._predict_analytical_fallback(market_data)
+            features_computed = 0
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
@@ -264,12 +300,21 @@ class ModelPredictor:
     ) -> dict:
         """BTC-specific prediction using ensemble (XGBoost + LSTM).
 
+        Builds the 16-feature vector defined in :mod:`src.ml.btc_features`
+        — the SAME schema training uses — and feeds it to the loaded
+        XGBoost / LSTM models.  On any feature-mismatch or model error we
+        fall back to the analytical tanh estimator.
+
         Parameters
         ----------
         market_data : MarketData
-            Current BTC market snapshot.
+            Current BTC market snapshot.  ``price`` should carry the BTC
+            spot in USD (callers like :class:`MLBtc15mStrategy` set this
+            explicitly), while ``bid``/``ask`` are the Kalshi contract
+            quotes in [0, 1].  ``extra`` may contain ``spot_price`` as a
+            fallback and ``contract_price`` override.
         strike : float
-            Contract strike price.
+            Contract strike price (USD).
         time_to_expiry_s : float
             Seconds until contract expiry.
 
@@ -279,25 +324,74 @@ class ModelPredictor:
             ``probability``, ``confidence``, ``fair_value``,
             ``recommended_price``, ``edge``.
         """
-        # Build feature DataFrame
-        record = {
-            "timestamp": market_data.timestamp,
-            "close": market_data.price,
-            "volume": market_data.volume,
-            "bid": market_data.bid,
-            "ask": market_data.ask,
-        }
-        if market_data.extra:
-            for key in ("high", "low", "open", "expiry"):
-                if key in market_data.extra:
-                    record[key] = market_data.extra[key]
+        extra = market_data.extra or {}
 
-        df = pd.DataFrame([record])
+        # ------------------------------------------------------------------
+        # 1. Extract the raw scalars we need to build the training-schema
+        #    feature vector.  Be defensive about what each field may carry:
+        #    in some call sites ``market_data.price`` is the BTC spot, in
+        #    others it's the contract mid price.
+        # ------------------------------------------------------------------
+        spot = float(extra.get("spot_price") or 0.0)
+        if spot <= 1.0:
+            # market_data.price doubles as spot for the ML strategies
+            spot = float(market_data.price or 0.0)
+
+        # Contract price: explicit extra wins, else mid of bid/ask, else ask.
+        contract_price_raw = extra.get("contract_price")
+        if contract_price_raw is None:
+            if market_data.bid > 0 and market_data.ask > 0:
+                contract_price = (market_data.bid + market_data.ask) / 2.0
+            elif market_data.ask > 0:
+                contract_price = float(market_data.ask)
+            else:
+                contract_price = 0.5
+        else:
+            contract_price = float(contract_price_raw)
+
+        # Sample timestamp and epoch seconds for history lookups.
+        ts = market_data.timestamp or datetime.now(tz=timezone.utc)
         try:
-            df = self._feature_pipeline.compute_features(df)
-            feature_cols = [c for c in df.columns if c.startswith("feat_")]
+            now_ts = ts.timestamp()
         except Exception:
-            feature_cols = []
+            now_ts = time.time()
+
+        # ------------------------------------------------------------------
+        # 2. Update rolling history deques *before* reading them so the
+        #    current sample contributes to its own momentum window (matching
+        #    training-time behaviour where the sample's own BTC price is in
+        #    the lookback range).
+        # ------------------------------------------------------------------
+        if spot > 1.0:
+            self._btc_spot_history.append((now_ts, spot))
+        sym = market_data.symbol or ""
+        if sym:
+            hist = self._btc_contract_history.setdefault(
+                sym, deque(maxlen=_CONTRACT_HISTORY_MAXLEN)
+            )
+            if 0.0 < contract_price < 1.0:
+                hist.append((now_ts, contract_price))
+            contract_history = list(hist)
+        else:
+            contract_history = []
+
+        # ------------------------------------------------------------------
+        # 3. Build feature dict via the shared builder — same function
+        #    ``scripts/train_from_csv.py`` calls for every training sample.
+        # ------------------------------------------------------------------
+        features = build_btc_sample_features(
+            spot=spot,
+            strike=strike,
+            contract_price=contract_price,
+            tte_s=time_to_expiry_s,
+            hour_of_day=ts.hour,
+            minute_of_hour=ts.minute,
+            spot_history=list(self._btc_spot_history),
+            contract_history=contract_history,
+            now_ts=now_ts,
+        )
+        df = pd.DataFrame([features], columns=BTC_FEATURE_NAMES)
+        feature_cols = list(BTC_FEATURE_NAMES)
 
         result = self._predict_btc_internal(df, feature_cols, strike, time_to_expiry_s)
 
@@ -311,6 +405,7 @@ class ModelPredictor:
             "fair_value": result["fair_value"],
             "recommended_price": result["recommended_price"],
             "edge": round(edge, 4),
+            "model_used": result.get("model_used", "analytical_fallback"),
         }
 
     def _predict_btc_internal(
@@ -332,11 +427,32 @@ class ModelPredictor:
         # Try XGBoost
         if self._xgboost is not None and feature_cols:
             try:
-                X = df[feature_cols].fillna(0.0)
+                expected = self._expected_btc_features()
+                if expected is not None:
+                    actual = set(df.columns)
+                    missing = expected - actual
+                    extra_cols = actual - expected
+                    if missing:
+                        logger.error(
+                            "[Predictor] XGBoost feature mismatch — "
+                            "missing=%s extra=%s; falling back to analytical",
+                            sorted(missing),
+                            sorted(extra_cols),
+                        )
+                        raise ValueError(
+                            f"XGBoost feature mismatch: missing {sorted(missing)}"
+                        )
+                    # Re-order to match the model's training order exactly.
+                    ordered = [
+                        c for c in self._xgboost_feature_order() if c in df.columns
+                    ]
+                    X = df[ordered].fillna(0.0)
+                else:
+                    X = df[feature_cols].fillna(0.0)
                 xgb_prob = float(self._xgboost.predict_proba(X)[0])
                 model_used = "xgboost"
             except Exception as exc:
-                logger.debug("XGBoost prediction failed: %s", exc)
+                logger.exception("[Predictor] XGBoost prediction failed: %s", exc)
 
         # Try LSTM
         if self._lstm is not None and feature_cols:

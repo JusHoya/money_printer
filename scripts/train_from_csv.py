@@ -28,6 +28,7 @@ from xgboost import XGBClassifier
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from src.ml.btc_features import BTC_FEATURE_NAMES, build_btc_sample_features
 from src.ml.calibration import ProbabilityCalibrator
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
@@ -503,95 +504,46 @@ def build_features(
             # Time to expiry
             tte_s = max(0, (expiry_ts - t).total_seconds())
 
-            # BTC price history for momentum/volatility
-            lookback = btc_df[
+            # BTC spot history for momentum/volatility features (last 10 minutes).
+            # Convert to (epoch_s, price) tuples so the shared builder gets the
+            # same representation as the live path.
+            lookback_df = btc_df[
                 (btc_df["timestamp"] >= t - pd.Timedelta(minutes=10))
                 & (btc_df["timestamp"] <= t)
-            ]["btc_price"]
+            ]
+            spot_history = [
+                (ts.timestamp(), float(p))
+                for ts, p in zip(
+                    lookback_df["timestamp"], lookback_df["btc_price"]
+                )
+            ]
 
-            # Features
-            price_dist = btc_price - strike
-            price_dist_pct = price_dist / strike if strike > 0 else 0
-            normalized_tte = tte_s / 900.0
-
-            # Tanh analytical estimate for comparison
-            scale = max(0.3, normalized_tte) * 1000
-            tanh_prob = 0.5 + 0.5 * math.tanh(price_dist / scale)
-
-            # Momentum features
-            ret_1m = ret_5m = ret_10m = 0.0
-            vol_1m = vol_5m = 0.0
-            btc_range = 0.0
-
-            if len(lookback) >= 2:
-                prices_arr = lookback.values
-                btc_range = float(prices_arr.max() - prices_arr.min())
-                log_returns = np.diff(np.log(prices_arr))
-                if len(log_returns) > 0:
-                    vol_5m = float(np.std(log_returns))
-
-                # 1-min return
-                btc_1m = btc_df[
-                    (btc_df["timestamp"] >= t - pd.Timedelta(minutes=1))
-                    & (btc_df["timestamp"] <= t)
-                ]["btc_price"]
-                if len(btc_1m) >= 2:
-                    ret_1m = float((btc_1m.iloc[-1] - btc_1m.iloc[0]) / btc_1m.iloc[0])
-                    lr_1m = np.diff(np.log(btc_1m.values))
-                    vol_1m = float(np.std(lr_1m)) if len(lr_1m) > 0 else 0.0
-
-                # 5-min return
-                btc_5m = btc_df[
-                    (btc_df["timestamp"] >= t - pd.Timedelta(minutes=5))
-                    & (btc_df["timestamp"] <= t)
-                ]["btc_price"]
-                if len(btc_5m) >= 2:
-                    ret_5m = float((btc_5m.iloc[-1] - btc_5m.iloc[0]) / btc_5m.iloc[0])
-
-                # 10-min return
-                if len(lookback) >= 2:
-                    ret_10m = float((prices_arr[-1] - prices_arr[0]) / prices_arr[0])
-
-            # Contract price trajectory
-            c_recent = cdf[
+            # Contract price trajectory (last 2 minutes) for slope feature.
+            c_recent_df = cdf[
                 (cdf["timestamp"] >= t - pd.Timedelta(minutes=2))
                 & (cdf["timestamp"] <= t)
-            ]["contract_price"]
-            contract_slope = 0.0
-            if len(c_recent) >= 2:
-                x = np.arange(len(c_recent), dtype=float)
-                try:
-                    slope, _ = np.polyfit(x, c_recent.values, 1)
-                    contract_slope = float(slope)
-                except Exception:
-                    pass
+            ]
+            contract_history = [
+                (ts.timestamp(), float(p))
+                for ts, p in zip(
+                    c_recent_df["timestamp"], c_recent_df["contract_price"]
+                )
+            ]
 
-            sample = {
-                "timestamp": t,
-                "symbol": sym,
-                "label": label,
-                # Core features
-                "feat_price_distance": price_dist,
-                "feat_price_distance_pct": price_dist_pct,
-                "feat_contract_price": contract_price,
-                "feat_tanh_prob": tanh_prob,
-                "feat_market_vs_analytical": contract_price - tanh_prob,
-                "feat_time_to_expiry": tte_s,
-                "feat_normalized_tte": normalized_tte,
-                # Momentum
-                "feat_btc_return_1m": ret_1m,
-                "feat_btc_return_5m": ret_5m,
-                "feat_btc_return_10m": ret_10m,
-                # Volatility
-                "feat_btc_vol_1m": vol_1m,
-                "feat_btc_vol_5m": vol_5m,
-                "feat_btc_range": btc_range,
-                # Contract microstructure
-                "feat_contract_slope": contract_slope,
-                # Time features
-                "feat_hour_of_day": t.hour,
-                "feat_minute_in_interval": t.minute % 15,
-            }
+            # Delegate all 16 feature values to the shared builder — same
+            # code path live inference uses, so train/serve can't drift.
+            feats = build_btc_sample_features(
+                spot=btc_price,
+                strike=strike,
+                contract_price=contract_price,
+                tte_s=tte_s,
+                hour_of_day=t.hour,
+                minute_of_hour=t.minute,
+                spot_history=spot_history,
+                contract_history=contract_history,
+                now_ts=t.timestamp(),
+            )
+            sample = {"timestamp": t, "symbol": sym, "label": label, **feats}
             samples.append(sample)
             t += pd.Timedelta(seconds=sample_interval_s)
 
