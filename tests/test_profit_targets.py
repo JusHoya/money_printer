@@ -86,5 +86,8 @@ def test_position_fields_initialized():
     assert "profit_targets" in pos
     assert "original_quantity" in pos
     assert pos["original_quantity"] == 10
-    assert pos["last_market_price"] == 0.50
+    # last_market_price is initialized to 0 as a sentinel meaning "no real
+    # market price yet" — matching_engine relies on `lmp > 0` to detect when
+    # a real Kalshi orderbook price has been observed (see lines 533, 628).
+    assert pos["last_market_price"] == 0
     assert pos["contract_side"] == "YES"

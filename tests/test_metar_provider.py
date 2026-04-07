@@ -10,6 +10,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -21,6 +22,10 @@ from src.core.interfaces import MarketData
 # ---------------------------------------------------------------------------
 # Fixtures / Mock Data
 # ---------------------------------------------------------------------------
+
+# METARProvider._get_daily_max_temp filters observations by today's UTC date.
+# Use today's date so multi-METAR daily-max tests don't break tomorrow.
+_TODAY_UTC = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 MOCK_METAR_RESPONSE = [
     {
@@ -111,7 +116,7 @@ MOCK_METAR_NO_TGROUP = [
 MOCK_METAR_MULTIPLE = [
     {
         "icaoId": "KJFK",
-        "reportTime": "2026-04-05T08:00:00Z",
+        "reportTime": f"{_TODAY_UTC}T08:00:00Z",
         "temp": 15,
         "dewp": 8,
         "wdir": 180,
@@ -125,7 +130,7 @@ MOCK_METAR_MULTIPLE = [
     },
     {
         "icaoId": "KJFK",
-        "reportTime": "2026-04-05T12:00:00Z",
+        "reportTime": f"{_TODAY_UTC}T12:00:00Z",
         "temp": 22,
         "dewp": 10,
         "wdir": 200,
@@ -139,7 +144,7 @@ MOCK_METAR_MULTIPLE = [
     },
     {
         "icaoId": "KJFK",
-        "reportTime": "2026-04-05T15:53:00Z",
+        "reportTime": f"{_TODAY_UTC}T15:53:00Z",
         "temp": 27,
         "dewp": 6,
         "wdir": 310,
@@ -153,7 +158,7 @@ MOCK_METAR_MULTIPLE = [
     },
     {
         "icaoId": "KJFK",
-        "reportTime": "2026-04-05T18:00:00Z",
+        "reportTime": f"{_TODAY_UTC}T18:00:00Z",
         "temp": 25,
         "dewp": 7,
         "wdir": 290,
