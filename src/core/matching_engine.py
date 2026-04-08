@@ -355,8 +355,12 @@ class SimulatedExchange:
             "profit_targets": []
             if disable_profit_targets
             else [
-                {"move": 0.15, "exit_pct": 0.33, "hit": False},
-                {"move": 0.30, "exit_pct": 0.50, "hit": False},
+                # Alt A: 1/2 + 1/2, no residual. Empirically the 1/3+1/3+1/3
+                # ladder's residual tranche bled $240/24h via EARLY_SETTLEMENT
+                # at 4.2% WR while the option value of riding past +0.30 was
+                # exactly +$31.50 in 24h — deeply negative optionality.
+                {"move": 0.15, "exit_pct": 0.50, "hit": False},
+                {"move": 0.30, "exit_pct": 1.00, "hit": False},
             ],
             "entry_fee": fee_result.fee,
             "is_maker": is_maker,

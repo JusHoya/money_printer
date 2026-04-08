@@ -4,7 +4,7 @@ from src.core.matching_engine import SimulatedExchange
 
 
 def test_partial_exit_at_first_target():
-    """At +$0.15 move, 33% of position should be closed."""
+    """At +$0.15 move, 50% of position should be closed (Alt A: 1/2 + 1/2)."""
     closed = []
     ex = SimulatedExchange(on_close=lambda p: closed.append(p))
 
@@ -24,13 +24,13 @@ def test_partial_exit_at_first_target():
     ex._check_profit_targets(pos, 0.65)
 
     assert len(closed) == 1
-    assert closed[0]["quantity"] == 9  # 33% of 30 = ~10, int(30*0.33)=9
+    assert closed[0]["quantity"] == 15  # 50% of 30 = 15
     assert closed[0]["pnl"] > 0
-    assert pos["quantity"] == 21  # 30 - 9
+    assert pos["quantity"] == 15  # 30 - 15
 
 
 def test_partial_exit_at_second_target():
-    """At +$0.30 move, 50% of remaining should be closed."""
+    """At +$0.30 move, 100% of remaining should be closed (Alt A: ladder fully exits)."""
     closed = []
     ex = SimulatedExchange(on_close=lambda p: closed.append(p))
 
@@ -47,13 +47,13 @@ def test_partial_exit_at_second_target():
 
     # Hit first target (+0.15)
     ex._check_profit_targets(pos, 0.65)
-    assert pos["quantity"] == 21
+    assert pos["quantity"] == 15
 
-    # Hit second target (+0.30)
+    # Hit second target (+0.30) — exits 100% of remaining, no residual
     ex._check_profit_targets(pos, 0.80)
     assert len(closed) == 2
-    assert closed[1]["quantity"] == 10  # 50% of 21 = 10
-    assert pos["quantity"] == 11
+    assert closed[1]["quantity"] == 15  # 100% of 15 = 15
+    assert pos["quantity"] == 0
 
 
 def test_profit_targets_on_sell_side():
