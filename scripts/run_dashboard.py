@@ -990,6 +990,23 @@ class OrchestratorEngine:
                     last_heartbeat = time.time()
                     continue
 
+                # Auto-cycle: wall-clock fallback (~4h). Sprint 6's 40-trades/day
+                # cap made the 50% drawdown trigger geometrically unreachable, so
+                # without this fallback the auto-training loop is silently dead.
+                _CYCLE_MAX_SECONDS = 4 * 3600
+                if (
+                    self.auto_cycle
+                    and (time.time() - self._cycle_start_time) > _CYCLE_MAX_SECONDS
+                ):
+                    logger.info(
+                        "[Cycle] Wall-clock fallback fired after %.1fh — completing cycle",
+                        (time.time() - self._cycle_start_time) / 3600,
+                    )
+                    self.risk_manager.drawdown_kill_triggered = True  # reuse existing path
+                    self._run_drawdown_cycle()
+                    last_heartbeat = time.time()
+                    continue
+
                 # Graduation check: 8+ continuous hours of positive PnL
                 if self.auto_cycle:
                     pnl = self.risk_manager.daily_pnl
