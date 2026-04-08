@@ -149,6 +149,7 @@ class MLBtcHourlyStrategy(Strategy):
         confidence = pred["confidence"]
         fair = pred.get("fair_value", prob)
         rec = pred.get("recommended_price", fair)
+        model_used = pred.get("model_used", "analytical")
 
         # YES direction
         if prob > 0.5:
@@ -166,6 +167,11 @@ class MLBtcHourlyStrategy(Strategy):
                 sig.stop_loss = max(0.01, lp - 0.10)
                 if close_time:
                     sig.expiration_time = close_time
+                # ML context for trade journal
+                sig.model_probability = prob
+                sig.model_used = model_used
+                sig.btc_spot = current_spot
+                sig.tte_at_entry = tte_s
                 logger.info(
                     "[ML Hourly] BUY YES %s | prob=%.3f edge=%.3f",
                     sym,
@@ -193,6 +199,11 @@ class MLBtcHourlyStrategy(Strategy):
                 sig.stop_loss = max(0.01, lp - 0.10)
                 if close_time:
                     sig.expiration_time = close_time
+                # ML context for trade journal
+                sig.model_probability = prob
+                sig.model_used = model_used
+                sig.btc_spot = current_spot
+                sig.tte_at_entry = tte_s
                 logger.info(
                     "[ML Hourly] BUY NO %s | prob=%.3f edge=%.3f",
                     sym,
