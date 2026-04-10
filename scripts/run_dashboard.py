@@ -20,6 +20,7 @@ from src.ml.trade_journal import TradeJournal, TradeOutcome
 from src.ml.online_updater import OnlineModelUpdater
 from src.strategies.counter_trade import CounterTradeAnalyzer
 from src.ml.settlement_resolver import SettlementResolver
+from src.notifications.discord import send_discord_notification
 
 # Import bots to trigger registration
 import src.bots  # noqa: F401
@@ -889,6 +890,11 @@ class OrchestratorEngine:
         )
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
+        # Discord notification (fire-and-forget)
+        discord_url = os.getenv("DISCORD_WEBHOOK_URL")
+        if discord_url:
+            send_discord_notification(discord_url, cycle_record, journal_count)
+
     def _graduate_model(self, hours: float, pnl: float):
         """Model is profitable after 8+ hours — save and exit training loop."""
         import json as _json
@@ -1002,7 +1008,9 @@ class OrchestratorEngine:
                         "[Cycle] Wall-clock fallback fired after %.1fh — completing cycle",
                         (time.time() - self._cycle_start_time) / 3600,
                     )
-                    self.risk_manager.drawdown_kill_triggered = True  # reuse existing path
+                    self.risk_manager.drawdown_kill_triggered = (
+                        True  # reuse existing path
+                    )
                     self._run_drawdown_cycle()
                     last_heartbeat = time.time()
                     continue
