@@ -268,6 +268,13 @@ class OrchestratorEngine:
         except Exception as exc:
             logger.error("[Shutdown] Could not save training state: %s", exc)
 
+        # 2b. Save win rates
+        try:
+            self.risk_manager._save_win_rates()
+            logger.info("[Shutdown] Win rates saved.")
+        except Exception as exc:
+            logger.error("[Shutdown] Could not save win rates: %s", exc)
+
         # 3. Log final data inventory
         try:
             self._log_data_inventory("SHUTDOWN")
@@ -770,6 +777,9 @@ class OrchestratorEngine:
             self._training_history = self._training_history[-20:]
 
         self._training_diagnostics = train_metrics
+
+        # Persist win rates before cycle reset (they survive across cycles)
+        self.risk_manager._save_win_rates()
 
         # Reset risk manager for new cycle
         new_bal = self.sim_balance if self.sim_balance > 0 else 3000.0

@@ -83,8 +83,10 @@ class TestStateManagerSnapshot:
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         pf = snap["portfolio"]
-        # equity = balance + exposure + unrealized_pnl = 100 + 30 + (-2) = 128
-        assert pf["equity"] == 128.0
+        # equity = balance + exposure = 100 + 30 = 130
+        # (unrealized is now folded into balance by _sync_balance, so
+        #  the state_manager formula is just bal + exposure)
+        assert pf["equity"] == 130.0
         assert pf["cash"] == 100.0
         assert pf["exposure"] == 30.0
         assert pf["realized_pnl"] == 5.0
@@ -598,8 +600,8 @@ class TestPortfolioLogging:
         with open(dash.portfolio_log_path, "r", encoding="utf-8") as f:
             rows = list(csv.reader(f))
         assert len(rows) == 2  # header + 1 data row
-        # equity = 100 + 30 + (-2) = 128
-        assert float(rows[1][1]) == 128.0
+        # equity = balance + exposure = 100 + 30 = 130 (unrealized now in balance)
+        assert float(rows[1][1]) == 130.0
         assert float(rows[1][2]) == 100.0  # cash
         assert float(rows[1][3]) == 30.0  # exposure
 

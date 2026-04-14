@@ -79,7 +79,7 @@ class Dashboard:
         realized = risk_manager.daily_pnl
         unrealized = risk_manager.unrealized_pnl
         exposure = risk_manager.get_current_exposure()
-        equity = bal + exposure + unrealized
+        equity = bal + exposure
 
         # CSV
         try:
@@ -234,7 +234,7 @@ class Dashboard:
 
             # Total Equity = Cash + Positions Value
             # Positions Value = Cost Basis (Exposure) + Unrealized PnL
-            total_equity = bal + exposure + unreal_pnl
+            total_equity = bal + exposure
 
             exposure_pct = (exposure / total_equity) * 100 if total_equity > 0 else 0
 

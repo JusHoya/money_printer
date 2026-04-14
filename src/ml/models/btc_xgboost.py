@@ -66,16 +66,22 @@ class BTCXGBoostClassifier:
             Training metrics: ``auc``, ``accuracy``, ``train_size``.
         """
         xgb_params = {
-            "max_depth": 6,
-            "n_estimators": 200,
+            "max_depth": 3,
+            "n_estimators": 300,
             "learning_rate": 0.05,
             "objective": "binary:logistic",
             "eval_metric": "auc",
+            # Regularization to prevent overfitting on ~3k samples
+            "min_child_weight": 5,
+            "reg_alpha": 0.3,
+            "reg_lambda": 3.0,
+            "subsample": 0.75,
+            "colsample_bytree": 0.75,
         }
 
         fit_kwargs: dict = {}
         if val_X is not None and val_y is not None:
-            xgb_params["early_stopping_rounds"] = 20
+            xgb_params["early_stopping_rounds"] = 30
             fit_kwargs["eval_set"] = [(val_X, val_y)]
             fit_kwargs["verbose"] = False
 

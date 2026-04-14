@@ -1,3 +1,5 @@
+import json
+import os
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, date, timedelta
@@ -24,6 +26,11 @@ BANKROLL_STAGES = [
     (10_000, 50_000, 0.05, 15, 0.35, "Scale"),
     (50_000, float("inf"), 0.025, 20, 0.25, "Compound"),
 ]
+
+FEE_TOLERANCE = 0.02
+
+WIN_RATES_PATH = os.path.join("data", "strategy_win_rates.json")
+WIN_RATES_SAVE_INTERVAL = 10  # Save every N trade closes
 
 
 def _get_bankroll_stage(balance: float) -> tuple:
@@ -83,6 +90,8 @@ class RiskManager:
 
         # Sprint 6: historical win rates for calibrated Kelly sizing
         self.strategy_win_rates: dict = {}  # strategy_name -> (wins, total)
+        self._trade_close_count = 0
+        self._load_win_rates()
 
         # Sprint 6: escalating cooldown after consecutive losses
         self.consecutive_losses: dict = {}  # strategy_name -> count
@@ -109,12 +118,12 @@ class RiskManager:
         # Sprint 6: Track per-strategy win rates for calibrated Kelly
         wins, total = self.strategy_win_rates.get(strategy_name, (0, 0))
         total += 1
-        if pnl > 0:
+        if pnl > -FEE_TOLERANCE:
             wins += 1
         self.strategy_win_rates[strategy_name] = (wins, total)
 
         # Sprint 6: Escalating cooldown after consecutive losses
-        if pnl > 0:
+        if pnl > -FEE_TOLERANCE:
             self.consecutive_losses[strategy_name] = 0
         else:
             streak = self.consecutive_losses.get(strategy_name, 0) + 1
@@ -129,7 +138,7 @@ class RiskManager:
             )
 
         # Per-symbol loss cooldown to prevent re-entry on same market
-        if pnl < 0:
+        if pnl < -FEE_TOLERANCE:
             symbol = position.get("symbol", "")
             # Ban exact ticker (not series prefix) to prevent re-entry on same market
             # while still allowing trades on other markets in the same series
@@ -139,13 +148,49 @@ class RiskManager:
                 f"[Risk] ⚠️ Loss Cooldown: {symbol} locked until {cooldown_until.strftime('%H:%M:%S')}"
             )
 
+        # Debounced persistence of win rates
+        self._trade_close_count += 1
+        if self._trade_close_count % WIN_RATES_SAVE_INTERVAL == 0:
+            self._save_win_rates()
+
+    def _load_win_rates(self):
+        """Load persisted win rates from disk if available."""
+        try:
+            if os.path.exists(WIN_RATES_PATH):
+                with open(WIN_RATES_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.strategy_win_rates = {k: tuple(v) for k, v in data.items()}
+                logger.info(
+                    f"[Risk] Loaded win rates for {len(self.strategy_win_rates)} strategies"
+                )
+        except Exception as e:
+            logger.warning(f"[Risk] Could not load win rates: {e}")
+
+    def _save_win_rates(self):
+        """Persist win rates to disk."""
+        try:
+            os.makedirs(os.path.dirname(WIN_RATES_PATH) or ".", exist_ok=True)
+            with open(WIN_RATES_PATH, "w", encoding="utf-8") as f:
+                json.dump(
+                    {k: list(v) for k, v in self.strategy_win_rates.items()},
+                    f,
+                    indent=2,
+                )
+        except Exception as e:
+            logger.warning(f"[Risk] Could not save win rates: {e}")
+
     def _sync_balance(self):
         """
         Calculates available cash balance based on realized PnL and current exposure.
         Formula: Starting Cash + Realized PnL - Cash tied up in open positions.
         """
         exposure = self.get_current_exposure()
-        self.balance = self.starting_balance_day + self.daily_pnl - exposure
+        self.balance = (
+            self.starting_balance_day
+            + self.daily_pnl
+            + self.exchange.unrealized_pnl
+            - exposure
+        )
 
     def update_balance(self, real_balance: float):
         """Syncs simulated balance with real exchange balance."""
@@ -223,11 +268,6 @@ class RiskManager:
 
         # 3. Fractional Kelly (stage-dependent)
         f_fractional = f * kelly_frac
-
-        # 3.5 Confidence dampening: high confidence is anti-correlated with
-        # profitability (0.7+ conf = 42.9% WR vs 0.5-0.7 = 48.6% WR).
-        if confidence > 0.85:
-            f_fractional *= 0.50
 
         if f_fractional <= 0:
             return 0

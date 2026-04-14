@@ -55,9 +55,13 @@ class TestBalanceFlow(unittest.TestCase):
         # Spot $5K above strike → tanh gives ~0.99 → large unrealized gain
         self.assertGreater(self.rm.unrealized_pnl, 0.0)
 
-        # Balance = starting - exposure - fees (unrealized doesn't affect cash)
+        # Balance = starting + realized + unrealized - exposure
+        # After Fix 6, _sync_balance includes unrealized_pnl in balance.
+        # balance = 100 + 0 + ~49 - 50 - fees ≈ 99 - fees
         fees = self.rm.exchange.total_fees_paid
-        self.assertAlmostEqual(self.rm.balance, 50.0 - fees, places=2)
+        unrealized = self.rm.unrealized_pnl
+        expected_balance = 100.0 + 0.0 + unrealized - 50.0 - fees
+        self.assertAlmostEqual(self.rm.balance, expected_balance, places=2)
 
     def test_loss_scenario(self):
         print("\n--- Test 4: Loss Scenario (Bad Trade) ---")

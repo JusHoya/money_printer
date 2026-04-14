@@ -123,7 +123,7 @@ class TestPnLFlow(unittest.TestCase):
 
     # === TEST 6: Equity Calculation ===
     def test_equity_calculation(self):
-        """Equity = Cash + Exposure + Unrealized."""
+        """Equity = Cash + Exposure (unrealized is now folded into cash by _sync_balance)."""
         print("\n--- Test: Equity Calculation ---")
 
         # Open position
@@ -136,12 +136,13 @@ class TestPnLFlow(unittest.TestCase):
         exposure = self.rm.get_current_exposure()
         unrealized = self.rm.unrealized_pnl
 
-        # This is what the dashboard calculates
-        equity = cash + exposure + unrealized
+        # Dashboard/state_manager formula: equity = cash + exposure
+        # (cash already includes unrealized via _sync_balance)
+        equity = cash + exposure
 
         # Exposure = 0.50 * 100 = 50
-        # Cash = 100 - 50 + 0 (no realized yet) = 50
-        # Equity = 50 + 50 + unrealized
+        # Cash = starting(100) + realized(0) + unrealized(~49) - exposure(50) = ~99
+        # Equity = ~99 + 50 = ~149
 
         print(f"  Cash: ${cash:.2f}")
         print(f"  Exposure: ${exposure:.2f}")

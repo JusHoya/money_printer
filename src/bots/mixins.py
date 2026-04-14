@@ -376,21 +376,6 @@ class SignalProcessorMixin:
                 )
                 continue
 
-            # Sprint 6: Entry price filter — reject trades at prices with poor R:R
-            # At 0.55+ entry, you need 55%+ WR to break even (our WR is ~45%).
-            # Sweet spot is 0.25-0.45 where risk/reward is asymmetric in our favor.
-            contract_side = getattr(sig, "contract_side", "YES")
-            effective_cost = (
-                sig.limit_price if contract_side == "YES" else (1.0 - sig.limit_price)
-            )
-            edge = getattr(sig, "confidence", 0.5) - effective_cost
-            if effective_cost > 0.55 and edge < 0.15:
-                logger.debug(
-                    f"[Price Filter] REJECT {sig.symbol}: cost={effective_cost:.2f} > 0.55 "
-                    f"with edge={edge:.2f} < 0.15"
-                )
-                continue
-
             # Cost calculation
             if sig.side == "sell" and getattr(sig, "contract_side", "YES") == "YES":
                 est_cost = (1.0 - sig.limit_price) * sig.quantity
@@ -415,7 +400,7 @@ class SignalProcessorMixin:
                 symbol=sig.symbol,
             )
 
-            if is_counter and not is_safe:
+            if is_counter:
                 risk_manager.last_trade_time = saved_last_trade
                 risk_manager.loss_cooldown = saved_cooldowns
 

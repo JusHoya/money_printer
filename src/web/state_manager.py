@@ -97,7 +97,7 @@ class StateManager:
         realized_pnl = rm.daily_pnl
         unrealized_pnl = rm.unrealized_pnl
         exposure = rm.get_current_exposure()
-        equity = bal + exposure + unrealized_pnl
+        equity = bal + exposure
         exposure_pct = (exposure / equity * 100) if equity > 0 else 0.0
         return {
             "equity": round(equity, 4),
