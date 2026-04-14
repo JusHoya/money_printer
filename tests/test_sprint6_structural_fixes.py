@@ -215,17 +215,6 @@ class TestDailyTradeCap:
 class TestEdgeThresholds:
     """Verify raised edge thresholds across strategies."""
 
-    def test_empirical_edge_defaults(self):
-        from src.strategies.empirical_edge import EmpiricalEdgeStrategy
-
-        strategy = EmpiricalEdgeStrategy()
-        assert (
-            strategy.min_edge >= 0.10
-        ), f"min_edge should be >=0.10, got {strategy.min_edge}"
-        assert (
-            strategy.min_ev_per_dollar >= 0.15
-        ), f"min_ev should be >=0.15, got {strategy.min_ev_per_dollar}"
-
     def test_crypto_v3_obi_threshold(self):
         from src.strategies.crypto_strategy import Crypto15mTrendStrategyV3
 

@@ -30,14 +30,12 @@ def build_btc_strategies():
     from src.strategies.ml_btc_15m import MLBtc15mStrategy
     from src.strategies.latency_arb import LatencyArbStrategy
     from src.strategies.longshot_fader_v2 import LongshotFaderV2
-    from src.strategies.time_decay import TimeDecayScalper
     from src.strategies.cross_spread_arb import CrossSpreadArbStrategy
 
     return {
         "ml_btc_15m": MLBtc15mStrategy(min_edge=0.03),
         "latency_arb": LatencyArbStrategy(),
         "longshot_fader_v2": LongshotFaderV2(min_edge=0.02),
-        "time_decay": TimeDecayScalper(min_probability=0.85, spot_distance_min=100.0),
         "cross_spread_arb": CrossSpreadArbStrategy(),
     }
 

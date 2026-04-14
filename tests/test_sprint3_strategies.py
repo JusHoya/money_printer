@@ -524,155 +524,6 @@ class TestLongshotFaderV2:
 
 
 # ===========================================================================
-# 3.6  Market Maker Strategy
-# ===========================================================================
-
-
-class TestMarketMakerStrategy:
-    def _make_strategy(self):
-        from src.strategies.market_maker import MarketMakerStrategy
-
-        return MarketMakerStrategy(gamma=0.20, min_spread=0.04)
-
-    def test_quotes_on_wide_spread_market(self):
-        strat = self._make_strategy()
-        md = make_btc_market(bid=0.40, ask=0.55)  # spread=0.15 > 0.04
-        signals = strat.analyze(md)
-        # Should generate up to 2 signals (bid + ask)
-        assert len(signals) >= 1
-        sides = {s.contract_side for s in signals}
-        # Market maker quotes both sides
-        assert len(sides) >= 1
-
-    def test_no_quotes_on_tight_spread(self):
-        strat = self._make_strategy()
-        md = make_btc_market(bid=0.50, ask=0.52)  # spread=0.02 < 0.04
-        assert strat.analyze(md) == []
-
-    def test_respects_per_market_cap(self):
-        strat = self._make_strategy()
-        strat._inventory["KXBTC15M-26MAR19-1430-T84000"] = strat.max_per_market
-        md = make_btc_market(bid=0.40, ask=0.55)
-        assert strat.analyze(md) == []
-
-    def test_respects_global_cap(self):
-        strat = self._make_strategy()
-        strat._global_count = strat.max_global
-        md = make_btc_market(bid=0.40, ask=0.55)
-        assert strat.analyze(md) == []
-
-    def test_inventory_tracking(self):
-        strat = self._make_strategy()
-        assert strat._inventory.get("SYM", 0) == 0
-        strat.on_fill("SYM", "buy", 2)
-        assert strat._inventory["SYM"] == 2
-        strat.on_fill("SYM", "sell", 1)
-        assert strat._inventory["SYM"] == 1
-        strat.on_close("SYM", 1)
-        assert "SYM" not in strat._inventory
-
-    def test_both_sides_have_stop_loss(self):
-        strat = self._make_strategy()
-        md = make_btc_market(bid=0.30, ask=0.60)  # Wide spread
-        signals = strat.analyze(md)
-        for sig in signals:
-            assert hasattr(sig, "stop_loss")
-            assert sig.stop_loss > 0
-
-
-# ===========================================================================
-# 3.7  Time Decay Scalper
-# ===========================================================================
-
-
-class TestTimeDecayScalper:
-    def _make_strategy(self):
-        from src.strategies.time_decay import TimeDecayScalper
-
-        return TimeDecayScalper(
-            min_probability=0.90,
-            max_entry_price=0.93,
-            spot_distance_min=150.0,
-        )
-
-    def test_buy_yes_when_spot_clearly_above_strike(self):
-        strat = self._make_strategy()
-        # minute 11 of cycle (within 10-13 window)
-        t = datetime(2026, 3, 19, 14, 41, 0)
-        md = make_btc_market(
-            symbol="KXBTC15M-26MAR19-1430-T84000",
-            bid=0.90,
-            ask=0.92,
-            spot_price=84300.0,  # $300 > strike → above distance_min
-            timestamp=t,
-        )
-        signals = strat.analyze(md)
-        assert len(signals) == 1
-        assert signals[0].contract_side == "YES"
-        assert signals[0].limit_price <= 0.93
-        assert getattr(signals[0], "disable_profit_targets", False) is True
-
-    def test_buy_no_when_spot_clearly_below_strike(self):
-        strat = self._make_strategy()
-        t = datetime(2026, 3, 19, 14, 41, 0)
-        md = make_btc_market(
-            symbol="KXBTC15M-26MAR19-1430-T84000",
-            bid=0.08,
-            ask=0.10,  # YES very cheap → NO bid high
-            spot_price=83700.0,  # $300 below strike
-            timestamp=t,
-        )
-        signals = strat.analyze(md)
-        assert len(signals) == 1
-        assert signals[0].contract_side == "NO"
-
-    def test_no_signal_outside_time_window(self):
-        strat = self._make_strategy()
-        t = datetime(2026, 3, 19, 14, 35, 0)  # Minute 5 — too early
-        md = make_btc_market(
-            bid=0.90,
-            ask=0.92,
-            spot_price=84300.0,
-            timestamp=t,
-        )
-        assert strat.analyze(md) == []
-
-    def test_no_signal_when_spot_near_strike(self):
-        strat = self._make_strategy()
-        t = datetime(2026, 3, 19, 14, 41, 0)
-        md = make_btc_market(
-            bid=0.50,
-            ask=0.55,
-            spot_price=84050.0,  # Only $50 from strike
-            timestamp=t,
-        )
-        assert strat.analyze(md) == []
-
-    def test_no_signal_when_ask_too_expensive(self):
-        strat = self._make_strategy()
-        t = datetime(2026, 3, 19, 14, 41, 0)
-        md = make_btc_market(
-            bid=0.95,
-            ask=0.97,  # above max_entry_price of 0.93
-            spot_price=84300.0,
-            timestamp=t,
-        )
-        assert strat.analyze(md) == []
-
-    def test_one_trade_per_cycle(self):
-        strat = self._make_strategy()
-        t = datetime(2026, 3, 19, 14, 41, 0)
-        md = make_btc_market(bid=0.90, ask=0.92, spot_price=84300.0, timestamp=t)
-        assert len(strat.analyze(md)) == 1
-
-        # Same cycle again — already traded
-        md2 = make_btc_market(
-            bid=0.90, ask=0.92, spot_price=84300.0, timestamp=t + timedelta(seconds=30)
-        )
-        assert strat.analyze(md2) == []
-
-
-# ===========================================================================
 # 3.8  Cross-Spread Arbitrage
 # ===========================================================================
 
@@ -797,8 +648,6 @@ class TestYesNoSupport:
             ("src.strategies.ml_weather", "MLWeatherStrategy"),
             ("src.strategies.latency_arb", "LatencyArbStrategy"),
             ("src.strategies.longshot_fader_v2", "LongshotFaderV2"),
-            ("src.strategies.market_maker", "MarketMakerStrategy"),
-            ("src.strategies.time_decay", "TimeDecayScalper"),
             ("src.strategies.cross_spread_arb", "CrossSpreadArbStrategy"),
         ],
     )
@@ -823,8 +672,6 @@ class TestYesNoSupport:
             ("src.strategies.ml_weather", "MLWeatherStrategy"),
             ("src.strategies.latency_arb", "LatencyArbStrategy"),
             ("src.strategies.longshot_fader_v2", "LongshotFaderV2"),
-            ("src.strategies.market_maker", "MarketMakerStrategy"),
-            ("src.strategies.time_decay", "TimeDecayScalper"),
             ("src.strategies.cross_spread_arb", "CrossSpreadArbStrategy"),
         ],
     )

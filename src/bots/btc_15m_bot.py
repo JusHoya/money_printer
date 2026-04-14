@@ -26,12 +26,9 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # Relaxed thresholds for data collection / ML training bootstrap
         self.strategies = {
             "cross_arb": CrossSpreadArbStrategy(),
-            # "empirical_edge": DISABLED — 2231 trades, -$38,452 PnL, 47.8% WR, expectancy -$17.24/trade
             "latency_arb": LatencyArbStrategy(),
-            # "time_decay": DISABLED — 25% WR, -$769 over 20 trades, avg entry 0.91
             "longshot_v2": LongshotFaderV2(),
             "ml_btc_15m": MLBtc15mStrategy(),
-            # "late_sniper": Crypto15mLateSniper(),  # DISABLED: 8% WR, -$8,310 over 113 trades
         }
 
     def setup(self, kalshi, coinbase=None, nws=None, **kwargs):
@@ -127,12 +124,9 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             )
         for strat_key, strat_name in [
             ("cross_arb", "Cross-Spread Arb"),
-            # ("empirical_edge", "Empirical Edge"),  # DISABLED — see strategies dict
             ("latency_arb", "Latency Arb"),
-            # ("time_decay", "Time Decay"),  # DISABLED
             ("longshot_v2", "LongShot Fader V2"),
             ("ml_btc_15m", "ML BTC 15m"),
-            # ("late_sniper", "Late Sniper"),  # DISABLED
         ]:
             signals = self.strategies[strat_key].analyze(btc_data)
             if signals and self.ticks % 10 == 0:

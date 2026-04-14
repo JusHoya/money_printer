@@ -72,7 +72,6 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 ### Strategies (`src/strategies/`)
 - **crypto_strategy.py**: Multiple versions (V1-V3) of crypto momentum/trend strategies plus `CryptoLongShotFader`. Uses 15-min momentum breakouts, RSI/MACD confirmation, mean reversion, trailing stops.
 - **weather_strategy.py**: V1/V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction.
-- **bracket_strategy.py**: Iron condor strategy for range-bound markets (rates, yields, FX, weather brackets).
 
 ### Dashboard (`src/visualization/dashboard.py`)
 Real-time terminal UI showing PnL, market feeds, strategy signals, and position tracking.
