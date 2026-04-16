@@ -132,6 +132,11 @@ class MLBtcHourlyStrategy(Strategy):
         if tte_s < 60:
             return signals
 
+        # Don't enter freshly-opened contracts (first 3 min of hourly) — unstable pricing
+        if tte_s > 3420:  # 57 minutes = 95% of 60min contract
+            logger.debug('[ML BTC Hourly] SKIP fresh contract: tte=%.0fs', tte_s)
+            return signals
+
         # ML prediction
         md_for_pred = MarketData(
             symbol=sym,
