@@ -111,7 +111,7 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # Risk manager (rate limit + cooldowns) controls trade frequency.
         now = datetime.now()
         minute_in_interval = now.minute % 15
-        if minute_in_interval < 1 or 5 <= minute_in_interval <= 9:
+        if minute_in_interval < 1 or 6 <= minute_in_interval <= 8:
             return []
 
         # Waterfall: risk-free arb > latency > time decay > longshot > ML > sniper
