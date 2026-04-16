@@ -900,10 +900,11 @@ class OrchestratorEngine:
         )
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
-        # Discord notification (fire-and-forget)
-        discord_url = os.getenv("DISCORD_WEBHOOK_URL")
-        if discord_url:
-            send_discord_notification(discord_url, cycle_record, journal_count)
+        # Discord notification — DISABLED by operator directive (2026-04-16)
+        # Updates moved to Hermes Agent cron in #herms_space channel.
+        # discord_url = os.getenv("DISCORD_WEBHOOK_URL")
+        # if discord_url:
+        #     send_discord_notification(discord_url, cycle_record, journal_count)
 
     def _graduate_model(self, hours: float, pnl: float):
         """Model is profitable after 8+ hours — save and exit training loop."""
