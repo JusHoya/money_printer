@@ -1,6 +1,6 @@
 """Money Printer trading system integration plugin for Hermes Agent.
 
-Provides 12 tools (prefixed mp_*) that let the agent monitor and control
+Provides 13 tools (prefixed mp_*) that let the agent monitor and control
 the trading system via its HTTP API (localhost:8050) and data files.
 
 Deploy:  ln -sf ~/money_printer/hermes_plugin ~/.hermes/plugins/money-printer
@@ -307,6 +307,117 @@ def read_log_tail(params):
         return json.dumps({"ok": False, "error": str(e)})
 
 
+def get_claude_usage(params):
+    """Compute Claude API token usage from Hermes session files."""
+    try:
+        hours = params.get("hours", 24)
+        sessions_dir = os.path.expanduser("~/.hermes/sessions")
+
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            hours=hours
+        )
+
+        session_files = sorted(
+            glob.glob(os.path.join(sessions_dir, "session_*.json")),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+
+        by_model = defaultdict(
+            lambda: {
+                "sessions": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 0,
+            }
+        )
+        by_platform = defaultdict(lambda: {"sessions": 0, "total_tokens": 0})
+        total_sessions = 0
+        total_messages = 0
+
+        for sf in session_files:
+            try:
+                with open(sf) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            start = data.get("session_start", data.get("created_at", ""))
+            if not start:
+                continue
+            try:
+                dt = datetime.fromisoformat(start.replace("Z", ""))
+            except ValueError:
+                continue
+            if dt < cutoff:
+                continue
+
+            model = data.get("model", "unknown")
+            platform = data.get("platform", "unknown")
+            msg_count = data.get("message_count", 0)
+            if isinstance(msg_count, int):
+                total_messages += msg_count
+
+            msgs = data.get("messages", [])
+            session_input = 0
+            session_output = 0
+            session_cache_read = 0
+            session_cache_write = 0
+
+            for msg in msgs:
+                usage = msg.get("usage", {})
+                if usage:
+                    session_input += usage.get("input_tokens", 0)
+                    session_output += usage.get("output_tokens", 0)
+                    session_cache_read += usage.get(
+                        "cache_read_input_tokens", usage.get("cache_read_tokens", 0)
+                    )
+                    session_cache_write += usage.get(
+                        "cache_creation_input_tokens",
+                        usage.get("cache_write_tokens", 0),
+                    )
+
+            session_total = (
+                session_input
+                + session_output
+                + session_cache_read
+                + session_cache_write
+            )
+
+            by_model[model]["sessions"] += 1
+            by_model[model]["input_tokens"] += session_input
+            by_model[model]["output_tokens"] += session_output
+            by_model[model]["cache_read_tokens"] += session_cache_read
+            by_model[model]["cache_write_tokens"] += session_cache_write
+            by_model[model]["total_tokens"] += session_total
+
+            by_platform[platform]["sessions"] += 1
+            by_platform[platform]["total_tokens"] += session_total
+
+            total_sessions += 1
+
+        grand_total = sum(m["total_tokens"] for m in by_model.values())
+
+        return json.dumps(
+            {
+                "ok": True,
+                "hours": hours,
+                "sessions": total_sessions,
+                "messages": total_messages,
+                "total_tokens": grand_total,
+                "by_model": dict(by_model),
+                "by_platform": dict(by_platform),
+                "billing_mode": "subscription (Claude Max)"
+                if not os.getenv("ANTHROPIC_API_KEY")
+                else "api_key",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Tool schemas ──────────────────────────────────────────────────
 
 TOOLS = {
@@ -460,6 +571,23 @@ TOOLS = {
             },
         },
         "handler": read_log_tail,
+    },
+    "mp_claude_usage": {
+        "schema": {
+            "name": "mp_claude_usage",
+            "description": "Get Claude API token usage from Hermes session history. Shows total tokens, per-model breakdown (Opus vs Sonnet), per-platform breakdown (cron vs discord vs cli), and billing mode (subscription vs API key).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hours": {
+                        "type": "integer",
+                        "description": "Lookback window in hours (default 24)",
+                    }
+                },
+                "required": [],
+            },
+        },
+        "handler": get_claude_usage,
     },
 }
 
