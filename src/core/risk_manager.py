@@ -288,7 +288,6 @@ class RiskManager:
 
         # Sprint 6: Hard cap at 50 contracts (research: 120-170 was way too high)
         return max(1, min(quantity, 50))
-
     def get_current_exposure(self, category: Optional[str] = None) -> float:
         """
         Sums the cost of active positions.
@@ -537,6 +536,16 @@ class RiskManager:
         strike: float = None,
     ):
         """Call this AFTER a trade is executed."""
+        # Hard position size cap: never record more than 50 contracts per entry
+        MAX_CONTRACTS = 50
+        if quantity > MAX_CONTRACTS:
+            logger.warning(
+                "[Risk] Position size capped: %d → %d contracts (%s)",
+                quantity,
+                MAX_CONTRACTS,
+                symbol,
+            )
+            quantity = MAX_CONTRACTS
         # OMS HANDOFF
         # Use exact quantity and price from the signal
         self.exchange.open_position(
