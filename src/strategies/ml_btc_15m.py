@@ -84,14 +84,18 @@ class MLBtc15mStrategy(Strategy):
         # Build MarketData with spot price for predictor
         spot = extra.get("spot_price", market_data.price)
 
-        # Strike proximity filter: skip near-ATM contracts (|spot-strike|/strike < 0.3%)
-        # These are the primary driver of EARLY_SETTLEMENT losses.
-        if spot > 1.0 and (abs(spot - strike_val) / strike_val) < 0.003:
+        # Strike proximity filter: skip near-ATM contracts (EARLY_SETTLEMENT risk).
+        # Adaptive threshold: tighter during low-vol overnight (UTC 04-12) to capture more trades,
+        # wider during high-vol daytime to avoid choppy settlements.
+        hour_utc = now.hour if hasattr(now, 'hour') else datetime.now().hour
+        prox_threshold = 0.0015 if 4 <= hour_utc <= 12 else 0.003
+        if spot > 1.0 and (abs(spot - strike_val) / strike_val) < prox_threshold:
             logger.debug(
-                "[ML BTC 15m] SKIP near-ATM: spot=%.2f strike=%.0f proximity=%.4f%%",
+                "[ML BTC 15m] SKIP near-ATM: spot=%.2f strike=%.0f proximity=%.4f%% (threshold=%.2f%%)",
                 spot,
                 strike_val,
                 abs(spot - strike_val) / strike_val * 100,
+                prox_threshold * 100,
             )
             return signals
 
