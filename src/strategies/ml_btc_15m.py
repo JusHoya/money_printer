@@ -83,6 +83,18 @@ class MLBtc15mStrategy(Strategy):
 
         # Build MarketData with spot price for predictor
         spot = extra.get("spot_price", market_data.price)
+
+        # Strike proximity filter: skip near-ATM contracts (|spot-strike|/strike < 0.3%)
+        # These are the primary driver of EARLY_SETTLEMENT losses.
+        if spot > 1.0 and (abs(spot - strike_val) / strike_val) < 0.003:
+            logger.debug(
+                "[ML BTC 15m] SKIP near-ATM: spot=%.2f strike=%.0f proximity=%.4f%%",
+                spot,
+                strike_val,
+                abs(spot - strike_val) / strike_val * 100,
+            )
+            return signals
+
         md_for_pred = MarketData(
             symbol=market_data.symbol,
             timestamp=now,

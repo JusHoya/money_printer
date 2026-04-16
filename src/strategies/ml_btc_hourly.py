@@ -110,6 +110,18 @@ class MLBtcHourlyStrategy(Strategy):
         if abs(strike - current_spot) > 750:
             return signals
 
+        # Strike proximity filter: skip near-ATM contracts (|spot-strike|/strike < 0.3%)
+        # These are the primary driver of EARLY_SETTLEMENT losses.
+        proximity = abs(strike - current_spot) / strike
+        if proximity < 0.003:
+            logger.debug(
+                "[ML Hourly] SKIP near-ATM: spot=%.2f strike=%.0f proximity=%.4f%%",
+                current_spot,
+                strike,
+                proximity * 100,
+            )
+            return signals
+
         # TTE for hourly contracts (seconds until top-of-next-hour)
         close_time = extra.get("close_time")
         if close_time and isinstance(close_time, datetime):
