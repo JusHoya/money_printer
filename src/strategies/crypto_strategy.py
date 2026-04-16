@@ -871,7 +871,7 @@ class CryptoHourlyStrategyV3(Strategy):
     def __init__(
         self,
         confidence_margin: float = 50.0,
-        obi_threshold: float = 0.60,
+        obi_threshold: float = 0.70,
         cooldown_seconds: int = 180,
     ):
         self.confidence_margin = confidence_margin
@@ -943,6 +943,15 @@ class CryptoHourlyStrategyV3(Strategy):
             if dist > 750:
                 logger.debug(
                     f"[HourlyV3] Strike ${strike_val} too far from spot ${current_spot:.2f} (dist={dist:.0f})"
+                )
+                return []
+            # Strike proximity filter: skip near-ATM contracts (|spot-strike|/strike < 0.3%)
+            # These are the primary driver of EARLY_SETTLEMENT losses.
+            proximity = dist / strike_val
+            if proximity < 0.003:
+                logger.debug(
+                    f"[HourlyV3] SKIP near-ATM: spot={current_spot:.2f} strike={strike_val:.0f} "
+                    f"proximity={proximity*100:.4f}%"
                 )
                 return []
             target_time = (datetime.now() + timedelta(hours=1)).replace(
