@@ -95,7 +95,7 @@ class RiskManager:
 
         # Sprint 6: escalating cooldown after consecutive losses
         self.consecutive_losses: dict = {}  # strategy_name -> count
-        self.ESCALATING_COOLDOWNS = [120, 300, 1800]  # 2min, 5min, 30min
+        self.ESCALATING_COOLDOWNS = [60, 180, 600]  # 1min, 3min, 10min
         self.strategy_cooldown: dict = {}  # strategy_name -> cooldown_until
 
     def _on_trade_close(self, position: dict):
