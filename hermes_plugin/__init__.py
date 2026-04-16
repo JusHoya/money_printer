@@ -466,8 +466,16 @@ TOOLS = {
 
 # ── Plugin registration ───────────────────────────────────────────
 
+TOOLSET = "money-printer"
+
 
 def register(ctx):
     """Register all Money Printer tools with Hermes."""
     for name, tool in TOOLS.items():
-        ctx.register_tool(name, tool["schema"], tool["handler"])
+        ctx.register_tool(
+            name=name,
+            toolset=TOOLSET,
+            schema=tool["schema"],
+            handler=lambda params, _h=tool["handler"], **kw: _h(params),
+            description=tool["schema"].get("description", ""),
+        )
