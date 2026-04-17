@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 # City configuration (aligned with weather_strategy.py)
 CITY_CONFIG = {
     "KXHIGHNY": {"station": "KNYC", "name": "New York", "bias_f": -0.5},
-    "KXHIGHCHI": {"station": "KMDW", "name": "Chicago", "bias_f": 0.8},
+    # bias_f reset to 0.0 on 2026-04-16 pending empirical retune (n >= 10 paired days)
+    "KXHIGHCHI": {"station": "KMDW", "name": "Chicago", "bias_f": 0.0},
     "KXHIGHLAX": {"station": "KLAX", "name": "Los Angeles", "bias_f": 0.2},
     "KXHIGHMIA": {"station": "KMIA", "name": "Miami", "bias_f": -0.3},
     "KXHIGHDFW": {"station": "KDFW", "name": "Dallas", "bias_f": 1.0},

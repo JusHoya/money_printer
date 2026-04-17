@@ -31,7 +31,11 @@ CITY_CONFIG = {
         "station": "KMDW",
         "metar_station": "KORD",
         "name": "Chicago (Midway)",
-        "bias_f": 0.8,  # NWS over-predicts Chicago highs (Great Plains effect)
+        # bias_f reset to 0.0 on 2026-04-16 pending 7-day data collection.
+        # Prior value of 0.8 was set 2026-04-05 without empirical data.
+        # Forecast+actual pairs are now logged via ml_context["nws_forecast_high"]
+        # for retune once n >= 10 paired days are available.
+        "bias_f": 0.0,
         "accuracy_window_days": 2,
     },
     "KXHIGHLAX": {
@@ -406,6 +410,14 @@ class WeatherArbitrageStrategyV2(Strategy):
         # Calculate edge (difference between forecast and strike)
         edge = abs(nws_high - strike_val)
 
+        # Tag raw NWS forecast onto signals for trade journal instrumentation.
+        # Downstream (mixins.py ml_context) picks up nws_forecast_high so each
+        # journal entry records the forecast at trade time. Used for bias retune.
+        def _tag_forecast(sig):
+            if raw_nws_high is not None:
+                sig.nws_forecast_high = float(raw_nws_high)
+            return sig
+
         # Only trade if edge exceeds minimum threshold
         if edge < self.min_edge_degrees:
             return []
@@ -421,25 +433,25 @@ class WeatherArbitrageStrategyV2(Strategy):
                     f"[MeteorV2] 🌡️ FORECAST LONG: {nws_high:.1f}°F > {strike_val}°F (conf={final_confidence:.2f})"
                 )
                 signals.append(
-                    TradeSignal(
+                    _tag_forecast(TradeSignal(
                         symbol=symbol,
                         side="buy",
                         quantity=50,
                         limit_price=market_ask,
                         confidence=final_confidence,
-                    )
+                    ))
                 )
             elif nws_high < (strike_val - self.min_edge_degrees) and market_bid > 0.20:
                 logger.info(
                     f"[MeteorV2] ❄️ FORECAST SHORT: {nws_high:.1f}°F < {strike_val}°F (conf={final_confidence:.2f}) BUY NO"
                 )
-                sig = TradeSignal(
+                sig = _tag_forecast(TradeSignal(
                     symbol=symbol,
                     side="buy",
                     quantity=50,
                     limit_price=1.0 - market_bid,
                     confidence=final_confidence,
-                )
+                ))
                 sig.contract_side = "NO"
                 sig.stop_loss = 0.25
                 signals.append(sig)
@@ -447,25 +459,25 @@ class WeatherArbitrageStrategyV2(Strategy):
             # Below Contract
             if nws_high < (strike_val - self.min_edge_degrees) and market_ask < 0.80:
                 signals.append(
-                    TradeSignal(
+                    _tag_forecast(TradeSignal(
                         symbol=symbol,
                         side="buy",
                         quantity=50,
                         limit_price=market_ask,
                         confidence=final_confidence,
-                    )
+                    ))
                 )
             elif nws_high > (strike_val + self.min_edge_degrees) and market_bid > 0.20:
                 logger.info(
                     f"[MeteorV2] FORECAST SHORT (Below): BUY NO (conf={final_confidence:.2f})"
                 )
-                sig = TradeSignal(
+                sig = _tag_forecast(TradeSignal(
                     symbol=symbol,
                     side="buy",
                     quantity=50,
                     limit_price=1.0 - market_bid,
                     confidence=final_confidence,
-                )
+                ))
                 sig.contract_side = "NO"
                 sig.stop_loss = 0.25
                 signals.append(sig)

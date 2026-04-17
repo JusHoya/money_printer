@@ -444,6 +444,7 @@ class SignalProcessorMixin:
                         "model_used": getattr(sig, "model_used", None),
                         "btc_spot": getattr(sig, "btc_spot", None),
                         "tte_at_entry": getattr(sig, "tte_at_entry", None),
+                        "nws_forecast_high": getattr(sig, "nws_forecast_high", None),
                     }
                 traded = True
             else:

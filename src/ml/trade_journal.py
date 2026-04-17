@@ -36,6 +36,10 @@ class TradeOutcome:
     btc_spot_at_entry: Optional[float] = None
     prediction_correct: Optional[bool] = None
     edge_at_entry: Optional[float] = None
+    # Weather-specific: NWS raw forecast high at trade entry (°F).
+    # Required for empirical bias retune — paired with actual settled high
+    # to compute: bias_sample = actual_high - nws_forecast_high
+    nws_forecast_high: Optional[float] = None
 
     @classmethod
     def from_position(cls, position: dict) -> "TradeOutcome":
@@ -106,6 +110,9 @@ class TradeOutcome:
             else None,
             prediction_correct=prediction_correct,
             edge_at_entry=edge,
+            nws_forecast_high=float(ml["nws_forecast_high"])
+            if ml.get("nws_forecast_high") is not None
+            else None,
         )
 
 
