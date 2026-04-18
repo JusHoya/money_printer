@@ -155,7 +155,13 @@ class ModelPredictor:
             cls = getattr(mod, class_name)
 
             if model_file.exists():
-                instance = cls(model_path=str(model_file))
+                # ProbabilityCalibrator has no model_path kwarg; use no-arg
+                # init + .load().  All other model classes accept model_path.
+                try:
+                    instance = cls(model_path=str(model_file))
+                except TypeError:
+                    instance = cls()
+                    instance.load(str(model_file))
                 mtime = datetime.fromtimestamp(
                     model_file.stat().st_mtime, tz=timezone.utc
                 )

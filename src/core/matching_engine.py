@@ -4,7 +4,65 @@ from dataclasses import dataclass
 from enum import Enum
 import re
 import math
+import json
+import os
+import tempfile
+from pathlib import Path
 from src.utils.logger import logger
+
+# ---------------------------------------------------------------------------
+# Persistence helpers
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_STATE_FILE = _REPO_ROOT / "data" / "exchange_state.json"
+_SCHEMA_VERSION = 1
+
+
+def _dt_to_str(v):
+    """Convert datetime to ISO string; pass through non-datetime values."""
+    if isinstance(v, datetime):
+        return v.isoformat()
+    return v
+
+
+def _str_to_dt(v):
+    """Convert ISO string back to datetime where applicable."""
+    if isinstance(v, str):
+        try:
+            return datetime.fromisoformat(v)
+        except ValueError:
+            pass
+    return v
+
+
+def _serialize_position(pos: dict) -> dict:
+    """Deep-copy a position dict and convert all datetime fields to strings."""
+    out = {}
+    for k, v in pos.items():
+        if isinstance(v, datetime):
+            out[k] = v.isoformat()
+        elif isinstance(v, list):
+            # profit_targets list contains plain dicts — no datetimes inside
+            out[k] = v
+        else:
+            out[k] = v
+    return out
+
+
+def _deserialize_position(pos: dict) -> dict:
+    """Restore datetime fields in a deserialized position dict."""
+    dt_keys = {"open_time", "close_time", "expiration_time"}
+    out = {}
+    for k, v in pos.items():
+        if k in dt_keys and isinstance(v, str):
+            try:
+                out[k] = datetime.fromisoformat(v)
+            except ValueError:
+                out[k] = None
+        else:
+            out[k] = v
+    return out
 
 
 # ==============================================================================
@@ -270,7 +328,7 @@ class SimulatedExchange:
     - Full order audit trail
     """
 
-    def __init__(self, on_close=None):
+    def __init__(self, on_close=None, state_file: Optional[Path] = None):
         self.positions = []  # List of active trades
         self.closed_trades = []  # History
         self.unrealized_pnl = 0.0
@@ -289,6 +347,128 @@ class SimulatedExchange:
 
         # Sprint 4: order audit trail
         self.order_audit: list = []
+
+        # Sprint 8: disk persistence.
+        # When state_file is None persistence is DISABLED — no reads or writes.
+        # Pass state_file explicitly (e.g. _DEFAULT_STATE_FILE) to enable.
+        self._state_file: Optional[Path] = (
+            Path(state_file) if state_file is not None else None
+        )
+        self._load_state()
+
+    # ------------------------------------------------------------------
+    # Sprint 8: persistence helpers
+    # ------------------------------------------------------------------
+
+    def _load_state(self):
+        """Load exchange state from disk on startup.
+
+        If state_file is None (persistence disabled), returns immediately.
+        If the file is missing, start fresh (normal cold-start).
+        If the file is corrupt or has the wrong schema_version, rename it
+        to ``*.corrupt-<timestamp>`` and start fresh without crashing.
+        """
+        if self._state_file is None:
+            return  # Persistence disabled
+
+        path = self._state_file
+        if not path.exists():
+            return  # Fresh start — nothing to restore
+
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+
+            if data.get("schema_version") != _SCHEMA_VERSION:
+                raise ValueError(
+                    f"Unexpected schema_version {data.get('schema_version')!r}"
+                )
+
+            # Restore scalar counters
+            self.realized_pnl = float(data.get("realized_pnl", 0.0))
+            self.unrealized_pnl = float(data.get("unrealized_pnl", 0.0))
+            self.total_fees_paid = float(data.get("total_fees_paid", 0.0))
+            self.maker_fills = int(data.get("maker_fills", 0))
+            self.taker_fills = int(data.get("taker_fills", 0))
+
+            # Restore open positions (deserialize datetime strings)
+            self.positions = [
+                _deserialize_position(p) for p in data.get("positions", [])
+            ]
+
+            # Restore closed trades (deserialize datetime strings)
+            self.closed_trades = [
+                _deserialize_position(p) for p in data.get("closed_trades", [])
+            ]
+
+            logger.info(
+                f"[OMS] Loaded exchange state: {len(self.positions)} open, "
+                f"{len(self.closed_trades)} closed, realized=${self.realized_pnl:+.2f}"
+            )
+
+        except Exception as exc:
+            ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+            corrupt_path = path.with_suffix(f".json.corrupt-{ts}")
+            try:
+                path.rename(corrupt_path)
+            except Exception:
+                pass  # Best-effort rename
+            logger.warning(
+                f"[OMS] Corrupt/incompatible exchange state file ({exc}). "
+                f"Renamed to {corrupt_path.name}. Starting fresh."
+            )
+            # Reset to blank slate (defaults already set in __init__ before _load_state)
+            self.positions = []
+            self.closed_trades = []
+            self.realized_pnl = 0.0
+            self.unrealized_pnl = 0.0
+            self.total_fees_paid = 0.0
+            self.maker_fills = 0
+            self.taker_fills = 0
+
+    def _save_state(self):
+        """Atomically persist exchange state to disk.
+
+        No-op when state_file is None (persistence disabled).
+        Uses ``tempfile + os.replace`` so a crash mid-write cannot corrupt
+        the state file.  The ``data/`` directory is created if missing.
+        """
+        if self._state_file is None:
+            return  # Persistence disabled
+
+        path = self._state_file
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            payload = {
+                "schema_version": _SCHEMA_VERSION,
+                "saved_at": datetime.now().isoformat(),
+                "realized_pnl": self.realized_pnl,
+                "unrealized_pnl": self.unrealized_pnl,
+                "total_fees_paid": self.total_fees_paid,
+                "maker_fills": self.maker_fills,
+                "taker_fills": self.taker_fills,
+                "positions": [_serialize_position(p) for p in self.positions],
+                "closed_trades": [_serialize_position(p) for p in self.closed_trades],
+            }
+
+            # Atomic write: write to temp file in the same directory, then rename
+            dir_ = str(path.parent)
+            fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, indent=2, default=str)
+                os.replace(tmp_path, str(path))
+            except Exception:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+
+        except Exception as exc:
+            logger.warning(f"[OMS] Failed to persist exchange state: {exc}")
 
     def open_position(
         self,
@@ -723,6 +903,9 @@ class SimulatedExchange:
                 if self.on_close:
                     self.on_close(partial_trade)
 
+                # Sprint 8: persist after each partial-close event
+                self._save_state()
+
                 if fully_closed or pos["quantity"] <= 0:
                     if pos in self.positions:
                         self.positions.remove(pos)
@@ -842,6 +1025,9 @@ class SimulatedExchange:
 
             if self.on_close:
                 self.on_close(pos)
+
+            # Sprint 8: persist state after every close
+            self._save_state()
 
         except Exception as e:
             logger.error(f"[OMS] Error closing position: {e}")

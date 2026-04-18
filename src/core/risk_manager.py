@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, date, timedelta
 
-from src.core.matching_engine import SimulatedExchange
+from src.core.matching_engine import SimulatedExchange, _DEFAULT_STATE_FILE
 from src.core.fee_calculator import ev_after_fees, compute_fee  # noqa: F401
 from src.utils.logger import logger
 
@@ -53,11 +53,15 @@ class RiskManager:
     - Circuit breaker integration
     """
 
-    def __init__(self, starting_balance: float = 100.0):
+    def __init__(self, starting_balance: float = 100.0, persist_state: bool = False):
         self.balance = starting_balance
         self.starting_balance_day = starting_balance
-        # Pass callback to OMS
-        self.exchange = SimulatedExchange(on_close=self._on_trade_close)
+        # Pass callback to OMS. Production (run_dashboard.py) passes persist_state=True
+        # so positions survive VM restarts; tests/backtests leave it False to stay in-memory.
+        self.exchange = SimulatedExchange(
+            on_close=self._on_trade_close,
+            state_file=_DEFAULT_STATE_FILE if persist_state else None,
+        )
 
         self.daily_pnl = 0.0
         self.unrealized_pnl = 0.0
@@ -288,6 +292,7 @@ class RiskManager:
 
         # Sprint 6: Hard cap at 50 contracts (research: 120-170 was way too high)
         return max(1, min(quantity, 50))
+
     def get_current_exposure(self, category: Optional[str] = None) -> float:
         """
         Sums the cost of active positions.

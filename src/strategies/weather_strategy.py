@@ -433,25 +433,29 @@ class WeatherArbitrageStrategyV2(Strategy):
                     f"[MeteorV2] 🌡️ FORECAST LONG: {nws_high:.1f}°F > {strike_val}°F (conf={final_confidence:.2f})"
                 )
                 signals.append(
-                    _tag_forecast(TradeSignal(
-                        symbol=symbol,
-                        side="buy",
-                        quantity=50,
-                        limit_price=market_ask,
-                        confidence=final_confidence,
-                    ))
+                    _tag_forecast(
+                        TradeSignal(
+                            symbol=symbol,
+                            side="buy",
+                            quantity=50,
+                            limit_price=market_ask,
+                            confidence=final_confidence,
+                        )
+                    )
                 )
             elif nws_high < (strike_val - self.min_edge_degrees) and market_bid > 0.20:
                 logger.info(
                     f"[MeteorV2] ❄️ FORECAST SHORT: {nws_high:.1f}°F < {strike_val}°F (conf={final_confidence:.2f}) BUY NO"
                 )
-                sig = _tag_forecast(TradeSignal(
-                    symbol=symbol,
-                    side="buy",
-                    quantity=50,
-                    limit_price=1.0 - market_bid,
-                    confidence=final_confidence,
-                ))
+                sig = _tag_forecast(
+                    TradeSignal(
+                        symbol=symbol,
+                        side="buy",
+                        quantity=50,
+                        limit_price=1.0 - market_bid,
+                        confidence=final_confidence,
+                    )
+                )
                 sig.contract_side = "NO"
                 sig.stop_loss = 0.25
                 signals.append(sig)
@@ -459,25 +463,29 @@ class WeatherArbitrageStrategyV2(Strategy):
             # Below Contract
             if nws_high < (strike_val - self.min_edge_degrees) and market_ask < 0.80:
                 signals.append(
-                    _tag_forecast(TradeSignal(
-                        symbol=symbol,
-                        side="buy",
-                        quantity=50,
-                        limit_price=market_ask,
-                        confidence=final_confidence,
-                    ))
+                    _tag_forecast(
+                        TradeSignal(
+                            symbol=symbol,
+                            side="buy",
+                            quantity=50,
+                            limit_price=market_ask,
+                            confidence=final_confidence,
+                        )
+                    )
                 )
             elif nws_high > (strike_val + self.min_edge_degrees) and market_bid > 0.20:
                 logger.info(
                     f"[MeteorV2] FORECAST SHORT (Below): BUY NO (conf={final_confidence:.2f})"
                 )
-                sig = _tag_forecast(TradeSignal(
-                    symbol=symbol,
-                    side="buy",
-                    quantity=50,
-                    limit_price=1.0 - market_bid,
-                    confidence=final_confidence,
-                ))
+                sig = _tag_forecast(
+                    TradeSignal(
+                        symbol=symbol,
+                        side="buy",
+                        quantity=50,
+                        limit_price=1.0 - market_bid,
+                        confidence=final_confidence,
+                    )
+                )
                 sig.contract_side = "NO"
                 sig.stop_loss = 0.25
                 signals.append(sig)
@@ -488,203 +496,4 @@ class WeatherArbitrageStrategyV2(Strategy):
         return []
 
 
-class WeatherArbitrageStrategy(Strategy):
-    """
-    The Meteorologist 🌦️ (v4 - Strike Aware)
-    Analyzes NWS Forecasts vs Market Sentiment with T/B Strike awareness.
-    """
-
-    def __init__(self, threshold: float = 0.15):
-        self.threshold = threshold
-
-    def name(self) -> str:
-        return "The Meteorologist"
-
-    def analyze(self, market_data: MarketData) -> List[TradeSignal]:
-        # 0. Warmup Period (Don't trade before 10 AM)
-        if datetime.now().hour < 10:
-            return []
-
-        signals = []
-        extra = market_data.extra
-        symbol = market_data.symbol
-
-        # 1. Source Fidelity
-        source = extra.get("source")
-        if source not in ("live_nws", "live_metar"):
-            return []
-
-        # METAR staleness check
-        if source == "live_metar":
-            metar_age = extra.get("metar_age_seconds", 0)
-            if metar_age > 600:
-                logger.warning(
-                    f"[Meteorologist] METAR data is {metar_age}s old (>{600}s) for {symbol}"
-                )
-
-        # 2. Extract Key Data
-        forecasts = extra.get("forecast")
-        current_temp = extra.get("temperature_f")
-        daily_max_obs = extra.get("max_temp_today_f")
-
-        # Market Sentiment
-        if market_data.bid > 0:
-            market_bid = market_data.bid
-            market_ask = market_data.ask
-        else:
-            return []
-
-        # 3. Parse Ticker for Strike & Date
-        try:
-            parts = symbol.split("-")
-            strike_str = parts[-1]  # e.g. T80 or B85.5
-
-            # Identify Direction: T (Above/Top), B (Below/Bottom)
-            is_above_contract = True
-            if strike_str.startswith("B"):
-                is_above_contract = False
-
-            strike_val = float(re.sub(r"[A-Za-z]", "", strike_str))
-
-            today_str = datetime.now().strftime("%y%b%d").upper()
-            is_today = today_str in symbol
-
-            _kalshi_ticker_base = symbol.split("-")[0]  # noqa: F841
-        except Exception:
-            return []
-
-        # --- MANDATORY PROTECTION: THE WINNER GUARD ---
-        # Determine if the contract has ALREADY won based on daily observations.
-        contract_has_won = False
-        if is_today and daily_max_obs:
-            if is_above_contract:
-                if daily_max_obs >= strike_val:
-                    contract_has_won = True
-            else:
-                # For a 'Below' contract, it's only 'won' if the high is still below strike
-                # AND it's the end of the day.
-                # Actually, a 'Below' contract is ALWAYS 'winning' until the temp breaks the strike.
-                # So we can't say it has 'won' early.
-                # But we CAN say it has 'LOST' if daily_max_obs > strike_val.
-                pass
-
-        # IF LOST:
-        if (
-            is_today
-            and daily_max_obs
-            and not is_above_contract
-            and daily_max_obs > strike_val
-        ):
-            # Below Strike contract has LOST because temp went above. Value = 0.00.
-            # Shorting @ 0.99 here is actually great (if price is still high), but usually price is 0.01.
-            return []
-
-        # IF WON:
-        if contract_has_won:
-            # Above Strike contract has WON. Value = 1.00.
-            if market_ask < 0.98:
-                logger.info(f"[Strategy] 🏆 HIGH MET: {symbol} WON. BUY YES.")
-                signals.append(
-                    TradeSignal(
-                        symbol=symbol,
-                        side="buy",
-                        quantity=100,
-                        limit_price=market_ask,
-                        confidence=1.0,
-                    )
-                )
-            return signals  # No Shorting a winner.
-
-        # --- LOGIC C: INTRADAY REALITY CHECK ---
-        if is_today and current_temp:
-            # Check for 'Below' contract suicide shorting (The bug the user reported)
-            # If it's a 'Below' contract (B85.5) and current temp is 70F.
-            # Betting 'NO' (Shorting) means betting it goes ABOVE 85.5.
-            # If it's late and 70F, betting it hits 85.5 is stupid.
-
-            if not is_above_contract:
-                # We should ONLY short (bet NO/Above) if we are very close to strike or forecast is high
-                pass  # Avoid for now to stop the bleeding
-
-            # Conservative Short for 'Above' contracts
-            if (
-                is_above_contract
-                and daily_max_obs < (strike_val - 2)
-                and current_temp < (strike_val - 3)
-            ):
-                if market_bid > 0.40:
-                    logger.info(f"[Strategy] ❄️ INTRADAY SHORT (Above): {symbol}. SELL.")
-                    signals.append(
-                        TradeSignal(
-                            symbol=symbol,
-                            side="sell",
-                            quantity=50,
-                            limit_price=market_bid,
-                            confidence=0.95,
-                        )
-                    )
-
-            if signals:
-                return signals
-
-        # 4. Forecast-Based Logic
-        if not forecasts:
-            return []
-        target_period = next((p for p in forecasts if p.get("isDaytime")), None)
-        if not target_period:
-            return []
-
-        nws_high = target_period.get("temperature")
-
-        # Forecast Arbitrage
-        # If we expect 90F and strike is T85 -> Buy YES
-        if is_above_contract:
-            if nws_high > (strike_val + 2) and market_ask < 0.80:
-                signals.append(
-                    TradeSignal(
-                        symbol=symbol,
-                        side="buy",
-                        quantity=50,
-                        limit_price=market_ask,
-                        confidence=0.9,
-                    )
-                )
-            elif nws_high < (strike_val - 2) and market_bid > 0.20:
-                signals.append(
-                    TradeSignal(
-                        symbol=symbol,
-                        side="sell",
-                        quantity=50,
-                        limit_price=market_bid,
-                        confidence=0.9,
-                    )
-                )
-        else:
-            # Below Contract (B85): YES means < 85.
-            # If forecast is 70F -> Buy YES.
-            if nws_high < (strike_val - 2) and market_ask < 0.80:
-                signals.append(
-                    TradeSignal(
-                        symbol=symbol,
-                        side="buy",
-                        quantity=50,
-                        limit_price=market_ask,
-                        confidence=0.9,
-                    )
-                )
-            # If forecast is 95F -> Short (Sell YES).
-            elif nws_high > (strike_val + 2) and market_bid > 0.20:
-                signals.append(
-                    TradeSignal(
-                        symbol=symbol,
-                        side="sell",
-                        quantity=50,
-                        limit_price=market_bid,
-                        confidence=0.9,
-                    )
-                )
-
-        return signals
-
-    def _analyze_mock(self, market_data):
-        return []
+# Sprint 8: WeatherArbitrageStrategy (V1) removed — superseded by WeatherArbitrageStrategyV2

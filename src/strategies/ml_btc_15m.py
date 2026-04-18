@@ -87,7 +87,7 @@ class MLBtc15mStrategy(Strategy):
         # Strike proximity filter: skip near-ATM contracts (EARLY_SETTLEMENT risk).
         # Adaptive threshold: tighter during low-vol overnight (UTC 04-12) to capture more trades,
         # wider during high-vol daytime to avoid choppy settlements.
-        hour_utc = now.hour if hasattr(now, 'hour') else datetime.now().hour
+        hour_utc = now.hour if hasattr(now, "hour") else datetime.now().hour
         prox_threshold = 0.0015 if 4 <= hour_utc <= 12 else 0.003
         if spot > 1.0 and (abs(spot - strike_val) / strike_val) < prox_threshold:
             logger.debug(
@@ -135,7 +135,6 @@ class MLBtc15mStrategy(Strategy):
                     confidence=confidence,
                     contract_side="YES",
                 )
-                sig.stop_loss = max(0.01, lp - 0.05)  # Tighten from 8c to 5c
                 sig.strike = strike_val
                 if close_time:
                     sig.expiration_time = close_time
@@ -171,7 +170,6 @@ class MLBtc15mStrategy(Strategy):
                     confidence=confidence,
                     contract_side="NO",
                 )
-                sig.stop_loss = max(0.01, lp - 0.05)  # Tighten from 8c to 5c
                 sig.strike = strike_val
                 if close_time:
                     sig.expiration_time = close_time

@@ -20,7 +20,6 @@ from src.ml.trade_journal import TradeJournal, TradeOutcome
 from src.ml.online_updater import OnlineModelUpdater
 from src.strategies.counter_trade import CounterTradeAnalyzer
 from src.ml.settlement_resolver import SettlementResolver
-from src.notifications.discord import send_discord_notification
 
 # Import bots to trigger registration
 import src.bots  # noqa: F401
@@ -33,7 +32,7 @@ class OrchestratorEngine:
     def __init__(self, bot_names=None):
         self.dashboard = Dashboard()
         self.running = True
-        self.risk_manager = RiskManager(starting_balance=100.0)
+        self.risk_manager = RiskManager(starting_balance=100.0, persist_state=True)
 
         # Wire the trade-close callback
         self.risk_manager.exchange.on_close = self._on_trade_close
@@ -673,15 +672,13 @@ class OrchestratorEngine:
         cycle_duration_s = time.time() - self._cycle_start_time
         cycle_duration_m = cycle_duration_s / 60
         cycle_pnl = self.risk_manager.daily_pnl
-        cycle_trades = sum(
-            s.get("signals", 0) for s in self.dashboard.strategy_stats.values()
-        )
         cycle_wins = sum(
             s.get("wins", 0) for s in self.dashboard.strategy_stats.values()
         )
         cycle_losses = sum(
             s.get("losses", 0) for s in self.dashboard.strategy_stats.values()
         )
+        cycle_trades = cycle_wins + cycle_losses
 
         self._cycle_count += 1
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -788,6 +785,10 @@ class OrchestratorEngine:
         self.risk_manager.strategy_pnl = {}
         self.risk_manager.loss_cooldown = {}
         self.risk_manager.last_trade_time = _dt.min
+        for p in list(self.risk_manager.exchange.positions):
+            self.risk_manager.exchange._close_position(
+                p, p["entry_price"], reason="CYCLE_RESET"
+            )
         self.risk_manager.exchange.positions.clear()
         self.risk_manager.exchange._next_id = 1
         self.risk_manager.active_positions = 0

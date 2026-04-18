@@ -86,11 +86,14 @@ def ev_after_fees(
 ) -> float:
     """Expected value per contract after fees.
 
-    EV = P(win) * (1 - price) - (1 - P(win)) * price - fee_per_contract
-       = probability - price - fee_per_contract
+    Binary contracts pay fees on both entry and exit (round-trip), so
+    fee_per_contract is doubled:
+
+    EV = P(win) * (1 - price) - (1 - P(win)) * price - 2 * fee_per_contract
+       = probability - price - 2 * fee_per_contract
     """
     fee_per = compute_fee(price, 1, is_maker).per_contract
-    return probability - price - fee_per
+    return probability - price - 2 * fee_per
 
 
 def trade_is_profitable(
