@@ -30,7 +30,7 @@ class MLBtc15mStrategy(Strategy):
         self,
         min_edge: float = 0.05,
         predictor: ModelPredictor = None,
-        cooldown_seconds: int = 120,
+        cooldown_seconds: int = 60,
     ):
         self.min_edge = min_edge
         self.predictor = predictor or ModelPredictor()

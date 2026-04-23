@@ -255,8 +255,15 @@ class RiskManager:
         # Bankroll stage determines Kelly fraction and trade cap
         trade_pct, max_positions, kelly_frac, stage = _get_bankroll_stage(self.balance)
 
-        # 1. Odds
-        b = (1.0 - price) / price
+        # 1. Fee-adjusted odds — Kalshi charges maker fees on both entry and
+        # settlement, so effective payoff shrinks and effective loss grows.
+        # Using raw b = (1-price)/price systematically oversizes thin edges.
+        fee_per = compute_fee(price, 1, is_maker=True).per_contract
+        net_win = (1.0 - price) - 2.0 * fee_per
+        net_loss = price + 2.0 * fee_per
+        if net_win <= 0:
+            return 0
+        b = net_win / net_loss
 
         # 2. Calibrated probability using historical win rate
         # Blend: 60% historical WR + 40% dampened confidence
@@ -290,17 +297,18 @@ class RiskManager:
             max_short_qty = int(10.0 / (1.0 - price))
             quantity = min(quantity, max_short_qty)
 
-        # Sprint 6: Hard cap at 50 contracts (research: 120-170 was way too high)
-        return max(1, min(quantity, 50))
+        # Hard cap at 75 contracts. Raised from 50 after disabling bleeder
+        # strategies (LongshotFaderV2, CryptoHourlyV3) — remaining strategies
+        # are either ML-gated or pure arb and can safely scale.
+        return max(1, min(quantity, 75))
 
     def get_current_exposure(self, category: Optional[str] = None) -> float:
         """
-        Sums the cost of active positions.
-        If category is provided, filters by symbol heuristics.
+        Sums the collateral cost of active positions.
+        Short YES (sell YES) locks up (1-price)*qty, not price*qty.
         """
         total = 0.0
         for p in self.exchange.positions:
-            # Simple Heuristic for Categorization
             sym = p["symbol"].upper()
             is_crypto = "BTC" in sym or "ETH" in sym
             is_weather = "HIGH" in sym or "PRECIP" in sym or "TEMP" in sym
@@ -314,7 +322,10 @@ class RiskManager:
                 match = True
 
             if match:
-                total += p["entry_price"] * p["quantity"]
+                if p.get("side") == "sell" and p.get("contract_side", "YES") == "YES":
+                    total += (1.0 - p["entry_price"]) * p["quantity"]
+                else:
+                    total += p["entry_price"] * p["quantity"]
         return total
 
     def check_order(

@@ -273,7 +273,7 @@ class TestCalibratedKelly:
 
         # With raw confidence of 0.90 at old code: p=0.90, massive position
         # With blended: p = 0.6*0.50 + 0.4*0.90 = 0.66, much smaller
-        assert qty_blended <= 50, "Hard cap should be 50"
+        assert qty_blended <= 75, "Hard cap should be 75 (PR#1 raised from 50)"
 
     def test_historical_wr_used_after_20_trades(self):
         """After 20+ trades, historical WR should influence sizing."""
@@ -291,11 +291,11 @@ class TestCalibratedKelly:
             0.80, 0.50, "NewStrat"
         ), "Bad WR strategy should size smaller"
 
-    def test_hard_cap_50_contracts(self):
-        """No trade should exceed 50 contracts."""
+    def test_hard_cap_75_contracts(self):
+        """No trade should exceed 75 contracts (PR#1 raised from 50)."""
         rm = RiskManager(starting_balance=50000.0)
         qty = rm.calculate_kelly_size(0.95, 0.30, "Test")
-        assert qty <= 50, f"Hard cap violated: {qty}"
+        assert qty <= 75, f"Hard cap violated: {qty}"
 
 
 class TestEscalatingCooldown:

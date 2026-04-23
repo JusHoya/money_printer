@@ -7,7 +7,6 @@ from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
 from src.core.interfaces import TradeSignal
 from src.strategies.ml_btc_15m import MLBtc15mStrategy
 from src.strategies.latency_arb import LatencyArbStrategy
-from src.strategies.longshot_fader_v2 import LongshotFaderV2
 from src.strategies.cross_spread_arb import CrossSpreadArbStrategy
 from src.data.coinbase_provider import CoinbaseProvider
 from src.utils.logger import logger
@@ -27,7 +26,6 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.strategies = {
             "cross_arb": CrossSpreadArbStrategy(),
             "latency_arb": LatencyArbStrategy(),
-            "longshot_v2": LongshotFaderV2(),
             "ml_btc_15m": MLBtc15mStrategy(),
         }
 
@@ -125,7 +123,6 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         for strat_key, strat_name in [
             ("cross_arb", "Cross-Spread Arb"),
             ("latency_arb", "Latency Arb"),
-            ("longshot_v2", "LongShot Fader V2"),
             ("ml_btc_15m", "ML BTC 15m"),
         ]:
             signals = self.strategies[strat_key].analyze(btc_data)

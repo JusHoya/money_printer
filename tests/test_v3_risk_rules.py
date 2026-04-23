@@ -10,14 +10,16 @@ from src.core.risk_manager import RiskManager
 
 def test_kelly_dampener_0_75x():
     """
-    Sprint 6: Kelly now blends historical WR (60%) with confidence (40%).
-    Default historical WR = 0.45 (no strategy history yet).
-    p = 0.6 * 0.45 + 0.4 * 0.8 = 0.59
-    b = (1-0.5)/0.5 = 1.0
-    f = 0.59 - 0.41/1.0 = 0.18
-    Quarter-Kelly = 0.18 * 0.25 = 0.045
-    At $100 balance (Seed stage): min(0.045, 0.10) = 0.045 -> $4.50
-    $4.50 / $0.50 = 9 contracts
+    Sprint 6 + PR#1 Kelly now blends historical WR (60%) with confidence (40%)
+    AND deducts round-trip fees from effective odds.
+    p = 0.6 * 0.50 + 0.4 * 0.80 = 0.62
+    fee_per (maker at 0.50) = 0.01
+    net_win = 0.50 - 0.02 = 0.48, net_loss = 0.50 + 0.02 = 0.52
+    b = 0.48/0.52 ≈ 0.923
+    f = 0.62 - 0.38/0.923 ≈ 0.208
+    Quarter-Kelly = 0.208 * 0.25 ≈ 0.052
+    At $100 balance (Seed stage): min(0.052, 0.10) = 0.052 → $5.20
+    $5.20 / $0.50 = 10 contracts
     """
     rm = RiskManager(starting_balance=100.0)
 
@@ -28,10 +30,9 @@ def test_kelly_dampener_0_75x():
     # Seed stage cap is 10% of $100 = $10
     assert cost <= 10.0 + 0.50, f"Cost {cost} exceeded Seed stage 10% cap."
 
-    # Sprint 6: Blended Kelly (60% historical WR + 40% confidence) produces
-    # smaller positions than raw confidence. 12 contracts vs old 20.
-    # p = 0.6*0.50 + 0.4*0.80 = 0.62, b=1.0, f=0.24, quarter=0.06, $6/$0.50=12
-    assert qty == 12, f"Expected 12, got {qty}. Calibrated Kelly at Seed stage."
+    # PR#1 fee-adjusted Kelly produces smaller positions than the fee-ignorant
+    # version (10 contracts vs old 12). The fee deduction is the intended fix.
+    assert qty == 10, f"Expected 10, got {qty}. Fee-adjusted Kelly at Seed stage."
 
 
 def test_final_minute_freeze():
