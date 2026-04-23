@@ -1,0 +1,41 @@
+{
+  "event_count": 30000,
+  "all_series_count": 3213,
+  "fifteen_minute_series": {
+    "KXXRP15M": {
+      "count": 1105,
+      "sample_event": "KXXRP15M-26APR240000",
+      "sample_title": "XRP Up or Down - 15 minutes"
+    },
+    "KXSOL15M": {
+      "count": 1105,
+      "sample_event": "KXSOL15M-26APR240000",
+      "sample_title": "SOL Up or Down - 15 minutes"
+    },
+    "KXHYPE15M": {
+      "count": 1105,
+      "sample_event": "KXHYPE15M-26APR240000",
+      "sample_title": "HYPE Up or Down - 15 minutes"
+    },
+    "KXETH15M": {
+      "count": 1105,
+      "sample_event": "KXETH15M-26APR240000",
+      "sample_title": "ETH Up or Down - 15 minutes"
+    },
+    "KXDOGE15M": {
+      "count": 1105,
+      "sample_event": "KXDOGE15M-26APR240000",
+      "sample_title": "DOGE Up or Down - 15 minutes"
+    },
+    "KXBTC15M": {
+      "count": 1105,
+      "sample_event": "KXBTC15M-26APR240000",
+      "sample_title": "BTC Up or Down - 15 minutes"
+    },
+    "KXBNB15M": {
+      "count": 1105,
+      "sample_event": "KXBNB15M-26APR240000",
+      "sample_title": "BNB Up or Down - 15 minutes"
+    }
+  }
+}
