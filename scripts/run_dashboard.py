@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.visualization.dashboard import Dashboard
 from src.data.coinbase_provider import CoinbaseProvider
 from src.data.nws_provider import NWSProvider
-from src.data.kalshi_provider import KalshiProvider
+from src.data.kalshi_provider import KalshiProvider, is_test_symbol
 from src.core.risk_manager import RiskManager
 from src.bots.registry import BotRegistry
 from src.utils.system_utils import prevent_sleep
@@ -952,9 +952,71 @@ class OrchestratorEngine:
             hours,
         )
 
+    # ------------------------------------------------------------------
+    # FakeEngine guard — defense in depth against silent fixture-only mode
+    # (2026-04-16 incident: 2-week silent run on synthetic KX-TEST-* data)
+    # ------------------------------------------------------------------
+
+    _FAKE_ENGINE_RECHECK_INTERVAL = 900  # 15 minutes
+
+    def _check_fake_engine(self, context: str = "startup") -> bool:
+        """Return True if Kalshi market discovery is healthy (real symbols visible).
+
+        Returns False (and logs ERROR) if discovery returns empty or only
+        test/fixture symbols — signal of FakeEngine fallback / lost API connection.
+        Skipped (returns True) if no Kalshi provider is configured.
+        """
+        if not self.kalshi:
+            return True
+        try:
+            result = self.kalshi.search_markets(limit=200)
+            markets = result[0] if isinstance(result, tuple) else (result or [])
+        except Exception as exc:
+            logger.error(
+                "[FakeEngineGuard] Discovery probe failed (%s): %s", context, exc
+            )
+            return False
+
+        real = [m for m in markets if not is_test_symbol(m.get("ticker", ""))]
+        test_count = len(markets) - len(real)
+
+        if not real:
+            logger.error(
+                "FakeEngine detected: market discovery returned only test/fixture "
+                "symbols. Real Kalshi connection lost. Refusing to start trading. "
+                "Investigate auth, env vars, provider status. (context=%s, "
+                "total=%d, test=%d)",
+                context,
+                len(markets),
+                test_count,
+            )
+            try:
+                self.dashboard.alert(
+                    "FAKE ENGINE DETECTED — market discovery returned no real symbols. "
+                    "Trading halted."
+                )
+            except Exception:
+                pass
+            return False
+
+        if test_count:
+            logger.warning(
+                "[FakeEngineGuard] %s probe saw %d test symbol(s) alongside %d real",
+                context,
+                test_count,
+                len(real),
+            )
+        return True
+
     def market_loop(self):
         """Background thread: position updates + bot ticks."""
         last_heartbeat = time.time()
+        last_fake_engine_check = time.time()
+
+        # Layer 2: refuse to start the trading loop if discovery is fixture-only
+        if not self._check_fake_engine(context="startup"):
+            self.running = False
+            sys.exit(1)
 
         # Startup: archive stale CSVs and retrain from all accumulated data
         try:
@@ -968,6 +1030,16 @@ class OrchestratorEngine:
                 if time.time() - last_heartbeat > 60:
                     self.dashboard.log("[System] Heartbeat: Market Loop is Alive.")
                     last_heartbeat = time.time()
+
+                # Layer 3: re-check that discovery still returns real symbols
+                if (
+                    time.time() - last_fake_engine_check
+                    > self._FAKE_ENGINE_RECHECK_INTERVAL
+                ):
+                    if not self._check_fake_engine(context="recheck"):
+                        self.running = False
+                        sys.exit(1)
+                    last_fake_engine_check = time.time()
 
                 # Update active positions (cross-bot)
                 if self.risk_manager and self.kalshi:

@@ -110,8 +110,8 @@ class MLWeatherStrategy(Strategy):
         extra = market_data.extra or {}
         symbol = market_data.symbol
 
-        # Source check
-        if extra.get("source") != "live_nws":
+        # Source check — accept both NWS forecasts and METAR observations (METAR ~10x more precise)
+        if extra.get("source") not in ("live_nws", "live_metar"):
             return signals
 
         # Skip near-resolved markets

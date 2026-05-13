@@ -30,7 +30,6 @@ BANKROLL_STAGES = [
 FEE_TOLERANCE = 0.02
 
 WIN_RATES_PATH = os.path.join("data", "strategy_win_rates.json")
-WIN_RATES_SAVE_INTERVAL = 10  # Save every N trade closes
 
 
 def _get_bankroll_stage(balance: float) -> tuple:
@@ -58,6 +57,7 @@ class RiskManager:
         self.starting_balance_day = starting_balance
         # Pass callback to OMS. Production (run_dashboard.py) passes persist_state=True
         # so positions survive VM restarts; tests/backtests leave it False to stay in-memory.
+        self._persist_state = persist_state
         self.exchange = SimulatedExchange(
             on_close=self._on_trade_close,
             state_file=_DEFAULT_STATE_FILE if persist_state else None,
@@ -69,9 +69,14 @@ class RiskManager:
 
         self.last_trade_time = datetime.min
         self.today = date.today()
+        # Baseline for converting cumulative exchange.realized_pnl into
+        # today-only daily_pnl. Reset at each UTC day boundary.
+        self._realized_at_day_start = self.exchange.realized_pnl
         self.drawdown_kill_triggered = False
 
         self.strategy_pnl = {}
+        # High-water mark per strategy for drawdown gating
+        self.strategy_peak_pnl: dict = {}
 
         # RULES (base — overridden by bankroll stage)
         self.MAX_RISK_PER_TRADE_PCT = 0.05
@@ -94,7 +99,6 @@ class RiskManager:
 
         # Sprint 6: historical win rates for calibrated Kelly sizing
         self.strategy_win_rates: dict = {}  # strategy_name -> (wins, total)
-        self._trade_close_count = 0
         self._load_win_rates()
 
         # Sprint 6: escalating cooldown after consecutive losses
@@ -104,9 +108,13 @@ class RiskManager:
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
-        # Sync daily_pnl from exchange (source of truth) BEFORE recalculating balance
+        # Detect day rollover before recomputing daily_pnl so a stale baseline
+        # doesn't leak yesterday's cumulative loss into today.
+        self._reset_daily_stats_if_needed()
+        # daily_pnl is today-only: cumulative exchange PnL minus the value
+        # captured at this UTC day's start.
         stats = self.exchange.get_stats()
-        self.daily_pnl = stats["realized"]
+        self.daily_pnl = stats["realized"] - self._realized_at_day_start
         self._sync_balance()
         pnl = position.get("pnl", 0.0)
         strategy_name = position.get("strategy_name", "Unknown")
@@ -114,6 +122,11 @@ class RiskManager:
         self.strategy_pnl[strategy_name] = (
             self.strategy_pnl.get(strategy_name, 0.0) + pnl
         )
+        # Track per-strategy peak P&L for allocation-aware drawdown gating
+        current = self.strategy_pnl[strategy_name]
+        prev_peak = self.strategy_peak_pnl.get(strategy_name, 0.0)
+        if current > prev_peak:
+            self.strategy_peak_pnl[strategy_name] = current
 
         logger.info(
             f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f} | Strategy: {strategy_name}"
@@ -152,9 +165,11 @@ class RiskManager:
                 f"[Risk] ⚠️ Loss Cooldown: {symbol} locked until {cooldown_until.strftime('%H:%M:%S')}"
             )
 
-        # Debounced persistence of win rates
-        self._trade_close_count += 1
-        if self._trade_close_count % WIN_RATES_SAVE_INTERVAL == 0:
+        # Persist win rates after every close — debouncing meant short
+        # runs that crashed before reaching the 10-close threshold lost
+        # all their data, leaving strategy_win_rates.json empty. Gated
+        # on persist_state so unit tests don't pollute the prod file.
+        if self._persist_state:
             self._save_win_rates()
 
     def _load_win_rates(self):
@@ -215,14 +230,16 @@ class RiskManager:
         self.daily_pnl = 0.0
         self.strategy_pnl = {}
         self.exchange.reset_stats()
+        self._realized_at_day_start = self.exchange.realized_pnl
 
         self._sync_balance()
 
     def update_market_data(self, symbol: str, price: float):
         """Passes live data to OMS to update PnL."""
+        self._reset_daily_stats_if_needed()
         self.exchange.update_market(symbol, price)
         stats = self.exchange.get_stats()
-        self.daily_pnl = stats["realized"]
+        self.daily_pnl = stats["realized"] - self._realized_at_day_start
         self.unrealized_pnl = stats["unrealized"]
 
         self._sync_balance()
@@ -233,10 +250,13 @@ class RiskManager:
             self.daily_pnl = 0.0
             self.strategy_pnl = {}
             self.daily_trade_count = 0
-            # Reset exchange realized PnL for the new day?
-            # In simulation, we usually keep cumulative, but for 'Daily' reporting:
-            # Let's just update the baseline.
+            # Capture today's baseline so daily_pnl = exchange.realized_pnl
+            # minus this snapshot. Without this, daily_pnl reads cumulative
+            # PnL since process start, tripping daily-drawdown gates on
+            # all-time loss.
+            self._realized_at_day_start = self.exchange.realized_pnl
             self.starting_balance_day = self.balance
+            self.drawdown_kill_triggered = False
             logger.info("[RiskManager] [NEW DAY] Daily PnL reset.")
 
     def calculate_kelly_size(
@@ -447,16 +467,27 @@ class RiskManager:
             self.drawdown_kill_triggered = True
             return False
 
-        # 3.5 Strategy Drawdown Limit
+        # 3.5 Strategy Drawdown Limit (peak-relative)
+        # Old code used starting_balance_day * 0.10 as the cap, which under-
+        # punished losing strategies that had never made money and over-
+        # punished winning strategies whose peak P&L exceeded that flat $10.
+        # Now: drawdown = peak - current. Limit = 10% of the strategy's
+        # capital base, where the base is starting_balance_day plus its
+        # peak P&L (i.e. the largest pool it ever effectively controlled).
         if strategy_name:
             strat_pnl = self.strategy_pnl.get(strategy_name, 0.0)
-            if strat_pnl < -(
-                self.starting_balance_day * self.MAX_STRATEGY_DRAWDOWN_PCT
-            ):
+            peak = self.strategy_peak_pnl.get(strategy_name, 0.0)
+            capital_base = self.starting_balance_day + max(peak, 0.0)
+            drawdown = peak - strat_pnl
+            if drawdown > capital_base * self.MAX_STRATEGY_DRAWDOWN_PCT:
                 logger.warning(
-                    "[Risk] [REJECT] STRATEGY DRAWDOWN: %s ($%.2f PnL)",
+                    "[Risk] [REJECT] STRATEGY DRAWDOWN: %s "
+                    "(peak=$%.2f, pnl=$%.2f, dd=$%.2f, base=$%.2f)",
                     strategy_name,
+                    peak,
                     strat_pnl,
+                    drawdown,
+                    capital_base,
                 )
                 return False
 

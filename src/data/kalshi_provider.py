@@ -11,6 +11,19 @@ from src.core.interfaces import DataProvider, MarketData
 from src.utils.logger import logger
 
 
+# Defense-in-depth against silent FakeEngine fallback (2026-04-16 incident).
+# Any market symbol whose ticker starts with one of these prefixes is a
+# synthetic/fixture leak — never let the live trader act on it.
+TEST_SYMBOL_PATTERNS = ("KX-TEST", "KX-LOSE", "KX-FAKE")
+
+
+def is_test_symbol(symbol: str) -> bool:
+    """Return True if `symbol` matches a known test/fixture pattern."""
+    if not symbol:
+        return False
+    return any(symbol.startswith(p) for p in TEST_SYMBOL_PATTERNS)
+
+
 class KalshiProvider(DataProvider):
     """
     Data Provider for Kalshi.
@@ -281,7 +294,19 @@ class KalshiProvider(DataProvider):
             if resp.status_code != 200:
                 return []
             data = resp.json()
-            return data.get("markets", []), data.get("cursor")
+            markets = data.get("markets", [])
+            filtered, dropped = [], 0
+            for m in markets:
+                if is_test_symbol(m.get("ticker", "")):
+                    dropped += 1
+                    continue
+                filtered.append(m)
+            if dropped:
+                logger.warning(
+                    "[KalshiProvider] Filtered %d test/fixture symbol(s) from search_markets response",
+                    dropped,
+                )
+            return filtered, data.get("cursor")
         except Exception as e:
             logger.error(f"[KalshiProvider] Search Error: {e}")
             return [], None
@@ -392,6 +417,8 @@ class KalshiProvider(DataProvider):
 
                             # Map V1 JSON to MarketData (V1 has both cents and _dollars fields)
                             symbol = m.get("ticker_name")
+                            if is_test_symbol(symbol):
+                                continue
                             md = self._parse_market_data(symbol, m, "v1_discovery")
                             # V1 uses close_date instead of close_time
                             md.extra["close_time"] = m.get("close_date")
