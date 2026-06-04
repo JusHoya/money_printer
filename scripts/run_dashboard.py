@@ -20,6 +20,7 @@ from src.ml.trade_journal import TradeJournal, TradeOutcome
 from src.ml.online_updater import OnlineModelUpdater
 from src.strategies.counter_trade import CounterTradeAnalyzer
 from src.ml.settlement_resolver import SettlementResolver
+from src.notifications.discord import send_discord_notification
 
 # Import bots to trigger registration
 import src.bots  # noqa: F401
@@ -80,6 +81,12 @@ class OrchestratorEngine:
         self._training_diagnostics = {}  # latest training metrics
         self._training_history = []  # accumulated training history (max 20)
         self._last_periodic_retrain = time.time()
+        # Periodic retrain runs on a daemon thread so a ~30-min retrain never
+        # blocks market polling, bot ticks, or position management. The lock
+        # guards against overlapping retrains; the flag lets the market loop
+        # skip scheduling a new one while one is in flight.
+        self._retrain_lock = threading.Lock()
+        self._is_retraining = False
 
         # Load persisted training state from prior runs
         self._load_training_state()
@@ -148,6 +155,19 @@ class OrchestratorEngine:
 
     def _on_trade_close(self, position: dict):
         """Callback from OMS when a trade is settled/closed."""
+        # Delegate to RiskManager FIRST: the orchestrator overwrites
+        # exchange.on_close (at __init__ and on cycle reset), which would
+        # otherwise orphan RiskManager's win-rate recording, loss/strategy
+        # cooldowns, consecutive-loss tracking, and strategy_pnl/peak
+        # accumulation. The two callbacks touch disjoint state and
+        # RiskManager._on_trade_close reads cumulative exchange state
+        # idempotently, so chaining is safe and non-duplicative. Wrapped in
+        # try/except so a RiskManager error can never break journaling below.
+        try:
+            self.risk_manager._on_trade_close(position)
+        except Exception as exc:
+            logger.warning("[Orchestrator] RiskManager close handler failed: %s", exc)
+
         strategy_name = position.get("strategy_name", "Unknown")
         pnl = position.get("pnl", 0.0)
         self.dashboard.record_strategy_trade_result(strategy_name, pnl)
@@ -661,6 +681,37 @@ class OrchestratorEngine:
 
         self._last_periodic_retrain = time.time()
 
+    def _start_periodic_retrain_async(self):
+        """Launch _periodic_retrain on a daemon thread so it never blocks the
+        market loop.
+
+        _periodic_retrain computes new models and, on success, hot-swaps them
+        into the running strategies via _reload_models_into_strategies()
+        (which it calls internally). The market loop keeps ticking throughout.
+        The lock/flag prevent overlapping retrains, and the interval timer
+        (_last_periodic_retrain) is reset on BOTH success and failure so the
+        every-2h cadence is preserved either way.
+        """
+        if not self._retrain_lock.acquire(blocking=False):
+            # A retrain is already running — skip scheduling another.
+            return
+
+        def _worker():
+            try:
+                self._is_retraining = True
+                self._periodic_retrain()
+            except Exception as exc:
+                logger.error("[Periodic] Retrain failed: %s", exc)
+                # _periodic_retrain resets the timer on success; ensure it is
+                # also reset on failure so the cadence stays on the 2h grid.
+                self._last_periodic_retrain = time.time()
+            finally:
+                self._is_retraining = False
+                self._retrain_lock.release()
+
+        t = threading.Thread(target=_worker, name="periodic-retrain", daemon=True)
+        t.start()
+
     def _run_drawdown_cycle(self):
         """Archive logs, retrain model, reset state for next cycle."""
         from datetime import datetime as _dt
@@ -901,11 +952,16 @@ class OrchestratorEngine:
         )
         logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
 
-        # Discord notification — DISABLED by operator directive (2026-04-16)
-        # Updates moved to Hermes Agent cron in #herms_space channel.
-        # discord_url = os.getenv("DISCORD_WEBHOOK_URL")
-        # if discord_url:
-        #     send_discord_notification(discord_url, cycle_record, journal_count)
+        # Discord cycle notification — the dashboard's own in-process webhook
+        # post (NOT the Hermes Agent cron). Gated on DISCORD_WEBHOOK_URL so it
+        # is a silent no-op when unconfigured. send_discord_notification is
+        # fire-and-forget (posts in a daemon thread).
+        discord_url = os.getenv("DISCORD_WEBHOOK_URL")
+        if discord_url:
+            try:
+                send_discord_notification(discord_url, cycle_record, journal_count)
+            except Exception as exc:
+                logger.warning("[Cycle] Discord notification failed: %s", exc)
 
     def _graduate_model(self, hours: float, pnl: float):
         """Model is profitable after 8+ hours — save and exit training loop."""
@@ -1112,16 +1168,17 @@ class OrchestratorEngine:
                         self._profitable_since = None  # reset clock
 
                 # Periodic retrain: every 2 hours, re-label settled contracts
-                # and retrain from all data (including current live session)
+                # and retrain from all data (including current live session).
+                # Runs on a daemon thread (see _start_periodic_retrain_async)
+                # so the ~30-min retrain never blocks market polling, bot
+                # ticks, or position management. The market loop keeps ticking
+                # throughout; models hot-swap in on completion.
                 if (
-                    time.time() - self._last_periodic_retrain
+                    not self._is_retraining
+                    and time.time() - self._last_periodic_retrain
                     > self._PERIODIC_RETRAIN_INTERVAL
                 ):
-                    try:
-                        self._periodic_retrain()
-                    except Exception as exc:
-                        logger.error("[Periodic] Retrain failed: %s", exc)
-                        self._last_periodic_retrain = time.time()
+                    self._start_periodic_retrain_async()
 
                 # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:

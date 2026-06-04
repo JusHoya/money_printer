@@ -30,9 +30,10 @@ class TestPnLFlow(unittest.TestCase):
         print("\n--- Test: Open Position Reduces Balance ---")
 
         initial_balance = self.rm.balance
-        cost = 50.0  # 100 qty @ 0.50
+        # risk_manager hard-caps entries at MAX_CONTRACTS=50, so 50 qty @ 0.50 = $25 cost
+        cost = 25.0  # 50 qty @ 0.50
 
-        self.rm.record_execution(cost, "KXBTC-TEST-50000", "buy", 100, 0.50)
+        self.rm.record_execution(cost, "KXBTC-TEST-50000", "buy", 50, 0.50)
 
         self.assertEqual(self.rm.balance, initial_balance - cost)
         self.assertEqual(len(self.rm.exchange.positions), 1)
@@ -83,9 +84,10 @@ class TestPnLFlow(unittest.TestCase):
         """Balance should increase when a profitable trade closes."""
         print("\n--- Test: Balance Increases on Profit ---")
 
-        # Open position (costs $50)
-        self.rm.record_execution(50.0, "KXBTC-TEST-50000", "buy", 100, 0.50)
-        self.assertEqual(self.rm.balance, 50.0)
+        # Open position. risk_manager caps entries at MAX_CONTRACTS=50, so
+        # 50 qty @ 0.50 = $25 cost → balance 75.
+        self.rm.record_execution(25.0, "KXBTC-TEST-50000", "buy", 50, 0.50)
+        self.assertEqual(self.rm.balance, 75.0)
 
         # Close with WIN (exit @ 1.00)
         pos = self.rm.exchange.positions[0]
@@ -94,10 +96,10 @@ class TestPnLFlow(unittest.TestCase):
         )  # Binary settles to 1.00
         self.rm.update_market_data("BTC", 60000.0)
 
-        # PnL = (1.00 - 0.50) * 100 = $50, minus entry fee
-        # Balance should be: 100 + 50 - fee ≈ 150 - fee
+        # PnL = (1.00 - 0.50) * 50 = $25, minus entry fee
+        # Balance should be: 100 + 25 - fee ≈ 125 - fee
         fees = self.rm.exchange.total_fees_paid
-        self.assertAlmostEqual(self.rm.balance, 150.0 - fees, places=2)
+        self.assertAlmostEqual(self.rm.balance, 125.0 - fees, places=2)
         print(f"✅ Balance after win: ${self.rm.balance:.2f} (fees: ${fees:.2f})")
 
     # === TEST 5: Balance Decrease After Loss ===
@@ -105,8 +107,9 @@ class TestPnLFlow(unittest.TestCase):
         """Balance should decrease when a losing trade closes."""
         print("\n--- Test: Balance Decreases on Loss ---")
 
-        # Open position (costs $50)
-        self.rm.record_execution(50.0, "KXBTC-TEST-50000", "buy", 100, 0.50)
+        # Open position. risk_manager caps entries at MAX_CONTRACTS=50, so
+        # 50 qty @ 0.50 = $25 cost.
+        self.rm.record_execution(25.0, "KXBTC-TEST-50000", "buy", 50, 0.50)
 
         # Close with LOSS (exit @ 0.00 - binary settles NO)
         pos = self.rm.exchange.positions[0]
@@ -115,10 +118,10 @@ class TestPnLFlow(unittest.TestCase):
         )  # Spot < Strike
         self.rm.update_market_data("BTC", 45000.0)
 
-        # PnL = (0.00 - 0.50) * 100 = -$50, minus entry fee
-        # Balance should be: 100 - 50 - fee ≈ 50 - fee
+        # PnL = (0.00 - 0.50) * 50 = -$25, minus entry fee
+        # Balance should be: 100 - 25 - fee ≈ 75 - fee
         fees = self.rm.exchange.total_fees_paid
-        self.assertAlmostEqual(self.rm.balance, 50.0 - fees, places=2)
+        self.assertAlmostEqual(self.rm.balance, 75.0 - fees, places=2)
         print(f"✅ Balance after loss: ${self.rm.balance:.2f} (fees: ${fees:.2f})")
 
     # === TEST 6: Equity Calculation ===
@@ -198,27 +201,30 @@ class TestExposureCalculation(unittest.TestCase):
         """Exposure should equal sum of (entry_price × quantity)."""
         print("\n--- Test: Exposure Calculation ---")
 
-        # Open two positions
+        # Open two positions. The first requests 100 qty but risk_manager caps
+        # entries at MAX_CONTRACTS=50, so it is recorded as 50 qty.
         self.rm.record_execution(20.0, "KXBTC-TEST-50000", "buy", 100, 0.20)
         self.rm.record_execution(15.0, "KXHIGH-TEST-75", "buy", 50, 0.30)
 
         exposure = self.rm.get_current_exposure()
 
-        # Expected: (0.20 * 100) + (0.30 * 50) = 20 + 15 = 35
-        self.assertEqual(exposure, 35.0)
+        # Expected: (0.20 * 50 capped) + (0.30 * 50) = 10 + 15 = 25
+        self.assertEqual(exposure, 25.0)
         print(f"✅ Exposure correctly calculated: ${exposure:.2f}")
 
     def test_exposure_by_category(self):
         """Exposure filtering by category should work."""
         print("\n--- Test: Exposure by Category ---")
 
+        # First entry requests 100 qty but risk_manager caps at MAX_CONTRACTS=50.
         self.rm.record_execution(20.0, "KXBTC-TEST-50000", "buy", 100, 0.20)
         self.rm.record_execution(15.0, "KXHIGH-TEST-75", "buy", 50, 0.30)
 
         crypto_exp = self.rm.get_current_exposure(category="crypto")
         weather_exp = self.rm.get_current_exposure(category="weather")
 
-        self.assertEqual(crypto_exp, 20.0)
+        # Crypto: 0.20 * 50 (capped) = 10; Weather: 0.30 * 50 = 15
+        self.assertEqual(crypto_exp, 10.0)
         self.assertEqual(weather_exp, 15.0)
         print(f"✅ Crypto: ${crypto_exp:.2f}, Weather: ${weather_exp:.2f}")
 

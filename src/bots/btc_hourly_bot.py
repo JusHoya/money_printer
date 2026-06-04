@@ -10,6 +10,13 @@ from src.data.coinbase_provider import CoinbaseProvider
 from src.utils.logger import logger
 
 
+# 2026-06-03 review (LEAN config): ML BTC Hourly is net-negative (-$4 net/21d,
+# -$440 lifetime). Disabled from live trading. The strategy still receives spot
+# ticks (price-history warmup) but its signals are not executed. Flip this flag
+# back to True to re-enable hourly execution.
+BTC_HOURLY_TRADING_ENABLED = False
+
+
 @BotRegistry.register("btc_hourly")
 class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
     def __init__(self):
@@ -119,12 +126,15 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         logger.info(
                             f"[BTC Hourly] ML Hourly → {len(ml_signals)} signal(s)"
                         )
-                    self._process_signals(
-                        ml_signals,
-                        strategy_name="ML BTC Hourly",
-                        risk_manager=risk_manager,
-                        dashboard=dashboard,
-                    )
+                    # 2026-06-03 review: ML BTC Hourly disabled (net-negative).
+                    # analyze() still runs above to keep model state warm.
+                    if BTC_HOURLY_TRADING_ENABLED:
+                        self._process_signals(
+                            ml_signals,
+                            strategy_name="ML BTC Hourly",
+                            risk_manager=risk_manager,
+                            dashboard=dashboard,
+                        )
             else:
                 if self.ticks % 10 == 0:
                     logger.warning(

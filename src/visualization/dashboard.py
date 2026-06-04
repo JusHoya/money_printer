@@ -238,6 +238,13 @@ class Dashboard:
 
             exposure_pct = (exposure / total_equity) * 100 if total_equity > 0 else 0
 
+            # Task F: lifetime net PnL (survives daily/balance-sync resets).
+            # Read straight off the exchange's immutable cumulative ledger.
+            try:
+                cumulative_net = risk_manager.exchange.get_cumulative_net_pnl()
+            except AttributeError:
+                cumulative_net = None
+
             print(" 💼 PORTFOLIO STATUS")
             print(
                 f"    Equity: ${total_equity:.2f}    |   Cash: ${bal:.2f}     |   Exposure: ${exposure:.2f} ({exposure_pct:.1f}%)"
@@ -245,6 +252,10 @@ class Dashboard:
             print(
                 f"    Realized: ${realized_pnl:+.2f}    |   Unrealized: ${unreal_pnl:+.2f}"
             )
+            if cumulative_net is not None:
+                print(
+                    f"    Cumulative Net (lifetime, all fees): ${cumulative_net:+.2f}"
+                )
             print(
                 "---------------------------------------------------------------------------------"
             )

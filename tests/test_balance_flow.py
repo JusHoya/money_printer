@@ -37,14 +37,16 @@ class TestBalanceFlow(unittest.TestCase):
 
     def test_basic_long_trade_flow_valid_pricing(self):
         print("\n--- Test 1B: Valid Pricing Long Trade ---")
-        # Strike 50000. Entry 0.50. Cost $50 (100 qty).
+        # Strike 50000. Entry 0.50. Requests 100 qty but risk_manager caps
+        # entries at MAX_CONTRACTS=50 → recorded as 50 qty, cost $25.
         # Use realistic BTC strike (> 1000) so tanh estimation works
         self.rm.record_execution(
             50.0, "KXBTC-TEST-T50000", "buy", 100, 0.50, strike=50000.0
         )
 
         # Balance = starting - exposure (fees already in realized_pnl)
-        self.assertAlmostEqual(self.rm.balance, 50.0, delta=1.0)
+        # exposure = 0.50 * 50 (capped) = 25 → balance ≈ 75
+        self.assertAlmostEqual(self.rm.balance, 75.0, delta=1.0)
 
         # Spot moves to 55000 (+5000 over strike).
         # tanh(5000/1000) ≈ 1.0, shift = 0.49, estimated ≈ 0.99
@@ -57,10 +59,11 @@ class TestBalanceFlow(unittest.TestCase):
 
         # Balance = starting + realized + unrealized - exposure
         # After Fix 6, _sync_balance includes unrealized_pnl in balance.
-        # balance = 100 + 0 + ~49 - 50 - fees ≈ 99 - fees
+        # exposure = 0.50 * 50 (capped) = 25.
+        # balance = 100 + 0 + ~24.5 - 25 - fees ≈ 99.5 - fees
         fees = self.rm.exchange.total_fees_paid
         unrealized = self.rm.unrealized_pnl
-        expected_balance = 100.0 + 0.0 + unrealized - 50.0 - fees
+        expected_balance = 100.0 + 0.0 + unrealized - 25.0 - fees
         self.assertAlmostEqual(self.rm.balance, expected_balance, places=2)
 
     def test_loss_scenario(self):
@@ -99,17 +102,18 @@ class TestBalanceFlow(unittest.TestCase):
         print("\n--- Test 3: Double Counting on Sync ---")
         rm = RiskManager(starting_balance=100.0)
 
-        # 1. Open and close a winning trade
+        # 1. Open and close a winning trade. Requests 100 qty but risk_manager
+        # caps entries at MAX_CONTRACTS=50 → recorded as 50 qty.
         rm.record_execution(20.0, "KX-TEST-50", "buy", 100, 0.20)
         pos = rm.exchange.positions[0]
         # Use EXPIRATION so binary settlement (spot=60 > strike=50 → YES → exit=1.00)
-        # PnL = (1.00 - 0.20) * 100 = $80
+        # PnL = (1.00 - 0.20) * 50 (capped) = $40
         rm.exchange._close_position(pos, 60.0, "EXPIRATION")
         rm.update_market_data("TEST", 60.0)
 
-        # Balance = 100 + 80 (PnL) - fees
+        # Balance = 100 + 40 (PnL) - fees
         fees = rm.exchange.total_fees_paid
-        self.assertAlmostEqual(rm.balance, 180.0 - fees, places=2)
+        self.assertAlmostEqual(rm.balance, 140.0 - fees, places=2)
 
         # 2. SYNC from "Real" Account
         # Suppose we sync and the Real Account says the actual balance.

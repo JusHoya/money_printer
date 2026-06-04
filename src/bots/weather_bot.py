@@ -13,6 +13,13 @@ from src.utils.logger import logger
 import os
 
 
+# 2026-06-03 review (LEAN config): ML Weather (-$137 net/21d, ~60% of all fees)
+# and Meteorologist V2 (-$75 net, ~14% of fees) are net-negative fee bleeders.
+# Both weather strategies are disabled from live trading. Flip this flag back
+# to True to re-enable the weather waterfall. Data/price feeds still run.
+WEATHER_TRADING_ENABLED = False
+
+
 @BotRegistry.register("weather")
 class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
     # Legacy NWS station mapping (kept for backwards compatibility / forecasts)
@@ -203,19 +210,22 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     risk_manager.update_market_data(f"PRECIP_{metar_station}", pop_prob)
 
             # Waterfall: ML Weather → V2 rule-based fallback
-            traded = self._process_signals(
-                self.strategies["ml_weather"].analyze(obs_data),
-                strategy_name="ML Weather",
-                risk_manager=risk_manager,
-                dashboard=dashboard,
-            )
-            if not traded:
-                self._process_signals(
-                    self.strategies["weather"].analyze(obs_data),
-                    strategy_name="Meteorologist V2",
+            # 2026-06-03 review: weather trading disabled (fee bleed). Price/data
+            # feeds above still run for dashboard + future re-enable.
+            if WEATHER_TRADING_ENABLED:
+                traded = self._process_signals(
+                    self.strategies["ml_weather"].analyze(obs_data),
+                    strategy_name="ML Weather",
                     risk_manager=risk_manager,
                     dashboard=dashboard,
                 )
+                if not traded:
+                    self._process_signals(
+                        self.strategies["weather"].analyze(obs_data),
+                        strategy_name="Meteorologist V2",
+                        risk_manager=risk_manager,
+                        dashboard=dashboard,
+                    )
 
             time.sleep(1)  # 1 sec between cities
 

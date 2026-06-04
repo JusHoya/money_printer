@@ -6,6 +6,7 @@ import re
 import math
 import json
 import os
+import random
 import tempfile
 from pathlib import Path
 from src.utils.logger import logger
@@ -328,7 +329,23 @@ class SimulatedExchange:
     - Full order audit trail
     """
 
-    def __init__(self, on_close=None, state_file: Optional[Path] = None):
+    # ------------------------------------------------------------------
+    # Task E: penny-floor fill model knobs (only consulted when
+    # ``realistic_fills`` is True; class-level so studies can tweak without
+    # touching the constructor signature).
+    # ------------------------------------------------------------------
+    PENNY_FLOOR_LO = 0.01  # inclusive lower bound of the "penny floor" band
+    PENNY_FLOOR_HI = 0.05  # inclusive upper bound
+    DEFAULT_PENNY_FILL_PROB = 0.5  # base fill probability inside the band
+
+    def __init__(
+        self,
+        on_close=None,
+        state_file: Optional[Path] = None,
+        realistic_fills: bool = False,
+        penny_fill_prob: float = None,
+        fill_rng_seed: Optional[int] = None,
+    ):
         self.positions = []  # List of active trades
         self.closed_trades = []  # History
         self.unrealized_pnl = 0.0
@@ -344,6 +361,46 @@ class SimulatedExchange:
         self.total_fees_paid = 0.0
         self.maker_fills = 0
         self.taker_fills = 0
+
+        # ------------------------------------------------------------------
+        # Task F (2026-06-03): immutable cumulative ledger.
+        #
+        # ``realized_pnl`` is a FRAGMENT, not a lifetime total: reset_stats()
+        # zeroes it on every balance sync (see reset_stats below). To expose a
+        # trustworthy lifetime net for real-capital gating we keep three
+        # monotonic accumulators that reset_stats() NEVER touches. They are
+        # incremented on every fill/close in lockstep with realized_pnl/fees
+        # and are persisted across restarts. ``closed_trades`` remains the
+        # source of truth; these scalars are a cheap, reconcilable cache.
+        # ------------------------------------------------------------------
+        self.cumulative_realized_pnl = (
+            0.0  # sum of every close's net pnl (post exit-fee)
+        )
+        self.cumulative_fees_paid = 0.0  # all fees ever paid (entry + exit)
+        self.cumulative_entry_fees = 0.0  # entry fees only (pnl is NOT net of these)
+
+        # ------------------------------------------------------------------
+        # Task E (2026-06-03): configurable probabilistic fill model.
+        #
+        # DEFAULT OFF. When False the exchange is byte-identical to the legacy
+        # behaviour (every requested open fills at the requested price), so the
+        # live paper-trading regime is unchanged. When True, orders resting at
+        # the penny floor ($0.01-$0.05) only fill with probability < 1 and
+        # suffer an adverse-selection penalty (a contract that has already
+        # repriced toward a win is *less* likely to have actually filled at the
+        # floor). Used by scripts/measure_fill_realism.py and offline studies
+        # to quantify how much of the edge is penny-floor lottery wins.
+        # ------------------------------------------------------------------
+        self.realistic_fills = realistic_fills
+        self.penny_fill_prob = (
+            self.DEFAULT_PENNY_FILL_PROB if penny_fill_prob is None else penny_fill_prob
+        )
+        # Dedicated RNG so fill draws are reproducible and never perturb the
+        # global random stream. Only constructed/used when realistic_fills.
+        self._fill_rng = random.Random(fill_rng_seed)
+        # Diagnostics: how many penny-floor orders were skipped vs requested.
+        self.penny_floor_requested = 0
+        self.penny_floor_skipped = 0
 
         # Sprint 4: order audit trail
         self.order_audit: list = []
@@ -401,9 +458,26 @@ class SimulatedExchange:
                 _deserialize_position(p) for p in data.get("closed_trades", [])
             ]
 
+            # Task F: restore the immutable cumulative ledger. Older state files
+            # written before this field existed won't have the keys; in that
+            # case backfill from closed_trades so the lifetime total is correct
+            # on first upgrade rather than silently starting from zero.
+            if "cumulative_realized_pnl" in data:
+                self.cumulative_realized_pnl = float(data["cumulative_realized_pnl"])
+                self.cumulative_fees_paid = float(data.get("cumulative_fees_paid", 0.0))
+                self.cumulative_entry_fees = float(
+                    data.get("cumulative_entry_fees", 0.0)
+                )
+            else:
+                self._backfill_cumulative_from_closed_trades()
+
+            # Task F: reconcile the scalar cache against the source of truth.
+            self._reconcile_cumulative(context="load")
+
             logger.info(
                 f"[OMS] Loaded exchange state: {len(self.positions)} open, "
-                f"{len(self.closed_trades)} closed, realized=${self.realized_pnl:+.2f}"
+                f"{len(self.closed_trades)} closed, realized=${self.realized_pnl:+.2f}, "
+                f"cumulative_net=${self.get_cumulative_net_pnl():+.2f}"
             )
 
         except Exception as exc:
@@ -425,6 +499,12 @@ class SimulatedExchange:
             self.total_fees_paid = 0.0
             self.maker_fills = 0
             self.taker_fills = 0
+            # Task F: a corrupt file means we have no trustworthy history —
+            # the cumulative ledger must reset alongside closed_trades so the
+            # two stay reconciled.
+            self.cumulative_realized_pnl = 0.0
+            self.cumulative_fees_paid = 0.0
+            self.cumulative_entry_fees = 0.0
 
     def _save_state(self):
         """Atomically persist exchange state to disk.
@@ -448,6 +528,10 @@ class SimulatedExchange:
                 "total_fees_paid": self.total_fees_paid,
                 "maker_fills": self.maker_fills,
                 "taker_fills": self.taker_fills,
+                # Task F: immutable cumulative ledger (never zeroed by reset_stats)
+                "cumulative_realized_pnl": self.cumulative_realized_pnl,
+                "cumulative_fees_paid": self.cumulative_fees_paid,
+                "cumulative_entry_fees": self.cumulative_entry_fees,
                 "positions": [_serialize_position(p) for p in self.positions],
                 "closed_trades": [_serialize_position(p) for p in self.closed_trades],
             }
@@ -470,6 +554,107 @@ class SimulatedExchange:
         except Exception as exc:
             logger.warning(f"[OMS] Failed to persist exchange state: {exc}")
 
+    # ------------------------------------------------------------------
+    # Task F (2026-06-03): immutable cumulative ledger
+    # ------------------------------------------------------------------
+
+    # Tolerance for reconciliation warnings. closed_trades stores money to the
+    # cent, so any divergence above half a cent is a real bug, not float dust.
+    _RECONCILE_TOLERANCE = 0.005
+
+    def _backfill_cumulative_from_closed_trades(self):
+        """Rebuild the cumulative accumulators from ``closed_trades``.
+
+        Used when upgrading a state file written before the cumulative ledger
+        existed. ``pnl`` on each closed trade is already net of its exit fee,
+        so the cumulative net = sum(pnl) - sum(entry_fee).
+        """
+        self.cumulative_realized_pnl = sum(
+            float(t.get("pnl", 0.0)) for t in self.closed_trades
+        )
+        self.cumulative_entry_fees = sum(
+            float(t.get("entry_fee", 0.0)) for t in self.closed_trades
+        )
+        exit_fees = sum(float(t.get("exit_fee", 0.0)) for t in self.closed_trades)
+        self.cumulative_fees_paid = self.cumulative_entry_fees + exit_fees
+        logger.info(
+            f"[OMS] Backfilled cumulative ledger from {len(self.closed_trades)} "
+            f"closed trades: net=${self.get_cumulative_net_pnl():+.2f}"
+        )
+
+    def _reconcile_cumulative(self, context: str = ""):
+        """Warn if the cumulative scalar has drifted from closed_trades.
+
+        ``closed_trades`` is the source of truth; the scalar is a cheap cache.
+        A divergence beyond a cent means a close path forgot to bump the
+        accumulator (or vice versa) — surface it loudly rather than trust a
+        silently-wrong lifetime total when gating real capital.
+        """
+        truth = sum(float(t.get("pnl", 0.0)) for t in self.closed_trades)
+        drift = self.cumulative_realized_pnl - truth
+        if abs(drift) > self._RECONCILE_TOLERANCE:
+            logger.warning(
+                f"[OMS] Cumulative ledger divergence ({context}): "
+                f"scalar=${self.cumulative_realized_pnl:+.2f} vs "
+                f"sum(closed_trades)=${truth:+.2f} (drift=${drift:+.2f}). "
+                f"closed_trades is authoritative."
+            )
+
+    def get_cumulative_net_pnl(self) -> float:
+        """Return the true lifetime net PnL, net of ALL fees.
+
+        Each closed trade's ``pnl`` is already net of its exit fee but NOT its
+        entry fee (the entry fee is deducted into ``realized_pnl`` separately
+        at open time). So the lifetime net after every fee is:
+
+            sum(closed_trades.pnl) - sum(entry_fees)
+
+        We use the immutable accumulators (not the reset-prone ``realized_pnl``)
+        so this survives balance syncs and restarts.
+        """
+        return self.cumulative_realized_pnl - self.cumulative_entry_fees
+
+    # ------------------------------------------------------------------
+    # Task E (2026-06-03): probabilistic penny-floor fill model
+    # ------------------------------------------------------------------
+
+    def penny_floor_fill_probability(
+        self, entry_price: float, side: str, contract_side: str = "YES"
+    ) -> float:
+        """Probability that a penny-floor resting order actually fills.
+
+        Only the cheap band (``PENNY_FLOOR_LO``..``PENNY_FLOOR_HI``) is
+        derated; everything else fills with probability 1.0 so the model is a
+        strict, isolated overlay on the legacy behaviour.
+
+        Inside the band the probability is ``penny_fill_prob`` scaled by a
+        queue-position / adverse-selection penalty: the cheaper the contract,
+        the deeper the queue at the floor and the worse the adverse selection
+        (a $0.01 YES that is destined to win was almost certainly never the
+        order that got filled at the floor). We model that by ramping the
+        probability down linearly toward the bottom of the band:
+
+            penalty = 0.5 + 0.5 * (price - LO) / (HI - LO)   in [0.5, 1.0]
+
+        so a $0.05 order keeps the full base probability while a $0.01 order
+        keeps only half of it. Returns 1.0 when the model is disabled or the
+        price is outside the band.
+        """
+        if not self.realistic_fills:
+            return 1.0
+        # Effective price the resting buy is competing at. For a "buy" of a YES
+        # contract the relevant price is entry_price; for a NO buy the order
+        # rests at (1 - entry_price) on the YES book but the penny-floor risk
+        # is governed by whichever side is cheap, so use the smaller leg.
+        price = entry_price
+        if contract_side == "NO":
+            price = min(entry_price, 1.0 - entry_price)
+        if price < self.PENNY_FLOOR_LO or price > self.PENNY_FLOOR_HI:
+            return 1.0
+        band = max(1e-9, self.PENNY_FLOOR_HI - self.PENNY_FLOOR_LO)
+        penalty = 0.5 + 0.5 * (price - self.PENNY_FLOOR_LO) / band  # [0.5, 1.0]
+        return max(0.0, min(1.0, self.penny_fill_prob * penalty))
+
     def open_position(
         self,
         symbol: str,
@@ -489,7 +674,41 @@ class SimulatedExchange:
 
         Sprint 4: deducts estimated fees from realized PnL and tracks
         maker/taker fill counts.
+
+        Task E: when ``realistic_fills`` is enabled a penny-floor resting order
+        may fail to fill — in that case NO position is created, no fee is paid,
+        and the method returns ``None`` early. When ``realistic_fills`` is False
+        (the live default) this block is skipped entirely and behaviour is
+        byte-identical to the legacy implementation.
         """
+        # --- Task E: probabilistic penny-floor fill gate (default OFF) ---
+        if self.realistic_fills:
+            fill_prob = self.penny_floor_fill_probability(
+                entry_price, side, contract_side
+            )
+            if fill_prob < 1.0:
+                self.penny_floor_requested += 1
+                if self._fill_rng.random() >= fill_prob:
+                    # Order did NOT fill at the penny floor.
+                    self.penny_floor_skipped += 1
+                    self.order_audit.append(
+                        {
+                            "event": "NO_FILL",
+                            "symbol": symbol,
+                            "side": side,
+                            "quantity": quantity,
+                            "price": entry_price,
+                            "fill_prob": round(fill_prob, 4),
+                            "strategy": strategy_name,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
+                    logger.info(
+                        f"[OMS] 🪙 NO FILL (penny floor): {side.upper()} {quantity}x "
+                        f"{symbol} @ {entry_price:.2f} (p_fill={fill_prob:.2f})"
+                    )
+                    return None
+
         expiry_dt = None
         if expiration_time:
             if isinstance(expiration_time, str):
@@ -508,6 +727,10 @@ class SimulatedExchange:
         fee_result = compute_fee(entry_price, quantity, is_maker=is_maker)
         self.total_fees_paid += fee_result.fee
         self.realized_pnl -= fee_result.fee  # Fees reduce realized PnL
+
+        # Task F: mirror the entry fee into the immutable cumulative ledger.
+        self.cumulative_fees_paid += fee_result.fee
+        self.cumulative_entry_fees += fee_result.fee
 
         if is_maker:
             self.maker_fills += 1
@@ -887,6 +1110,14 @@ class SimulatedExchange:
                 pos["quantity"] -= exit_qty
                 self.realized_pnl += partial_pnl
 
+                # Task F: mirror into the immutable cumulative ledger.
+                # partial_pnl is already net of this exit fee, matching the
+                # ``pnl`` field stored on the partial_trade below. The entry fee
+                # was counted once at open time, so we do NOT touch
+                # cumulative_entry_fees here.
+                self.cumulative_realized_pnl += partial_pnl
+                self.cumulative_fees_paid += exit_fee
+
                 partial_trade = dict(pos)
                 partial_trade["exit_price"] = current_price
                 partial_trade["pnl"] = partial_pnl
@@ -996,6 +1227,14 @@ class SimulatedExchange:
             pos["exit_fee"] = exit_fee
 
             self.realized_pnl += total_pnl
+
+            # Task F: mirror into the immutable cumulative ledger. total_pnl is
+            # already net of this exit fee (matching the stored ``pnl`` field),
+            # so cumulative_realized_pnl reconciles with sum(closed_trades.pnl).
+            # The entry fee was counted once at open time.
+            self.cumulative_realized_pnl += total_pnl
+            self.cumulative_fees_paid += exit_fee
+
             self.closed_trades.append(pos)
             self.positions.remove(pos)
 
@@ -1042,8 +1281,20 @@ class SimulatedExchange:
             "maker_fills": self.maker_fills,
             "taker_fills": self.taker_fills,
             "maker_ratio": self.maker_fills / total_fills if total_fills > 0 else 1.0,
+            # Task F: lifetime totals that survive reset_stats / balance syncs.
+            "cumulative_net": self.get_cumulative_net_pnl(),
+            "cumulative_realized": self.cumulative_realized_pnl,
+            "cumulative_fees": self.cumulative_fees_paid,
         }
 
     def reset_stats(self):
-        """Resets cumulative PnL counters (useful after a balance sync)."""
+        """Reset the *fragment* realized-PnL counter (used after a balance sync).
+
+        This intentionally only zeroes ``realized_pnl`` — the per-sync fragment
+        that the risk manager folds into the running balance. The immutable
+        cumulative ledger (``cumulative_realized_pnl``, ``cumulative_fees_paid``,
+        ``cumulative_entry_fees``) is NEVER touched here: it is the trustworthy
+        lifetime total exposed via ``get_cumulative_net_pnl()`` for real-capital
+        gating. Do NOT add cumulative_* resets to this method.
+        """
         self.realized_pnl = 0.0

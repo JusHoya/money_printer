@@ -24,6 +24,13 @@ from src.utils.logger import logger
 # BNB and HYPE are also listed on Kalshi but not on Coinbase; defer.
 SUPPORTED_ASSETS = ("ETH", "SOL", "DOGE", "XRP")
 
+# 2026-06-03 review (LEAN config): Latency Arb is disabled for SOL (dead, ~0
+# trades) and DOGE (dead, slightly negative). ETH and XRP Latency Arb are kept
+# enabled but are WATCH-ONLY / UNPROVEN (tiny lifetime profit, n<12 — not
+# statistically validated). Cross-Spread Arb (risk-free) stays on for all assets.
+# To re-enable SOL/DOGE latency arb, remove the asset from this set.
+LATENCY_ARB_DISABLED_ASSETS = {"SOL", "DOGE"}
+
 
 class Crypto15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
     """Runs arb-only strategies against KX{asset}15M contracts."""
@@ -127,10 +134,13 @@ class Crypto15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 f"strike={spot_data.extra.get('strike', '?')}"
             )
 
-        for strat_key, strat_name in [
-            ("cross_arb", f"{self.asset} Cross-Spread Arb"),
-            ("latency_arb", f"{self.asset} Latency Arb"),
-        ]:
+        # 2026-06-03 review: SOL/DOGE Latency Arb disabled (dead/negative);
+        # ETH/XRP kept as watch-only/unproven. Cross-Spread Arb runs for all.
+        waterfall = [("cross_arb", f"{self.asset} Cross-Spread Arb")]
+        if self.asset not in LATENCY_ARB_DISABLED_ASSETS:
+            waterfall.append(("latency_arb", f"{self.asset} Latency Arb"))
+
+        for strat_key, strat_name in waterfall:
             signals = self.strategies[strat_key].analyze(spot_data)
             if signals and self.ticks % 10 == 0:
                 logger.info(

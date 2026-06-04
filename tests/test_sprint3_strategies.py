@@ -128,7 +128,9 @@ class TestMLBtc15mStrategy:
             "fair_value": 0.75,
             "recommended_price": 0.73,
         }
-        md = make_btc_market(ask=0.60)
+        # spot well above the 84000 strike so it clears the near-ATM proximity
+        # filter (>0.3% away during daytime UTC).
+        md = make_btc_market(ask=0.60, spot_price=85000.0)
         signals = strat.analyze(md)
         assert len(signals) == 1
         assert signals[0].side == "buy"
@@ -145,7 +147,9 @@ class TestMLBtc15mStrategy:
             "recommended_price": 0.27,
         }
         # bid=0.30 → NO cost = 1-0.30 = 0.70, NO fair = 0.75, edge = 0.05
-        md = make_btc_market(bid=0.30, ask=0.35)
+        # spot well below the 84000 strike so it clears the near-ATM proximity
+        # filter (>0.3% away).
+        md = make_btc_market(bid=0.30, ask=0.35, spot_price=83000.0)
         signals = strat.analyze(md)
         assert len(signals) == 1
         assert signals[0].side == "buy"
@@ -173,12 +177,15 @@ class TestMLBtc15mStrategy:
             "recommended_price": 0.78,
         }
         t0 = datetime(2026, 3, 19, 14, 38, 0)
-        md1 = make_btc_market(ask=0.60, timestamp=t0)
+        # spot above the 84000 strike to clear the near-ATM proximity filter.
+        md1 = make_btc_market(ask=0.60, spot_price=85000.0, timestamp=t0)
         signals1 = strat.analyze(md1)
         assert len(signals1) == 1
 
         # 10 seconds later — should be in cooldown
-        md2 = make_btc_market(ask=0.60, timestamp=t0 + timedelta(seconds=10))
+        md2 = make_btc_market(
+            ask=0.60, spot_price=85000.0, timestamp=t0 + timedelta(seconds=10)
+        )
         signals2 = strat.analyze(md2)
         assert len(signals2) == 0
 
@@ -198,7 +205,10 @@ class TestMLBtc15mStrategy:
         signals = strat.analyze(md)
         assert len(signals) == 0
 
-    def test_stop_loss_set_on_signals(self):
+    def test_risk_context_set_on_signals(self):
+        # Sprint 6 removed hard stop-losses for 15m contracts; the ML strategy
+        # now attaches strike + expiration + ML journal context to each signal
+        # instead. Verify those load-bearing attributes are populated.
         strat, predictor = self._make_strategy()
         predictor.predict_btc.return_value = {
             "probability": 0.80,
@@ -206,11 +216,18 @@ class TestMLBtc15mStrategy:
             "fair_value": 0.80,
             "recommended_price": 0.78,
         }
-        md = make_btc_market(ask=0.60)
+        # spot above the 84000 strike to clear the near-ATM proximity filter.
+        md = make_btc_market(ask=0.60, spot_price=85000.0)
         signals = strat.analyze(md)
         assert len(signals) == 1
-        assert hasattr(signals[0], "stop_loss")
-        assert signals[0].stop_loss > 0
+        sig = signals[0]
+        # Strike must propagate for binary settlement / exposure routing.
+        assert sig.strike == 84000.0
+        # close_time from the market feed becomes the contract expiration.
+        assert hasattr(sig, "expiration_time")
+        # ML context required by the trade journal.
+        assert sig.model_probability == 0.80
+        assert sig.btc_spot == 85000.0
 
     def test_invalid_bid_ask_returns_empty(self):
         strat, predictor = self._make_strategy()

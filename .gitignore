@@ -48,6 +48,18 @@ data/sandbox_logs/
 __pycache__/
 *.pyc
 
+# Mutable runtime state — must NOT be version-controlled (a deploy `git pull`
+# could otherwise clobber the VM's live learning). Untracked via `git rm --cached`
+# in the 2026-06-03 review-fix commit. See docs/host_watchdog.md / review notes.
+data/exchange_state.json
+data/strategy_win_rates.json
+data/training_state.json
+data/trade_journal.jsonl
+*.bak
+
+# Review/audit artifacts (large pulled VM data dumps)
+review_2026_06_03/
+
 
 
 # Playwright
