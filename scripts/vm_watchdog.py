@@ -40,10 +40,33 @@ from typing import Optional
 REPO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TMUX_SESSION = "money"
 
+
+def _resolve_sim_balance() -> str:
+    """2026-06-10 fix (b): never hardcode the sim balance on auto-restart — that
+    would silently override a future Phase-2 $500 run. Reuse the balance the
+    dashboard launched with, written by run_dashboard.py to logs/.sim_balance.
+    Precedence: $MP_SIM_BALANCE env var > marker file > safe default 3000."""
+    bal = os.environ.get("MP_SIM_BALANCE", "").strip()
+    if not bal:
+        marker = os.path.join(REPO_PATH, "logs", ".sim_balance")
+        try:
+            with open(marker, encoding="utf-8") as f:
+                bal = f.readline().strip()
+        except OSError:
+            bal = ""
+    try:
+        if float(bal) > 0:
+            return bal
+    except (TypeError, ValueError):
+        pass
+    return "3000"
+
+
 DASHBOARD_CMD = (
     f"cd {REPO_PATH} && source {REPO_PATH}/venv/bin/activate && "
     "PYTHONPATH=. python3 scripts/run_web_dashboard.py "
-    "--auto-cycle --sim-balance 3000 --host 0.0.0.0 --port 8050 --no-browser"
+    f"--auto-cycle --sim-balance {_resolve_sim_balance()} "
+    "--host 0.0.0.0 --port 8050 --no-browser"
 )
 
 CHECK_INTERVAL_S = 60

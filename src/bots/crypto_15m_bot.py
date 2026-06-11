@@ -19,6 +19,11 @@ from src.strategies.latency_arb import LatencyArbStrategy
 from src.data.coinbase_provider import CoinbaseProvider
 from src.utils.logger import logger
 
+# 2026-06-10 ML-label fix: reuse the single source of truth for the
+# logged-price selection so a cleared/locked book (bid==0, ask pinned ~1.0)
+# is not recorded as a misleading 1.0 in the harvested training CSV.
+from src.bots.btc_15m_bot import _best_observable_price
+
 
 # Discovered 2026-04-22: Kalshi lists 15-minute contracts for these assets.
 # BNB and HYPE are also listed on Kalshi but not on Coinbase; defer.
@@ -29,7 +34,11 @@ SUPPORTED_ASSETS = ("ETH", "SOL", "DOGE", "XRP")
 # enabled but are WATCH-ONLY / UNPROVEN (tiny lifetime profit, n<12 — not
 # statistically validated). Cross-Spread Arb (risk-free) stays on for all assets.
 # To re-enable SOL/DOGE latency arb, remove the asset from this set.
-LATENCY_ARB_DISABLED_ASSETS = {"SOL", "DOGE"}
+#
+# 2026-06-10 review: XRP Latency Arb is a 0/5 bleeder (0 wins of 5 trades) once
+# the settlement/label corruption was corrected; disable it too. ETH stays on
+# (watch-only/unproven). Cross-Spread Arb (risk-free) stays on for all assets.
+LATENCY_ARB_DISABLED_ASSETS = {"SOL", "DOGE", "XRP"}
 
 
 class Crypto15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
@@ -81,10 +90,11 @@ class Crypto15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             if ticker:
                 k_data = self.kalshi.fetch_latest(ticker)
                 if k_data:
-                    best_price = (
-                        k_data.bid
-                        if k_data.bid > 0
-                        else (k_data.ask if k_data.ask > 0 else k_data.price)
+                    # 2026-06-10 ML-label fix: route through the shared helper
+                    # so a cleared/locked book (bid==0, ask pinned at ~1.0) is
+                    # not logged as 1.0 and mislabeled YES downstream.
+                    best_price = _best_observable_price(
+                        k_data.bid, k_data.ask, k_data.price
                     )
                     dashboard.update_price(
                         f"{ticker} (15m)",

@@ -118,8 +118,23 @@ class LatencyArbStrategy(Strategy):
         if market_data.ask >= 1.0:
             return signals
 
-        strike = self._extract_strike(market_data.symbol)
+        # 2026-06-10 fix: prefer the real API floor_strike (extra["strike"],
+        # populated by the 15m bot at crypto_15m_bot.py:116). For 15m crypto
+        # tickers (KX{ASSET}15M-...-{MM}) the symbol's LAST segment is the expiry
+        # MINUTE LABEL (00/15/30/45), NOT a strike, so _extract_strike returns
+        # garbage (e.g. 0.0 for "-00") — which breaks this strategy's fair-value
+        # gate AND, once propagated to sig.strike, would make settlement auto-YES
+        # (spot >= 0 is always true). Fall back to the symbol parse only when
+        # extra carries no strike (e.g. daily KX{ASSET}D-...-T{strike} markets
+        # whose suffix genuinely IS the strike).
+        strike = extra.get("strike")
         if strike is None:
+            strike = self._extract_strike(market_data.symbol)
+        if strike is None:
+            return signals
+        try:
+            strike = float(strike)
+        except (TypeError, ValueError):
             return signals
 
         # Detect rapid BTC spot move
@@ -151,6 +166,9 @@ class LatencyArbStrategy(Strategy):
                         confidence=min(0.90, 0.7 + edge),
                         contract_side="YES",
                     )
+                    # 2026-06-10 fix: carry the real strike so settlement can
+                    # positively settle this position instead of fail-safe-NO.
+                    sig.strike = strike
                     sig.stop_loss = max(0.01, lp - 0.06)
                     if close_time:
                         sig.expiration_time = close_time
@@ -185,6 +203,9 @@ class LatencyArbStrategy(Strategy):
                         confidence=min(0.90, 0.7 + edge),
                         contract_side="NO",
                     )
+                    # 2026-06-10 fix: carry the real strike so settlement can
+                    # positively settle this position instead of fail-safe-NO.
+                    sig.strike = strike
                     sig.stop_loss = max(0.01, lp - 0.06)
                     if close_time:
                         sig.expiration_time = close_time

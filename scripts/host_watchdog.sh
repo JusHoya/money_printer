@@ -11,9 +11,11 @@
 # Two liveness checks (alert on EITHER failure):
 #   1. The run_web_dashboard.py process is alive   (pgrep -f run_web_dashboard).
 #   2. The newest logs/session_*.log was written < STALE_MAX_AGE seconds ago.
-#      The 40-min margin is intentional defense-in-depth: the orchestrator runs a
-#      ~30-min periodic retrain. After the orchestrator fix the retrain no longer
-#      freezes the tick loop, but the generous margin guarantees no false positives.
+#      The orchestrator runs ~30-min retrains (startup, periodic, and cycle
+#      reset) during which the session log legitimately stops advancing. To
+#      avoid false alerts the orchestrator writes a "retraining" state marker
+#      (logs/.orchestrator_state); while that marker is fresh we widen the
+#      staleness margin to RETRAIN_STALE_MAX_AGE. (2026-06-10 fix.)
 #
 # Alerts are throttled to at most once per ALERT_COOLDOWN seconds via a timestamp
 # file, mirroring scripts/watchdog_cron.sh so we never spam the channel.
@@ -44,8 +46,14 @@ LOG_DIR="$PROJECT_DIR/logs"
 STATE_DIR="$LOG_DIR"
 LAST_ALERT_FILE="$STATE_DIR/host_watchdog_last_alert.ts"
 DISABLE_FLAG="$PROJECT_DIR/.host_watchdog_disabled"
+# 2026-06-10 fix (c): orchestrator writes "running"/"retraining" + a unix ts to
+# this marker. During a retrain the session log legitimately stops advancing for
+# ~30 min; we widen the staleness margin then so we don't false-alert.
+STATE_MARKER="$LOG_DIR/.orchestrator_state"
 
 STALE_MAX_AGE=2400        # 40 min — newest session log must be fresher than this
+RETRAIN_STALE_MAX_AGE=3000  # 50 min — widened margin while a retrain is in flight
+STATE_MARKER_MAX_AGE=2700   # 45 min — ignore a "retraining" marker older than this
 ALERT_COOLDOWN=1800       # 30 min — minimum seconds between Discord alerts
 CURL_TIMEOUT=10           # curl max-time seconds for the Discord POST
 
@@ -95,7 +103,25 @@ check_process() {
     return 1
 }
 
-# Returns 0 if the newest logs/session_*.log is fresher than STALE_MAX_AGE, else 1.
+# Returns 0 if the orchestrator state marker says it is currently retraining
+# (and the marker is recent enough to trust), else 1. A normal retrain freezes
+# the session log for ~30 min, so we widen the staleness margin while it lasts.
+is_retraining() {
+    [[ -r "$STATE_MARKER" ]] || return 1
+    local content state marker_ts now marker_age
+    content=$(head -n1 "$STATE_MARKER" 2>/dev/null || echo "")
+    state=$(printf '%s' "$content" | awk '{print $1}')
+    marker_ts=$(printf '%s' "$content" | awk '{print $2}')
+    [[ "$state" == "retraining" ]] || return 1
+    # Guard against a stuck marker (crash mid-retrain): only honour it if recent.
+    [[ "$marker_ts" =~ ^[0-9]+$ ]] || return 1
+    now=$(date +%s)
+    marker_age=$(( now - marker_ts ))
+    (( marker_age < STATE_MARKER_MAX_AGE ))
+}
+
+# Returns 0 if the newest logs/session_*.log is fresher than the effective max
+# age (widened during a retrain), else 1.
 check_log_freshness() {
     local newest=""
     local f
@@ -113,16 +139,24 @@ check_log_freshness() {
         return 1
     fi
 
+    # 2026-06-10 fix (c): widen the margin while the orchestrator is retraining
+    # so a normal ~30-min retrain freeze does NOT trigger a false alert.
+    local max_age=$STALE_MAX_AGE
+    if is_retraining; then
+        max_age=$RETRAIN_STALE_MAX_AGE
+        log "Log freshness check: orchestrator retraining — widening margin to ${max_age}s"
+    fi
+
     local mtime now age
     mtime=$(stat -c %Y "$newest" 2>/dev/null || echo 0)
     now=$(date +%s)
     age=$(( now - mtime ))
 
-    if (( age < STALE_MAX_AGE )); then
+    if (( age < max_age )); then
         return 0
     fi
 
-    log "Log freshness check: newest log '$newest' is ${age}s old (max ${STALE_MAX_AGE}s)"
+    log "Log freshness check: newest log '$newest' is ${age}s old (max ${max_age}s)"
     return 1
 }
 

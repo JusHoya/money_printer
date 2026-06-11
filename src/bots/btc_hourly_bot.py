@@ -9,6 +9,11 @@ from src.strategies.ml_btc_hourly import MLBtcHourlyStrategy
 from src.data.coinbase_provider import CoinbaseProvider
 from src.utils.logger import logger
 
+# 2026-06-10 ML-label fix: reuse the single source of truth for the
+# logged-price selection so a cleared/locked book (bid==0, ask pinned ~1.0)
+# is not recorded as a misleading 1.0 in the harvested training CSV.
+from src.bots.btc_15m_bot import _best_observable_price
+
 
 # 2026-06-03 review (LEAN config): ML BTC Hourly is net-negative (-$4 net/21d,
 # -$440 lifetime). Disabled from live trading. The strategy still receives spot
@@ -63,14 +68,13 @@ class BTCHourlyBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 for ticker in ladder:
                     k_data_ladder = self.kalshi.fetch_latest(ticker)
                     if k_data_ladder:
-                        best_price = (
-                            k_data_ladder.bid
-                            if k_data_ladder.bid > 0
-                            else (
-                                k_data_ladder.ask
-                                if k_data_ladder.ask > 0
-                                else k_data_ladder.price
-                            )
+                        # 2026-06-10 ML-label fix: route through the shared
+                        # helper so a cleared/locked book (bid==0, ask pinned
+                        # at ~1.0) is not logged as 1.0 and mislabeled YES.
+                        best_price = _best_observable_price(
+                            k_data_ladder.bid,
+                            k_data_ladder.ask,
+                            k_data_ladder.price,
                         )
                         dashboard.update_price(
                             f"{ticker} (1h)",

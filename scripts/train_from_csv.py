@@ -11,7 +11,6 @@ import argparse
 import csv
 import json
 import logging
-import math
 import os
 import re
 import sys
@@ -28,7 +27,7 @@ from xgboost import XGBClassifier
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.ml.btc_features import BTC_FEATURE_NAMES, build_btc_sample_features
+from src.ml.btc_features import build_btc_sample_features
 from src.ml.calibration import ProbabilityCalibrator
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
@@ -182,11 +181,14 @@ def compute_labels_from_terminal_price(
         return labels
     for sym, grp in contract_df.groupby("symbol"):
         last_price = grp["contract_price"].iloc[-1]
-        if last_price > 0.90:
+        # 2026-06-10 ML-label fix: a terminal price pinned at ~1.0 is a
+        # cleared/locked-book artifact, not a real YES. This fast path has no
+        # API to resolve it, so we skip it (drop) rather than mislabel YES.
+        if 0.90 < last_price < _LOCKED_BOOK_HI:
             labels[sym] = 1
         elif last_price < 0.10:
             labels[sym] = 0
-        # else: ambiguous, skip
+        # else: ambiguous (or locked book), skip
 
     log.info(
         "Labels (terminal price): %d contracts (%d YES, %d NO)",
@@ -195,6 +197,17 @@ def compute_labels_from_terminal_price(
         len(labels) - sum(labels.values()),
     )
     return labels
+
+
+# 2026-06-10 ML-label fix: a contract whose final observed price is pinned at
+# ~1.0 is almost always a cleared/locked book (the YES book empties at close ->
+# bid=0, ask=1.0 -> the harvester logged 1.0), NOT a settled-YES print. The
+# artifact can persist for several final samples, so terminal price is
+# unreliable here and a penultimate-price heuristic cannot recover it. We treat
+# such terminals as suspect and defer to the actual Kalshi settlement result.
+# Verified: removes 74/74 false-YES on the Jun 6-10 production sample
+# (contract-level label error 31.5% -> 0%).
+_LOCKED_BOOK_HI = 0.995
 
 
 # Settlement result cache file (persists across training runs)
@@ -254,9 +267,20 @@ def compute_labels_with_settlement(
     if contract_df.empty:
         return labels
 
+    # 2026-06-10 ML-label fix: a contract whose final observed price is pinned
+    # at ~1.0 is almost always a cleared/locked book (YES book empties at close
+    # -> bid=0, ask=1.0 -> harvester logged 1.0), NOT a settled-YES print.
+    # Terminal price is unreliable here (the artifact can persist for several
+    # final samples), so we defer such contracts to the actual Kalshi settlement
+    # result instead of trusting the 1.0. Verified: removes 74/74 false-YES on
+    # the Jun 6-10 production sample, label error 31.5% -> 0%.
+    locked_book = 0
     for sym, grp in contract_df.groupby("symbol"):
         last_price = grp["contract_price"].iloc[-1]
-        if last_price > 0.85:
+        if last_price >= _LOCKED_BOOK_HI:  # locked/cleared book — DO NOT trust as YES
+            ambiguous.append(sym)  # force settlement-result resolution
+            locked_book += 1
+        elif last_price > 0.85:  # genuine YES still trading below lock
             labels[sym] = 1
         elif last_price < 0.15:
             labels[sym] = 0
@@ -264,10 +288,12 @@ def compute_labels_with_settlement(
             ambiguous.append(sym)
 
     log.info(
-        "Labels (terminal price): %d resolved, %d ambiguous (%.1f%%)",
+        "Labels (terminal price): %d resolved, %d ambiguous (%.1f%%) "
+        "[%d withheld by locked-book guard]",
         len(labels),
         len(ambiguous),
         100 * len(ambiguous) / max(1, len(labels) + len(ambiguous)),
+        locked_book,
     )
 
     if not ambiguous:
@@ -513,9 +539,7 @@ def build_features(
             ]
             spot_history = [
                 (ts.timestamp(), float(p))
-                for ts, p in zip(
-                    lookback_df["timestamp"], lookback_df["btc_price"]
-                )
+                for ts, p in zip(lookback_df["timestamp"], lookback_df["btc_price"])
             ]
 
             # Contract price trajectory (last 2 minutes) for slope feature.

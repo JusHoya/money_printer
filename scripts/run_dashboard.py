@@ -29,6 +29,20 @@ import src.bots  # noqa: F401
 class OrchestratorEngine:
     _TRAINING_STATE_PATH = os.path.join("data", "training_state.json")
     _PERIODIC_RETRAIN_INTERVAL = 2 * 3600  # 2 hours
+    # 2026-06-10 fix (a) — if a (periodic) retrain finished within this window,
+    # the cycle-reset path skips its own redundant ~30-min in-process retrain
+    # and reuses the just-computed model/diagnostics, so the trading loop is not
+    # frozen on the live thread. The async daemon already keeps models current.
+    _CYCLE_RETRAIN_SKIP_WINDOW_S = 30 * 60  # 30 minutes
+
+    # 2026-06-10 fix (c) — runtime state marker the external watchdogs read so a
+    # normal retrain freeze widens their staleness margin instead of alerting.
+    # Contents: a single line "running" or "retraining" + a unix timestamp.
+    _STATE_MARKER_PATH = os.path.join("logs", ".orchestrator_state")
+    # 2026-06-10 fix (b) — records the sim balance this process launched with so
+    # a watchdog auto-restart reuses it instead of hardcoding $3000 (which would
+    # silently override a future Phase-2 $500 run).
+    _SIM_BALANCE_MARKER_PATH = os.path.join("logs", ".sim_balance")
 
     def __init__(self, bot_names=None):
         self.dashboard = Dashboard()
@@ -192,6 +206,44 @@ class OrchestratorEngine:
         for bot in self.bots:
             if strategy_name == "Late Sniper" and "late_sniper" in bot.strategies:
                 bot.strategies["late_sniper"]._handle_position_close(position)
+
+    # ------------------------------------------------------------------
+    # Runtime state markers (2026-06-10 fixes b + c) — best-effort, never raise
+    # ------------------------------------------------------------------
+
+    def _write_state_marker(self, state: str) -> None:
+        """Write a tiny "running"/"retraining" + timestamp marker for the
+        external watchdog (scripts/host_watchdog.sh). During a "retraining"
+        state the watchdog widens its log-staleness margin so a normal ~30-min
+        retrain freeze does NOT trigger a false alert. Best-effort: any failure
+        is swallowed so this can never affect trading."""
+        try:
+            os.makedirs("logs", exist_ok=True)
+            with open(self._STATE_MARKER_PATH, "w", encoding="utf-8") as f:
+                f.write(f"{state} {int(time.time())}\n")
+        except Exception:
+            pass  # marker is advisory only
+
+    def _write_sim_balance_marker(self) -> None:
+        """Persist the sim balance this process launched with so a watchdog
+        auto-restart reuses it (instead of hardcoding $3000). Best-effort."""
+        try:
+            bal = self.sim_balance if self.sim_balance > 0 else 3000.0
+            os.makedirs("logs", exist_ok=True)
+            with open(self._SIM_BALANCE_MARKER_PATH, "w", encoding="utf-8") as f:
+                f.write(f"{bal:.2f}\n")
+        except Exception:
+            pass
+
+    # 2026-06-10 fix (c): watchdog logs (host_watchdog.log / watchdog.log) live
+    # in logs/ and end in .log, so the .log cleanup passes below used to delete
+    # them at session start / cycle reset — destroying the very alert history the
+    # external watchdog appends to. Preserve them across all cleanup passes.
+    _PRESERVED_LOG_NAMES = ("host_watchdog.log", "watchdog.log")
+
+    @classmethod
+    def _is_preserved_log(cls, filename: str) -> bool:
+        return filename in cls._PRESERVED_LOG_NAMES
 
     # ------------------------------------------------------------------
     # Training state persistence
@@ -586,6 +638,8 @@ class OrchestratorEngine:
                 continue
             if os.path.abspath(fpath) in active_files:
                 continue
+            if self._is_preserved_log(f):  # 2026-06-10 fix (c): keep watchdog logs
+                continue
             stale_files.append((f, fpath))
 
         if stale_files:
@@ -699,6 +753,9 @@ class OrchestratorEngine:
         def _worker():
             try:
                 self._is_retraining = True
+                # 2026-06-10 fix (c): mark "retraining" so the external watchdog
+                # widens its staleness margin during this CPU-bound retrain.
+                self._write_state_marker("retraining")
                 self._periodic_retrain()
             except Exception as exc:
                 logger.error("[Periodic] Retrain failed: %s", exc)
@@ -707,6 +764,7 @@ class OrchestratorEngine:
                 self._last_periodic_retrain = time.time()
             finally:
                 self._is_retraining = False
+                self._write_state_marker("running")
                 self._retrain_lock.release()
 
         t = threading.Thread(target=_worker, name="periodic-retrain", daemon=True)
@@ -785,14 +843,58 @@ class OrchestratorEngine:
                 continue
             if not (f.endswith(".csv") or f.endswith(".log")):
                 continue
+            if self._is_preserved_log(f):  # 2026-06-10 fix (c): keep watchdog logs
+                continue
             try:
                 os.remove(fpath)
             except Exception as exc:
                 logger.warning("[Cycle] Could not remove old file %s: %s", f, exc)
 
-        # Retrain model from all accumulated archive data
-        logger.info("[Cycle] Retraining model in-process...")
-        train_metrics = self._retrain_from_all_data(include_live=False)
+        # Retrain model from all accumulated archive data.
+        #
+        # 2026-06-10 fix (a): the in-process retrain here used to freeze the
+        # whole trading loop ~30 min every cycle. The async daemon
+        # (_start_periodic_retrain_async, every 2h) already keeps models
+        # current AND hot-swaps them on the live thread. So we now SKIP this
+        # synchronous retrain when the models are already fresh:
+        #   - a retrain is currently running on the daemon thread, OR
+        #   - a (periodic) retrain finished within _CYCLE_RETRAIN_SKIP_WINDOW_S.
+        # In either case we reuse the last good diagnostics; the models on disk
+        # are already the latest, and _reload_models_into_strategies() below
+        # picks them up. Otherwise we retrain in-process (rare — only when no
+        # recent retrain exists), guarded by the same lock/state-marker the
+        # async path uses so it never overlaps a daemon retrain and the watchdog
+        # does not false-alert on the freeze.
+        recent_retrain = (
+            time.time() - self._last_periodic_retrain
+        ) < self._CYCLE_RETRAIN_SKIP_WINDOW_S
+        if self._is_retraining or recent_retrain:
+            logger.info(
+                "[Cycle] Skipping in-process retrain (fresh models: "
+                "is_retraining=%s, recent=%s) — reusing last diagnostics",
+                self._is_retraining,
+                recent_retrain,
+            )
+            train_metrics = self._training_diagnostics or {}
+        elif self._retrain_lock.acquire(blocking=False):
+            # No recent/in-flight retrain — do it in-process but guarded.
+            logger.info("[Cycle] Retraining model in-process (no recent retrain)...")
+            try:
+                self._is_retraining = True
+                self._write_state_marker("retraining")
+                train_metrics = self._retrain_from_all_data(include_live=False)
+                # Keep the 2h periodic cadence aligned so we don't immediately
+                # retrain again on the daemon thread right after this one.
+                self._last_periodic_retrain = time.time()
+            finally:
+                self._is_retraining = False
+                self._write_state_marker("running")
+                self._retrain_lock.release()
+        else:
+            # Lock held by a daemon retrain that started between the check and
+            # here — reuse last diagnostics rather than block.
+            logger.info("[Cycle] Retrain lock busy — reusing last diagnostics")
+            train_metrics = self._training_diagnostics or {}
 
         # Save cycle record
         cycle_record = {
@@ -868,6 +970,8 @@ class OrchestratorEngine:
             if not (f.endswith(".csv") or f.endswith(".log")):
                 continue
             if os.path.abspath(fpath) in new_active:
+                continue
+            if self._is_preserved_log(f):  # 2026-06-10 fix (c): keep watchdog logs
                 continue
             try:
                 os.remove(fpath)
@@ -1069,16 +1173,27 @@ class OrchestratorEngine:
         last_heartbeat = time.time()
         last_fake_engine_check = time.time()
 
+        # 2026-06-10 fix (b)+(c): publish the launch balance + initial "running"
+        # state so the external watchdog (a) restarts with the right balance and
+        # (b) doesn't false-alert during the long startup/periodic retrains.
+        self._write_sim_balance_marker()
+        self._write_state_marker("running")
+
         # Layer 2: refuse to start the trading loop if discovery is fixture-only
         if not self._check_fake_engine(context="startup"):
             self.running = False
             sys.exit(1)
 
-        # Startup: archive stale CSVs and retrain from all accumulated data
+        # Startup: archive stale CSVs and retrain from all accumulated data.
+        # The startup retrain is a long (~30-min) synchronous freeze, so mark
+        # "retraining" around it to widen the watchdog's staleness margin.
         try:
+            self._write_state_marker("retraining")
             self._startup_archive_and_retrain()
         except Exception as exc:
             logger.error("[Startup] Archive/retrain failed: %s", exc)
+        finally:
+            self._write_state_marker("running")
 
         while self.running:
             try:

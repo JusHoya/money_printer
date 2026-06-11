@@ -28,7 +28,25 @@ ALERT_COOLDOWN=1800       # seconds between Discord alerts
 HEALTH_TIMEOUT=10         # curl max-time seconds
 RESTART_STARTUP_WAIT=30   # seconds to wait after tmux session start
 
-START_CMD="cd $PROJECT_DIR && source $PROJECT_DIR/venv/bin/activate && PYTHONPATH=. python3 scripts/run_web_dashboard.py --auto-cycle --sim-balance 3000 --host 0.0.0.0 --port 8050 --no-browser"
+# 2026-06-10 fix (b): never hardcode the sim balance on auto-restart — that
+# would silently override a future Phase-2 $500 run. Reuse the balance the
+# process was launched with, written by run_dashboard.py to this marker file.
+# Precedence: $MP_SIM_BALANCE env var > marker file > safe default 3000.
+SIM_BALANCE_MARKER="$STATE_DIR/.sim_balance"
+resolve_sim_balance() {
+    local bal="${MP_SIM_BALANCE:-}"
+    if [[ -z "$bal" && -r "$SIM_BALANCE_MARKER" ]]; then
+        bal=$(head -n1 "$SIM_BALANCE_MARKER" 2>/dev/null | tr -dc '0-9.')
+    fi
+    # Validate: must be a positive number; otherwise fall back to 3000.
+    if [[ -z "$bal" || ! "$bal" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        bal=3000
+    fi
+    printf '%s' "$bal"
+}
+SIM_BALANCE="$(resolve_sim_balance)"
+
+START_CMD="cd $PROJECT_DIR && source $PROJECT_DIR/venv/bin/activate && PYTHONPATH=. python3 scripts/run_web_dashboard.py --auto-cycle --sim-balance $SIM_BALANCE --host 0.0.0.0 --port 8050 --no-browser"
 
 # ---------------------------------------------------------------------------
 # Helpers

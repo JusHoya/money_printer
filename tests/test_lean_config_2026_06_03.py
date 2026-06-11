@@ -9,7 +9,12 @@ Disabled per the 2026-06-03 review:
   - ML BTC Hourly (btc_hourly_bot)                     -> BTC_HOURLY_TRADING_ENABLED
   - SOL / DOGE Latency Arb (crypto_15m_bot)            -> LATENCY_ARB_DISABLED_ASSETS
 
-Kept (watch-only / unproven, n<12): ETH + XRP Latency Arb.
+2026-06-10 fix: XRP Latency Arb moved from "kept (watch-only)" to DISABLED — it
+turned out to be a 0/5 bleeder per the 2026-06-10 review (see
+test_label_other_bots.py::test_xrp_latency_arb_disabled). Only ETH remains
+watch-only/unproven and enabled.
+
+Kept (watch-only / unproven): ETH Latency Arb.
 Kept (primary edge): ML BTC 15m.
 """
 
@@ -37,19 +42,22 @@ class TestDisabledStrategies(unittest.TestCase):
             "ML BTC Hourly must be disabled from live trading",
         )
 
-    def test_sol_doge_latency_arb_disabled(self):
+    def test_sol_doge_xrp_latency_arb_disabled(self):
+        # 2026-06-10 fix: XRP joined SOL/DOGE in the disable set (0/5 bleeder).
         disabled = crypto_15m_bot.LATENCY_ARB_DISABLED_ASSETS
         self.assertIn("SOL", disabled, "SOL Latency Arb must be disabled (dead)")
         self.assertIn("DOGE", disabled, "DOGE Latency Arb must be disabled (dead/neg)")
+        self.assertIn("XRP", disabled, "XRP Latency Arb must be disabled (0/5 bleeder)")
 
-    def test_eth_xrp_latency_arb_kept(self):
-        """ETH + XRP latency arb are watch-only/unproven — kept enabled."""
+    def test_eth_latency_arb_kept(self):
+        """ETH latency arb is watch-only/unproven — kept enabled.
+
+        2026-06-10 fix: XRP is no longer kept (it moved to the disable set); only
+        ETH remains enabled here.
+        """
         disabled = crypto_15m_bot.LATENCY_ARB_DISABLED_ASSETS
         self.assertNotIn(
             "ETH", disabled, "ETH Latency Arb must stay enabled (watch-only)"
-        )
-        self.assertNotIn(
-            "XRP", disabled, "XRP Latency Arb must stay enabled (watch-only)"
         )
 
 

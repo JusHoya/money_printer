@@ -12,6 +12,40 @@ from src.data.coinbase_provider import CoinbaseProvider
 from src.utils.logger import logger
 
 
+# 2026-06-10 ML-label fix: ask pinned at ~1.0 with an empty YES book (bid==0) is
+# a cleared/locked-book artifact, not a real YES print. Logging 1.0 corrupts the
+# terminal-price ML labels (NO-settled contracts mislabeled YES). Treat anything
+# at/above this as a locked book and refuse to fabricate a 1.0 price from it.
+_LOCKED_BOOK_HI = 0.995
+
+
+def _best_observable_price(bid: float, ask: float, price: float) -> float:
+    """Pick the price to log to the training CSV for a contract tick.
+
+    2026-06-10 ML-label fix. Original logic was
+    ``bid if bid>0 else (ask if ask>0 else price)``, which at/after close — when
+    the YES book empties (bid==0) and ask is pinned at 1.0 — synthesized a
+    misleading 1.0. The terminal-price labeler then marks the (often NO-settled)
+    contract YES. New rules:
+
+    * a genuine bid (>0) is the most reliable observable -> use it;
+    * otherwise a genuine ask that is NOT a locked book (0 < ask < 0.995) -> use it;
+    * otherwise the last traded price, if available -> use it;
+    * otherwise a cleared/locked book -> return 0.0 (never fabricate 1.0) so the
+      labeler's settlement path resolves the outcome rather than trusting it.
+
+    Only the CSV-logged scalar is affected — strategies read bid/ask/extra
+    directly off ``MarketData``, independent of this value.
+    """
+    if bid > 0:
+        return bid
+    if 0 < ask < _LOCKED_BOOK_HI:  # genuine ask, not a locked/cleared book
+        return ask
+    if price > 0:  # fall back to last traded price
+        return price
+    return 0.0  # cleared/locked book: do not fabricate 1.0
+
+
 @BotRegistry.register("btc_15m")
 class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
     def __init__(self):
@@ -57,10 +91,11 @@ class BTC15mBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             if btc_15m:
                 k_data_15 = self.kalshi.fetch_latest(btc_15m)
                 if k_data_15:
-                    best_price = (
-                        k_data_15.bid
-                        if k_data_15.bid > 0
-                        else (k_data_15.ask if k_data_15.ask > 0 else k_data_15.price)
+                    # 2026-06-10 ML-label fix: de-corrupt the logged price so a
+                    # cleared/locked book (bid==0, ask pinned at 1.0) is not
+                    # recorded as 1.0 and mislabeled YES downstream.
+                    best_price = _best_observable_price(
+                        k_data_15.bid, k_data_15.ask, k_data_15.price
                     )
                     dashboard.update_price(
                         f"{btc_15m} (15m)",

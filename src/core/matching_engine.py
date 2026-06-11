@@ -1174,18 +1174,105 @@ class SimulatedExchange:
                     if final_spot_price > 0.50:
                         outcome_is_yes = True
                 else:
+                    # ----------------------------------------------------------
+                    # 2026-06-10 SETTLEMENT FIX (strike resolution)
+                    #
+                    # The legacy code parsed the LAST dash-segment of the ticker
+                    # as the settlement strike. That is correct for weather
+                    # (KXHIGHNY-26JUN04-B86.5 -> 86.5) and hourly
+                    # (KXBTCD-...-T78499.99) tickers whose suffix IS the strike,
+                    # but it is WRONG for 15m crypto tickers
+                    # (KXBTC15M-26JUN032130-30, KXETH15M-...-00, KXSOL15M-...-15,
+                    #  KXDOGE15M-...-45, KXXRP15M-...-00) where the last segment
+                    # is the EXPIRY MINUTE LABEL (00/15/30/45), NOT a strike.
+                    # Parsing it as a strike forced near-100% auto-YES (e.g. -00
+                    # parses 0 so any positive spot >= 0 settled YES). Actual
+                    # Kalshi base rate is ~8% YES (settlement_cache.json: 9/114).
+                    #
+                    # The real per-asset strike (API floor_strike) is cached on
+                    # the position as pos["strike"] (open_position stores it at
+                    # line ~757). Mirror the sibling pattern in update_market
+                    # "CASE 2: STRIKE BASED" (lines ~893-923) which prefers the
+                    # cached strike over the suffix — but WITHOUT that path's
+                    # `cached_strike > 1000` magnitude heuristic, which is wrong
+                    # for sub-1000 alt strikes (SOL ~$150, DOGE ~$0.4, XRP ~$2,
+                    # ETH ~$3k). Rule: if pos["strike"] is present, USE IT; only
+                    # fall back to the suffix when strike is absent AND the
+                    # suffix is a plausible real strike (weather/hourly). For a
+                    # 15m-crypto family with NO cached strike (current
+                    # latency_arb reality — ETH/SOL/DOGE/XRP never set
+                    # sig.strike, so pos["strike"] is None) we FAIL-SAFE to NO
+                    # rather than auto-YES off the minute label.
+                    # ----------------------------------------------------------
+                    _CRYPTO_15M_FAMILIES = (
+                        "KXBTC15M",
+                        "KXETH15M",
+                        "KXSOL15M",
+                        "KXDOGE15M",
+                        "KXXRP15M",
+                    )
+                    is_15m_crypto = any(
+                        fam in pos["symbol"] for fam in _CRYPTO_15M_FAMILIES
+                    )
+
                     try:
+                        # Defensive suffix parse (FALLBACK only).
                         parts = pos["symbol"].split("-")
                         strike_str = parts[-1]
+                        # B-prefix (weather below-bucket) => below; everything
+                        # else (T-prefix weather/hourly, bare crypto) => above.
                         is_above = not strike_str.startswith("B")
-                        strike = float(re.sub(r"[A-Za-z]", "", strike_str))
+                        try:
+                            parsed_strike = float(re.sub(r"[A-Za-z]", "", strike_str))
+                        except Exception:
+                            parsed_strike = None
 
-                        if is_above:
-                            if final_spot_price >= strike:
-                                outcome_is_yes = True
+                        cached_strike = pos.get("strike")
+
+                        # 2026-06-10 defensive: a real strike is always > 0
+                        # (crypto spot / weather temp). Reject 0 or negative —
+                        # e.g. a minute-label 0.0 that slips through from a
+                        # strategy that mis-parsed the ticker — so it fail-safes
+                        # to NO below instead of auto-YES (spot >= 0 always true).
+                        if cached_strike is not None and cached_strike > 0:
+                            # Real API floor_strike — always preferred. Direction
+                            # from the suffix prefix: 15m crypto minute labels
+                            # never start with "B" so is_above=True (YES iff
+                            # spot >= strike), which is correct for KX*15M
+                            # "above strike?" markets; weather B-buckets stay
+                            # below (is_above=False).
+                            strike = float(cached_strike)
+                            if is_above:
+                                outcome_is_yes = final_spot_price >= strike
+                            else:
+                                outcome_is_yes = final_spot_price <= strike
+                        elif is_15m_crypto:
+                            # latency_arb missing-strike case: the suffix is a
+                            # minute label, NOT a strike. We cannot determine the
+                            # outcome, so FAIL-SAFE to NO (Kalshi base rate is
+                            # ~8% YES). This removes the fictional auto-YES profit
+                            # and surfaces the latency_arb sig.strike gap loudly.
+                            logger.error(
+                                "[OMS] 2026-06-10 settlement fix: missing cached "
+                                "strike for 15m crypto %s; cannot determine "
+                                "settlement, defaulting outcome to NO (no "
+                                "auto-YES). reason=%s",
+                                pos["symbol"],
+                                reason,
+                            )
+                            outcome_is_yes = False
+                        elif parsed_strike is not None:
+                            # Weather (KXHIGH...-T65 / -B86.5) and hourly
+                            # (KXBTCD-...-T78499.99): the suffix IS the real
+                            # strike — preserve exact legacy behavior.
+                            strike = parsed_strike
+                            if is_above:
+                                outcome_is_yes = final_spot_price >= strike
+                            else:
+                                outcome_is_yes = final_spot_price <= strike
                         else:
-                            if final_spot_price <= strike:
-                                outcome_is_yes = True
+                            # Unparseable suffix, no cached strike: fail-safe.
+                            outcome_is_yes = False
                     except Exception:
                         outcome_is_yes = False  # Fail safe
 
