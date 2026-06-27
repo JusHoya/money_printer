@@ -31,10 +31,15 @@ class MLBtc15mStrategy(Strategy):
         min_edge: float = 0.05,
         predictor: ModelPredictor = None,
         cooldown_seconds: int = 60,
+        near_atm_threshold: float = 0.0,
     ):
         self.min_edge = min_edge
         self.predictor = predictor or ModelPredictor()
         self.cooldown_seconds = cooldown_seconds
+        # Fractional distance (|spot-strike|/strike) below which a contract is
+        # treated as near-ATM and skipped. Default 0.0 DISABLES the skip (see
+        # the filter block in analyze() for the rationale).
+        self.near_atm_threshold = near_atm_threshold
         self._cooldown_until = datetime.min
 
     def name(self) -> str:
@@ -84,18 +89,30 @@ class MLBtc15mStrategy(Strategy):
         # Build MarketData with spot price for predictor
         spot = extra.get("spot_price", market_data.price)
 
-        # Strike proximity filter: skip near-ATM contracts (EARLY_SETTLEMENT risk).
-        # Adaptive threshold: tighter during low-vol overnight (UTC 04-12) to capture more trades,
-        # wider during high-vol daytime to avoid choppy settlements.
-        hour_utc = now.hour if hasattr(now, "hour") else datetime.now().hour
-        prox_threshold = 0.0015 if 4 <= hour_utc <= 12 else 0.003
-        if spot > 1.0 and (abs(spot - strike_val) / strike_val) < prox_threshold:
+        # Strike proximity filter (near-ATM skip) -- DISABLED BY DEFAULT.
+        #
+        # Kalshi sets each 15-min contract floor_strike approximately equal to
+        # BTC spot at the START of the interval, so spot is essentially always
+        # within ~0.01-0.04% of the strike. Near-ATM is therefore the NORMAL
+        # (and only) state for these contracts. The previous always-on adaptive
+        # filter (0.15% overnight / 0.30% daytime) consequently rejected 100% of
+        # available contracts, producing ZERO trades over 15 days.
+        #
+        # near_atm_threshold defaults to 0.0, which turns this skip OFF so
+        # near-ATM contracts pass through to the predictor and volume is
+        # restored. Set near_atm_threshold > 0 only if a future market structure
+        # (e.g. wider strike spacing) makes skipping near-ATM contracts useful.
+        if (
+            self.near_atm_threshold > 0
+            and spot > 1.0
+            and (abs(spot - strike_val) / strike_val) < self.near_atm_threshold
+        ):
             logger.debug(
                 "[ML BTC 15m] SKIP near-ATM: spot=%.2f strike=%.0f proximity=%.4f%% (threshold=%.2f%%)",
                 spot,
                 strike_val,
                 abs(spot - strike_val) / strike_val * 100,
-                prox_threshold * 100,
+                self.near_atm_threshold * 100,
             )
             return signals
 

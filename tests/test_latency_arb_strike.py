@@ -139,3 +139,37 @@ def test_daily_ticker_falls_back_to_symbol_parse():
     assert len(signals) == 1, f"expected one signal, got {len(signals)}"
     sig = signals[0]
     assert sig.strike == 3000.0
+
+
+# --- New regression guards: missing extra strike on a 15m ticker must ABORT ----
+
+
+def test_missing_extra_strike_on_15m_ticker_aborts():
+    """15m ticker with NO extra['strike'] must NOT fall through to a 0 strike.
+
+    The symbol-parse fallback would return 0.0 (minute label "00"); propagating
+    that re-introduces the auto-YES settlement bug, so the strategy aborts. A
+    +10% up-move qualifies, so under the old code this WOULD have produced a
+    (broken) signal — proving the guard is what suppresses it.
+    """
+    symbol = "KXETH15M-26JUN101200-00"
+    assert LatencyArbStrategy._extract_strike(symbol) == 0.0  # the trap value
+    strat = LatencyArbStrategy(move_threshold=0.003, min_edge_cents=0.04)
+
+    signals = _build_buffer_and_trade(strat, symbol, 3000.0, 3300.0, strike=None)
+
+    assert signals == [], "15m ticker without a real strike must produce no signal"
+    assert all(getattr(s, "strike", None) != 0 for s in signals)
+
+
+def test_missing_extra_strike_15min_label_15_aborts():
+    """Minute label "15" parses to 15.0 (> 0), so the strike<=0 guard can't catch
+    it — the 15m-format detection must. strike=None -> ZERO signals."""
+    symbol = "KXSOL15M-26JUN101215-15"
+    assert LatencyArbStrategy._extract_strike(symbol) == 15.0  # nonzero trap value
+    strat = LatencyArbStrategy(move_threshold=0.003, min_edge_cents=0.04)
+
+    signals = _build_buffer_and_trade(strat, symbol, 3000.0, 3300.0, strike=None)
+
+    assert signals == [], "minute-label '15' must not become a strike"
+    assert all(getattr(s, "strike", None) != 0 for s in signals)

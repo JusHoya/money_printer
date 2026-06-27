@@ -94,6 +94,18 @@ class LatencyArbStrategy(Strategy):
         except Exception:
             return None
 
+    @staticmethod
+    def _is_15m_symbol(symbol: str) -> bool:
+        """True for 15-minute crypto tickers (KX{ASSET}15M-...).
+
+        Their series segment ends in ``15M`` and the symbol's LAST hyphen-segment
+        is an expiry MINUTE LABEL (00/15/30/45), not a strike — so the
+        ``_extract_strike`` symbol-parse fallback must NOT be used for them.
+        Daily ``KX{ASSET}D`` tickers return False and fall through to the parse.
+        """
+        series = (symbol or "").split("-", 1)[0]
+        return "15M" in series.upper()
+
     # ------------------------------------------------------------------
     # Strategy interface
     # ------------------------------------------------------------------
@@ -124,17 +136,28 @@ class LatencyArbStrategy(Strategy):
         # MINUTE LABEL (00/15/30/45), NOT a strike, so _extract_strike returns
         # garbage (e.g. 0.0 for "-00") — which breaks this strategy's fair-value
         # gate AND, once propagated to sig.strike, would make settlement auto-YES
-        # (spot >= 0 is always true). Fall back to the symbol parse only when
-        # extra carries no strike (e.g. daily KX{ASSET}D-...-T{strike} markets
-        # whose suffix genuinely IS the strike).
+        # (spot >= 0 is always true).
+        #
+        # 2026-06-26 fix: the symbol-parse fallback is valid ONLY for daily
+        # KX{ASSET}D-...-T{strike} markets, whose suffix genuinely encodes the
+        # strike. When extra carries no strike on a 15m ticker, ABORT rather than
+        # guess — a minute label as the strike is a guaranteed mis-settlement.
         strike = extra.get("strike")
         if strike is None:
+            if self._is_15m_symbol(market_data.symbol):
+                return signals
             strike = self._extract_strike(market_data.symbol)
         if strike is None:
             return signals
         try:
             strike = float(strike)
         except (TypeError, ValueError):
+            return signals
+        # Belt-and-suspenders: a non-positive strike must NEVER reach settlement
+        # (catches the "-00" minute-label trap and any other garbage). Note this
+        # alone does NOT catch "-15"/"-30"/"-45" (they parse > 0) — the 15m-format
+        # detection above is what catches those.
+        if strike <= 0:
             return signals
 
         # Detect rapid BTC spot move
