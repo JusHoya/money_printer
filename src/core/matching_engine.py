@@ -448,10 +448,16 @@ class SimulatedExchange:
             self.maker_fills = int(data.get("maker_fills", 0))
             self.taker_fills = int(data.get("taker_fills", 0))
 
-            # Restore open positions (deserialize datetime strings)
-            self.positions = [
+            # Restore open positions (deserialize datetime strings). Drop
+            # qty<=0 shells at load so the no-ghost invariant holds even for
+            # state files written before the FR-0.6 partial-close fix.
+            loaded_positions = [
                 _deserialize_position(p) for p in data.get("positions", [])
             ]
+            self.positions = [
+                pos for pos in loaded_positions if pos.get("quantity", 0) > 0
+            ]
+            n_shells_dropped = len(loaded_positions) - len(self.positions)
 
             # Restore closed trades (deserialize datetime strings)
             self.closed_trades = [
@@ -479,6 +485,13 @@ class SimulatedExchange:
                 f"{len(self.closed_trades)} closed, realized=${self.realized_pnl:+.2f}, "
                 f"cumulative_net=${self.get_cumulative_net_pnl():+.2f}"
             )
+
+            if n_shells_dropped:
+                logger.info(
+                    f"[OMS] STATE HYGIENE: dropped {n_shells_dropped} qty<=0 "
+                    f"shell position(s) at load; persisting cleaned state"
+                )
+                self._save_state()
 
         except Exception as exc:
             ts = datetime.now().strftime("%Y%m%dT%H%M%S")

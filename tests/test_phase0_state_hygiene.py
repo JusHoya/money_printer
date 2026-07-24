@@ -224,15 +224,17 @@ class TestExpirationSweepDropsShells:
         assert len(ex.positions) == 1
         assert ex.positions[0]["quantity"] == 5
 
-    def test_sweep_drops_real_id_1582_shell_from_vm_state(self, vm_fixtures):
-        """Load the actual VM exchange_state.json: the sweep must drop the
-        real id-1582 shell and persist the cleaned state."""
+    def test_real_id_1582_shell_from_vm_state_never_loads(self, vm_fixtures):
+        """Load the actual VM exchange_state.json: the qty<=0 load filter must
+        drop the real id-1582 shell at load time (stronger than the sweep —
+        the ghost never enters the open list at all), with no phantom close
+        and the closed history untouched. The sweep remains the second line
+        of defense for shells created in-memory (covered by the tests above)."""
         state_file, _ = vm_fixtures
         closes = []
         ex = SimulatedExchange(on_close=closes.append, state_file=state_file)
-        assert len(ex.positions) == 1
-        assert ex.positions[0]["id"] == 1582
-        assert ex.positions[0]["quantity"] == 0
+
+        assert ex.positions == [], "qty<=0 shell must be filtered at load"
         n_closed = len(ex.closed_trades)
 
         ex.update_market("BTC", 118000.0)

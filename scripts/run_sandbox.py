@@ -6,7 +6,7 @@ scorecard, and saves trade logs for model refinement.
 
 Usage:
     python scripts/run_sandbox.py
-    python scripts/run_sandbox.py --bot btc_15m --bot btc_hourly
+    python scripts/run_sandbox.py --bot weather
     python scripts/run_sandbox.py --balance 300 --duration 480
 """
 
