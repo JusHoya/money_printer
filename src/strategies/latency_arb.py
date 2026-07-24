@@ -1,5 +1,19 @@
 """Coinbase → Kalshi latency arbitrage strategy.
 
+============================================================================
+MOTHBALLED 2026-07-24 per PRD §4 A2 / review_2026_07_24 §4.
+NOT-FOR-CAPITAL EXPERIMENT — this strategy is intentionally unregistered:
+no bot wires it and no runtime path instantiates it. Its former consumers
+(the crypto 15m bots) were deleted in the Phase 0 teardown.
+
+Revival preconditions (ALL required before it may be wired to any bot):
+  - websocket feeds (Coinbase + Kalshi), not polled REST snapshots
+  - <1s event loop end-to-end
+  - maker/IOC order placement
+  - realistic fill model
+  - >=200 paper trades of evidence
+============================================================================
+
 Monitors a Coinbase WebSocket feed for rapid BTC price moves and
 trades the corresponding Kalshi 15-minute contract before the
 market reprices.  This is the highest-volume edge identified in
@@ -131,7 +145,8 @@ class LatencyArbStrategy(Strategy):
             return signals
 
         # 2026-06-10 fix: prefer the real API floor_strike (extra["strike"],
-        # populated by the 15m bot at crypto_15m_bot.py:116). For 15m crypto
+        # which the former 15m crypto bot injected — that bot was deleted in
+        # the Phase 0 teardown; any future consumer must inject it). For 15m crypto
         # tickers (KX{ASSET}15M-...-{MM}) the symbol's LAST segment is the expiry
         # MINUTE LABEL (00/15/30/45), NOT a strike, so _extract_strike returns
         # garbage (e.g. 0.0 for "-00") — which breaks this strategy's fair-value

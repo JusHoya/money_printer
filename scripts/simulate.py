@@ -9,7 +9,7 @@ Usage:
     python scripts/simulate.py --strategy <strategy_name> --days <number_of_days>
 
 Options:
-    --strategy  Name of the strategy to test (e.g., 'weather', 'crypto').
+    --strategy  Name of the strategy to test (only 'weather' remains).
     --days      Number of days to simulate (default: 30).
     --optimize  Flag to run hyperparameter optimization.
 """
@@ -53,47 +53,11 @@ def run_simulation(strategy_name, days, optimize, use_live=False):
         else:
             providers = [MockNWSProvider()]
 
-    elif strategy_name.lower() == "btc_15m":
-        from src.strategies.crypto_strategy import Crypto15mTrendStrategyV3
-
-        strategy = Crypto15mTrendStrategyV3()
-        if use_live:
-            from src.data.coinbase_provider import CoinbaseProvider
-
-            providers = [CoinbaseProvider("BTC-USD")]
-        else:
-            from src.data.mock_providers import MockCoinbaseProvider
-
-            providers = [MockCoinbaseProvider(initial_price=84000.0, seed=42)]
-            providers[0].connect()
-
-    elif strategy_name.lower() == "btc_hourly":
-        from src.strategies.crypto_strategy import CryptoHourlyStrategyV3
-
-        strategy = CryptoHourlyStrategyV3()
-        if use_live:
-            from src.data.coinbase_provider import CoinbaseProvider
-
-            providers = [CoinbaseProvider("BTC-USD")]
-        else:
-            from src.data.mock_providers import MockCoinbaseProvider
-
-            providers = [MockCoinbaseProvider(initial_price=84000.0, seed=42)]
-            providers[0].connect()
-
-    elif strategy_name.lower() == "crypto":
-        from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2
-
-        strategy = Crypto15mTrendStrategyV2()
-        if use_live:
-            from src.data.coinbase_provider import CoinbaseProvider
-
-            providers = [CoinbaseProvider("BTC-USD")]
-        else:
-            print("Mock Crypto Provider not implemented yet. Use --live for now.")
-            return
+    # Phase 0 teardown (2026-07-24, PRD FR-0.1): the crypto strategy branches
+    # (btc_15m / btc_hourly / crypto) were removed with the deleted crypto
+    # strategies. Weather is the only simulatable strategy.
     else:
-        print(f"Unknown strategy: {strategy_name}")
+        print(f"Unknown strategy: {strategy_name} (only 'weather' is supported)")
         return
 
     print("\n--- Simulation Started ---")
@@ -119,14 +83,14 @@ if __name__ == "__main__":
         "--strategy",
         type=str,
         default=None,
-        help="Strategy to simulate (weather|crypto)",
+        help="Strategy to simulate (weather)",
     )
     parser.add_argument(
         "--bot",
         type=str,
         default=None,
-        choices=["btc_15m", "btc_hourly", "weather"],
-        help="Bot preset (btc_15m|btc_hourly|weather). Takes precedence over --strategy.",
+        choices=["weather"],
+        help="Bot preset (weather). Takes precedence over --strategy.",
     )
     parser.add_argument("--days", type=int, default=30, help="Days (steps) to simulate")
     parser.add_argument(
@@ -142,8 +106,6 @@ if __name__ == "__main__":
 
     # --bot maps to a strategy name for run_simulation
     BOT_MAP = {
-        "btc_15m": "btc_15m",
-        "btc_hourly": "btc_hourly",
         "weather": "weather",
     }
 

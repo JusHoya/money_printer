@@ -330,9 +330,11 @@ def test_reset_apply_backs_up_and_repairs(tmp_path, monkeypatch):
     assert any("trade_journal" in b.name for b in backups)
 
     # Win rates rebuilt from truth: the single YES trade actually settled NO,
-    # so the YES holder LOST -> 0 wins / 1 total for ML BTC 15m.
+    # so the YES holder LOST -> a one-outcome loss window for ML BTC 15m
+    # (FR-0.6 windowed schema: {"window": [...], "updated": iso-ts}).
     wr = json.loads(paths["wr"].read_text(encoding="utf-8"))
-    assert wr["ML BTC 15m"] == [0, 1]
+    assert wr["ML BTC 15m"]["window"] == [0]
+    assert "updated" in wr["ML BTC 15m"]
 
     # Exchange state re-scored: the +9.9 fiction is gone; pnl now reflects the
     # real NO settlement loss (negative), and cumulative updated to match.

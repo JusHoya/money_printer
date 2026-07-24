@@ -1,8 +1,10 @@
-"""Bot plugin system. Import all bot modules for auto-registration."""
+"""Bot plugin system. Import all bot modules for auto-registration.
 
-from src.bots.btc_15m_bot import BTC15mBot
-from src.bots.btc_hourly_bot import BTCHourlyBot
+Phase 0 teardown (2026-07-24, PRD FR-0.1): the crypto bots (btc_15m,
+btc_hourly, eth/sol/doge/xrp_15m) were deleted. The weather bot is the
+only registered bot; it runs feed-only until the Phase 1-3 rebuild.
+"""
+
 from src.bots.weather_bot import WeatherBot
-from src.bots.crypto_15m_bot import Crypto15mBot  # registers eth/sol/doge/xrp_15m
 
-__all__ = ["BTC15mBot", "BTCHourlyBot", "WeatherBot", "Crypto15mBot"]
+__all__ = ["WeatherBot"]

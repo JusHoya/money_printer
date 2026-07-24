@@ -1,8 +1,9 @@
 import json
 import os
+from collections import deque
 from dataclasses import dataclass
 from typing import Optional
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 from src.core.matching_engine import SimulatedExchange, _DEFAULT_STATE_FILE
 from src.core.fee_calculator import ev_after_fees, compute_fee  # noqa: F401
@@ -30,6 +31,69 @@ BANKROLL_STAGES = [
 FEE_TOLERANCE = 0.02
 
 WIN_RATES_PATH = os.path.join("data", "strategy_win_rates.json")
+
+# FR-0.6: recency-windowed win-rate tracking. Only the last WIN_RATE_WINDOW
+# closed-trade outcomes per strategy are retained, so a poisoned era can no
+# longer zero-size signals forever (the "ML BTC 15m": [30, 1048] deadlock).
+WIN_RATE_WINDOW = 50
+# Win-rate influences Kelly sizing only once the window holds this many samples.
+MIN_WIN_SAMPLES = 20
+
+
+class RejectReason:
+    """FR-0.4 stable reason codes for risk rejections and zero-sizing.
+
+    Every rejection emitted by the RiskManager logs one of these codes at
+    INFO via :func:`log_rejection`. ``EV_GATE`` is defined here so the EV
+    gate (which lives with signal processing, not in this class) shares the
+    same stable vocabulary and log format.
+    """
+
+    KELLY_ZERO = "KELLY_ZERO"
+    EV_GATE = "EV_GATE"
+    MAX_EXPOSURE = "MAX_EXPOSURE"
+    DAILY_DRAWDOWN = "DAILY_DRAWDOWN"
+    STRATEGY_DRAWDOWN = "STRATEGY_DRAWDOWN"
+    COOLDOWN_SYMBOL = "COOLDOWN_SYMBOL"
+    COOLDOWN_STRATEGY = "COOLDOWN_STRATEGY"
+    TRADE_INTERVAL = "TRADE_INTERVAL"
+    INSUFFICIENT_BALANCE = "INSUFFICIENT_BALANCE"
+    DAILY_TRADE_CAP = "DAILY_TRADE_CAP"
+    CIRCUIT_BREAKER = "CIRCUIT_BREAKER"
+    FINAL_MINUTE_FREEZE = "FINAL_MINUTE_FREEZE"
+    POSITION_TOO_LARGE = "POSITION_TOO_LARGE"
+    MAX_POSITIONS = "MAX_POSITIONS"
+    CORRELATION_LIMIT = "CORRELATION_LIMIT"
+    WEATHER_ALLOCATION = "WEATHER_ALLOCATION"
+
+
+def log_rejection(reason: str, strategy: str = "", symbol: str = "", **context):
+    """Emit the FR-0.4 rejection line at INFO with a stable, greppable shape.
+
+    Format::
+
+        [Risk] REJECT strategy=<name> symbol=<ticker> reason=<CODE> k=v ...
+
+    ``None`` context values are dropped; floats are compacted (0.3700 -> 0.37).
+    Public so signal-processing code (EV gate, sizing callers) can reuse the
+    exact same format and vocabulary.
+    """
+    parts = [
+        f"[Risk] REJECT strategy={strategy or '-'}",
+        f"symbol={symbol or '-'}",
+        f"reason={reason}",
+    ]
+    for key, value in context.items():
+        if value is None:
+            continue
+        if isinstance(value, float):
+            text = f"{value:.4f}".rstrip("0").rstrip(".")
+            if text in ("", "-"):
+                text = "0"
+        else:
+            text = str(value)
+        parts.append(f"{key}={text}")
+    logger.info(" ".join(parts))
 
 
 def _get_bankroll_stage(balance: float) -> tuple:
@@ -97,8 +161,11 @@ class RiskManager:
         # Sprint 4: optional circuit breaker (set by orchestrator)
         self.circuit_breaker = None
 
-        # Sprint 6: historical win rates for calibrated Kelly sizing
-        self.strategy_win_rates: dict = {}  # strategy_name -> (wins, total)
+        # FR-0.6: recency-windowed win records for calibrated Kelly sizing.
+        # strategy_name -> deque of 1/0 outcomes (maxlen=WIN_RATE_WINDOW).
+        # Replaces the Sprint 6 cumulative-forever (wins, total) counters.
+        self.strategy_win_records: dict = {}
+        self._win_rate_updated: dict = {}  # strategy_name -> iso timestamp
         self._load_win_rates()
 
         # Sprint 6: escalating cooldown after consecutive losses
@@ -132,12 +199,15 @@ class RiskManager:
             f"[Risk] 💰 SETTLEMENT: Profit ${pnl:+.2f} -> Balance: ${self.balance:.2f} | Strategy: {strategy_name}"
         )
 
-        # Sprint 6: Track per-strategy win rates for calibrated Kelly
-        wins, total = self.strategy_win_rates.get(strategy_name, (0, 0))
-        total += 1
-        if pnl > -FEE_TOLERANCE:
-            wins += 1
-        self.strategy_win_rates[strategy_name] = (wins, total)
+        # FR-0.6: recency-windowed win record (last WIN_RATE_WINDOW closed
+        # trades per strategy). The deque evicts the oldest outcome once
+        # full, so no single poisoned era can dominate sizing forever.
+        record = self.strategy_win_records.get(strategy_name)
+        if record is None:
+            record = deque(maxlen=WIN_RATE_WINDOW)
+            self.strategy_win_records[strategy_name] = record
+        record.append(1 if pnl > -FEE_TOLERANCE else 0)
+        self._win_rate_updated[strategy_name] = datetime.now(timezone.utc).isoformat()
 
         # Sprint 6: Escalating cooldown after consecutive losses
         if pnl > -FEE_TOLERANCE:
@@ -173,28 +243,68 @@ class RiskManager:
             self._save_win_rates()
 
     def _load_win_rates(self):
-        """Load persisted win rates from disk if available."""
+        """Load persisted per-strategy win windows from disk if available.
+
+        FR-0.6 format: ``{"Strategy": {"window": [1, 0, ...], "updated": iso}}``.
+        Legacy-format entries (``[wins, total]`` cumulative counters) are
+        deliberately IGNORED — the pivot resets win-rate history, so a legacy
+        entry is treated as absent (neutral 0.5 prior in Kelly) rather than
+        migrated. The load never crashes on an old, mixed, or malformed file.
+        """
+        self.strategy_win_records = {}
+        self._win_rate_updated = {}
         try:
-            if os.path.exists(WIN_RATES_PATH):
-                with open(WIN_RATES_PATH, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self.strategy_win_rates = {k: tuple(v) for k, v in data.items()}
+            if not os.path.exists(WIN_RATES_PATH):
+                return
+            with open(WIN_RATES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning("[Risk] Win-rate file is not a JSON object; ignoring it")
+                return
+            ignored_legacy = 0
+            for name, value in data.items():
+                if isinstance(value, dict) and isinstance(value.get("window"), list):
+                    window = [1 if x else 0 for x in value["window"]]
+                    window = window[-WIN_RATE_WINDOW:]
+                    self.strategy_win_records[name] = deque(
+                        window, maxlen=WIN_RATE_WINDOW
+                    )
+                    if value.get("updated"):
+                        self._win_rate_updated[name] = value["updated"]
+                else:
+                    # Legacy [wins, total] (or unknown shape): pivot reset.
+                    ignored_legacy += 1
+            if ignored_legacy:
                 logger.info(
-                    f"[Risk] Loaded win rates for {len(self.strategy_win_rates)} strategies"
+                    "[Risk] Ignored %d legacy-format win-rate entries "
+                    "(deliberate pivot reset; scripts/purge_stale_state.py "
+                    "archives them)",
+                    ignored_legacy,
+                )
+            if self.strategy_win_records:
+                logger.info(
+                    "[Risk] Loaded win windows for %d strategies",
+                    len(self.strategy_win_records),
                 )
         except Exception as e:
             logger.warning(f"[Risk] Could not load win rates: {e}")
+            self.strategy_win_records = {}
+            self._win_rate_updated = {}
 
     def _save_win_rates(self):
-        """Persist win rates to disk."""
+        """Persist per-strategy win windows to disk (FR-0.6 format)."""
         try:
             os.makedirs(os.path.dirname(WIN_RATES_PATH) or ".", exist_ok=True)
+            payload = {
+                name: {
+                    "window": [int(x) for x in record],
+                    "updated": self._win_rate_updated.get(name)
+                    or datetime.now(timezone.utc).isoformat(),
+                }
+                for name, record in self.strategy_win_records.items()
+            }
             with open(WIN_RATES_PATH, "w", encoding="utf-8") as f:
-                json.dump(
-                    {k: list(v) for k, v in self.strategy_win_rates.items()},
-                    f,
-                    indent=2,
-                )
+                json.dump(payload, f, indent=2)
         except Exception as e:
             logger.warning(f"[Risk] Could not save win rates: {e}")
 
@@ -260,7 +370,11 @@ class RiskManager:
             logger.info("[RiskManager] [NEW DAY] Daily PnL reset.")
 
     def calculate_kelly_size(
-        self, confidence: float, price: float, strategy_name: str = ""
+        self,
+        confidence: float,
+        price: float,
+        strategy_name: str = "",
+        symbol: str = "",
     ) -> int:
         """Position sizing using Quarter-Kelly with bankroll-stage awareness.
 
@@ -268,8 +382,24 @@ class RiskManager:
         prevent oversizing. Research (Bertsimas & Mundru 2024): when model
         confidence is 0.95 but actual WR is 0.45, full-Kelly sizing is
         catastrophic. Blend historical WR with dampened confidence.
+
+        FR-0.6: the historical win rate comes from the recency window (last
+        WIN_RATE_WINDOW closed trades); with fewer than MIN_WIN_SAMPLES in
+        the window the neutral 0.5 prior is used, so a reset strategy sizes
+        like an unknown one instead of inheriting a poisoned history.
+
+        FR-0.4: every zero return is logged at INFO with reason=KELLY_ZERO —
+        this was the silent kill-switch (skips were DEBUG-only downstream).
         """
         if price <= 0 or price >= 1.0:
+            log_rejection(
+                RejectReason.KELLY_ZERO,
+                strategy_name,
+                symbol,
+                detail="PRICE_OUT_OF_RANGE",
+                price=price,
+                confidence=confidence,
+            )
             return 0
 
         # Bankroll stage determines Kelly fraction and trade cap
@@ -282,16 +412,27 @@ class RiskManager:
         net_win = (1.0 - price) - 2.0 * fee_per
         net_loss = price + 2.0 * fee_per
         if net_win <= 0:
+            log_rejection(
+                RejectReason.KELLY_ZERO,
+                strategy_name,
+                symbol,
+                detail="FEES_EXCEED_PAYOFF",
+                price=price,
+                fee_per=fee_per,
+            )
             return 0
         b = net_win / net_loss
 
         # 2. Calibrated probability using historical win rate
         # Blend: 60% historical WR + 40% dampened confidence
-        historical_wr = 0.50  # Neutral prior until we have data
-        if strategy_name and strategy_name in self.strategy_win_rates:
-            wins, total = self.strategy_win_rates[strategy_name]
-            if total >= 20:  # Need sufficient sample
-                historical_wr = wins / total
+        historical_wr = 0.50  # Neutral prior until the window has data
+        n_samples = 0
+        if strategy_name:
+            record = self.strategy_win_records.get(strategy_name)
+            if record:
+                n_samples = len(record)
+                if n_samples >= MIN_WIN_SAMPLES:  # Need sufficient sample
+                    historical_wr = sum(record) / n_samples
 
         p = 0.6 * historical_wr + 0.4 * confidence
         q = 1.0 - p
@@ -301,6 +442,18 @@ class RiskManager:
         f_fractional = f * kelly_frac
 
         if f_fractional <= 0:
+            log_rejection(
+                RejectReason.KELLY_ZERO,
+                strategy_name,
+                symbol,
+                p=p,
+                price=price,
+                b=b,
+                f=f,
+                win_rate=historical_wr,
+                samples=n_samples,
+                confidence=confidence,
+            )
             return 0
 
         # 4. Hard cap (stage-dependent trade %)
@@ -355,6 +508,9 @@ class RiskManager:
         strategy_name: str = None,
         expiration_time=None,
         symbol: str = "",
+        side: str = "",
+        price: float = None,
+        quantity: int = None,
     ) -> bool:
         """Returns True if the order is safe to execute.
 
@@ -362,13 +518,23 @@ class RiskManager:
         limit, bankroll-stage max positions.
         Sprint 6 additions: daily trade cap, exact-ticker cooldown,
         escalating strategy cooldown, entry price filter.
+        FR-0.4: every rejection logs at INFO via log_rejection with a
+        stable reason code. ``side``/``price``/``quantity`` are optional
+        signal context passed through to the log line when provided.
         """
         self._reset_daily_stats_if_needed()
+        strat = strategy_name or ""
+        sig_ctx = {"side": side or None, "price": price, "quantity": quantity}
 
         # Daily trade cap
         if self.daily_trade_count >= self.MAX_DAILY_TRADES:
-            logger.info(
-                f"[Risk] REJECT: Daily trade cap reached ({self.MAX_DAILY_TRADES})"
+            log_rejection(
+                RejectReason.DAILY_TRADE_CAP,
+                strat,
+                symbol,
+                count=self.daily_trade_count,
+                cap=self.MAX_DAILY_TRADES,
+                **sig_ctx,
             )
             return False
 
@@ -379,9 +545,12 @@ class RiskManager:
                 remaining = (
                     self.strategy_cooldown[strategy_name] - now
                 ).total_seconds()
-                logger.info(
-                    f"[Risk] [REJECT] Strategy cooldown: {strategy_name} "
-                    f"({remaining:.0f}s remaining)"
+                log_rejection(
+                    RejectReason.COOLDOWN_STRATEGY,
+                    strat,
+                    symbol,
+                    remaining_s=round(remaining),
+                    **sig_ctx,
                 )
                 return False
             else:
@@ -400,7 +569,13 @@ class RiskManager:
                 daily_pnl=self.daily_pnl,
                 bankroll=self.starting_balance_day,
             ):
-                logger.warning("[Risk] [REJECT] Circuit breaker tripped")
+                log_rejection(
+                    RejectReason.CIRCUIT_BREAKER,
+                    strat,
+                    symbol,
+                    daily_pnl=self.daily_pnl,
+                    **sig_ctx,
+                )
                 return False
 
         # 0.5. Final Minute Freeze
@@ -421,18 +596,24 @@ class RiskManager:
                 )
                 time_to_expiry_sec = (expiry_dt - now).total_seconds()
                 if 0 < time_to_expiry_sec <= 60:
-                    logger.warning(
-                        "[Risk] [REJECT] FINAL MINUTE FREEZE: %.1fs until expiry.",
-                        time_to_expiry_sec,
+                    log_rejection(
+                        RejectReason.FINAL_MINUTE_FREEZE,
+                        strat,
+                        symbol,
+                        tte_s=round(time_to_expiry_sec, 1),
+                        **sig_ctx,
                     )
                     return False
 
         # 1. Capital Check
         if proposed_cost > self.balance:
-            logger.warning(
-                "[Risk] [REJECT] Insufficient Funds ($%.2f < $%.2f)",
-                self.balance,
-                proposed_cost,
+            log_rejection(
+                RejectReason.INSUFFICIENT_BALANCE,
+                strat,
+                symbol,
+                balance=self.balance,
+                cost=proposed_cost,
+                **sig_ctx,
             )
             return False
 
@@ -440,31 +621,42 @@ class RiskManager:
         trade_pct, max_positions, _, stage = _get_bankroll_stage(self.balance)
         max_trade_size = self.balance * trade_pct
         if proposed_cost > max_trade_size + 1.0:
-            logger.warning(
-                "[Risk] [REJECT] Position too large for %s stage ($%.2f > $%.2f)",
-                stage,
-                proposed_cost,
-                max_trade_size,
+            log_rejection(
+                RejectReason.POSITION_TOO_LARGE,
+                strat,
+                symbol,
+                stage=stage,
+                cost=proposed_cost,
+                max=max_trade_size,
+                **sig_ctx,
             )
             return False
 
         # 2.5 Max positions (bankroll-stage-aware)
         if len(self.exchange.positions) >= max_positions:
-            logger.warning(
-                "[Risk] [REJECT] Max positions for %s stage (%d/%d)",
-                stage,
-                len(self.exchange.positions),
-                max_positions,
+            log_rejection(
+                RejectReason.MAX_POSITIONS,
+                strat,
+                symbol,
+                stage=stage,
+                open=len(self.exchange.positions),
+                max=max_positions,
+                **sig_ctx,
             )
             return False
 
         # 3. Drawdown Limit (Kill Switch)
         if self.daily_pnl < -(self.starting_balance_day * self.MAX_DAILY_DRAWDOWN_PCT):
-            logger.warning(
-                "[Risk] [KILL] KILL SWITCH: Daily Drawdown Limit Hit ($%.2f)",
-                self.daily_pnl,
-            )
             self.drawdown_kill_triggered = True
+            log_rejection(
+                RejectReason.DAILY_DRAWDOWN,
+                strat,
+                symbol,
+                daily_pnl=self.daily_pnl,
+                limit=-(self.starting_balance_day * self.MAX_DAILY_DRAWDOWN_PCT),
+                kill_switch=True,
+                **sig_ctx,
+            )
             return False
 
         # 3.5 Strategy Drawdown Limit (peak-relative)
@@ -480,14 +672,15 @@ class RiskManager:
             capital_base = self.starting_balance_day + max(peak, 0.0)
             drawdown = peak - strat_pnl
             if drawdown > capital_base * self.MAX_STRATEGY_DRAWDOWN_PCT:
-                logger.warning(
-                    "[Risk] [REJECT] STRATEGY DRAWDOWN: %s "
-                    "(peak=$%.2f, pnl=$%.2f, dd=$%.2f, base=$%.2f)",
-                    strategy_name,
-                    peak,
-                    strat_pnl,
-                    drawdown,
-                    capital_base,
+                log_rejection(
+                    RejectReason.STRATEGY_DRAWDOWN,
+                    strat,
+                    symbol,
+                    peak=peak,
+                    pnl=strat_pnl,
+                    dd=drawdown,
+                    base=capital_base,
+                    **sig_ctx,
                 )
                 return False
 
@@ -495,10 +688,14 @@ class RiskManager:
         current_total_exposure = self.get_current_exposure()
         max_exposure = self.balance * self.MAX_PORTFOLIO_EXPOSURE_PCT
         if (current_total_exposure + proposed_cost) > max_exposure:
-            logger.warning(
-                "[Risk] [REJECT] Max Portfolio Exposure (%.2f/%.2f)",
-                current_total_exposure,
-                max_exposure,
+            log_rejection(
+                RejectReason.MAX_EXPOSURE,
+                strat,
+                symbol,
+                exposure=current_total_exposure,
+                cost=proposed_cost,
+                max=max_exposure,
+                **sig_ctx,
             )
             return False
 
@@ -517,11 +714,14 @@ class RiskManager:
                 and p["side"] == "sell"
             )
             if max(buy_count, sell_count) >= self.MAX_SAME_DIRECTION_BTC:
-                logger.warning(
-                    "[Risk] [REJECT] BTC correlation limit (buy=%d sell=%d max=%d)",
-                    buy_count,
-                    sell_count,
-                    self.MAX_SAME_DIRECTION_BTC,
+                log_rejection(
+                    RejectReason.CORRELATION_LIMIT,
+                    strat,
+                    symbol,
+                    buy=buy_count,
+                    sell=sell_count,
+                    max=self.MAX_SAME_DIRECTION_BTC,
+                    **sig_ctx,
                 )
                 return False
 
@@ -530,20 +730,27 @@ class RiskManager:
             max_weather = self.balance * 0.30
             current_weather = self.get_current_exposure(category="weather")
             if (current_weather + proposed_cost) > max_weather:
-                logger.warning(
-                    "[Risk] [REJECT] Max Weather Allocation (%.2f/%.2f)",
-                    current_weather,
-                    max_weather,
+                log_rejection(
+                    RejectReason.WEATHER_ALLOCATION,
+                    strat,
+                    symbol,
+                    exposure=current_weather,
+                    cost=proposed_cost,
+                    max=max_weather,
+                    **sig_ctx,
                 )
                 return False
 
         # 6. Rate Limiting
         seconds_since_last = (datetime.now() - self.last_trade_time).total_seconds()
         if seconds_since_last < self.MIN_TRADE_INTERVAL_SEC:
-            logger.info(
-                "[Risk] [WAIT] Rate Limit (%.1fs < %ds)",
-                seconds_since_last,
-                self.MIN_TRADE_INTERVAL_SEC,
+            log_rejection(
+                RejectReason.TRADE_INTERVAL,
+                strat,
+                symbol,
+                since_s=round(seconds_since_last, 1),
+                min_s=self.MIN_TRADE_INTERVAL_SEC,
+                **sig_ctx,
             )
             return False
 
@@ -556,12 +763,27 @@ class RiskManager:
         if symbol:
             # Check exact ticker match
             if symbol in self.loss_cooldown:
-                logger.info(f"[Risk] [REJECT] Loss cooldown active for {symbol}")
+                log_rejection(
+                    RejectReason.COOLDOWN_SYMBOL,
+                    strat,
+                    symbol,
+                    scope="exact",
+                    until=self.loss_cooldown[symbol].strftime("%H:%M:%S"),
+                    **sig_ctx,
+                )
                 return False
             # Secondary guard: check series prefix
             prefix = symbol.split("-")[0] if "-" in symbol else symbol
             if prefix in self.loss_cooldown:
-                logger.info(f"[Risk] [REJECT] Loss cooldown active for series {prefix}")
+                log_rejection(
+                    RejectReason.COOLDOWN_SYMBOL,
+                    strat,
+                    symbol,
+                    scope="series",
+                    series=prefix,
+                    until=self.loss_cooldown[prefix].strftime("%H:%M:%S"),
+                    **sig_ctx,
+                )
                 return False
 
         self.daily_trade_count += 1

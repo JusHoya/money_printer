@@ -9,7 +9,7 @@ Modes:
 
 Usage:
   python scripts/lab.py --audit
-  python scripts/lab.py --optimize [--strategy crypto|weather]
+  python scripts/lab.py --optimize [--strategy weather]
   python scripts/lab.py --refine [--threshold 80]
 """
 
@@ -27,11 +27,10 @@ sys.path.append(os.getcwd())
 
 from src.core.interfaces import MarketData
 from src.core.matching_engine import SimulatedExchange
-from src.strategies.crypto_strategy import (
-    Crypto15mTrendStrategyV2,
-    Crypto15mTrendStrategyV3,
-)
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
+
+# Phase 0 teardown (2026-07-24, PRD FR-0.1): the crypto strategies (V2/V3)
+# were deleted; the lab now audits/optimizes weather only.
 
 # --- CONFIGURATION ---
 LOG_DIR = "logs"
@@ -39,14 +38,10 @@ AUDIT_REPORT_FILE = os.path.join(LOG_DIR, "audit_report.json")
 OPTIMAL_PARAMS_FILE = os.path.join(LOG_DIR, "optimal_params.json")
 
 BOT_SYMBOL_FILTERS = {
-    "btc_15m": ["BTC"],
-    "btc_hourly": ["BTC"],
     "weather": ["HIGH", "LOW", "RAIN"],
 }
 
 BOT_STRATEGY_KEYS = {
-    "btc_15m": ["Crypto V2", "Crypto V3"],
-    "btc_hourly": ["Crypto V2", "Crypto V3"],
     "weather": ["Weather V2"],
 }
 
@@ -111,8 +106,6 @@ class Lab:
 
         # Instantiate strategies
         all_strategies = {
-            "Crypto V2": Crypto15mTrendStrategyV2(),
-            "Crypto V3": Crypto15mTrendStrategyV3(),
             "Weather V2": WeatherArbitrageStrategyV2(),
         }
 
@@ -158,35 +151,11 @@ class Lab:
             # Route to correct strategy
             for name, strategy in strategies.items():
                 # Filter for strategy relevance
-                is_crypto = "BTC" in md.symbol or "ETH" in md.symbol
                 is_weather = (
                     "HIGH" in md.symbol or "LOW" in md.symbol or "RAIN" in md.symbol
                 )
 
-                if name in ("Crypto V2", "Crypto V3") and is_crypto:
-                    oms = oms_instances[name]
-                    # Update OMS market price for tracking
-                    if "BTC" in md.symbol:
-                        oms.update_market("BTC", md.price)
-
-                    sigs = strategy.analyze(md)
-                    for s in sigs:
-                        ticker = (
-                            s.symbol
-                            if "BTC-USD" not in s.symbol
-                            else f"KXBTC-AUDIT-{count}"
-                        )
-                        oms.open_position(
-                            ticker,
-                            s.side,
-                            s.limit_price,
-                            s.quantity,
-                            getattr(s, "stop_loss", 0),
-                            getattr(s, "trailing_rules", None),
-                            getattr(s, "expiration_time", None),
-                        )
-
-                elif name == "Weather V2" and is_weather:
+                if name == "Weather V2" and is_weather:
                     oms = oms_instances[name]
                     # Weather doesn't need "update_market" global price usually, specific to contract
                     # But we simulate fills
@@ -247,14 +216,6 @@ class Lab:
             return
 
         # Parameter Grids
-        # Crypto V2
-        crypto_grid = {
-            "bull_trigger": [0.55, 0.60, 0.65],
-            "bear_trigger": [0.45, 0.40, 0.35],
-            "confirmation_delay": [0, 60],  # Reduced for speed
-            "mean_reversion_threshold": [0.03, 0.05],
-        }
-
         # Weather V2
         weather_grid = {
             "threshold": [0.10, 0.15, 0.20],
@@ -264,13 +225,6 @@ class Lab:
         best_configs = {}
 
         strategies_to_test = []
-        if target_strategy in ["all", "crypto"]:
-            strategies_to_test.append(
-                ("Crypto V2", Crypto15mTrendStrategyV2, crypto_grid)
-            )
-            strategies_to_test.append(
-                ("Crypto V3", Crypto15mTrendStrategyV3, crypto_grid)
-            )
         if target_strategy in ["all", "weather"]:
             strategies_to_test.append(
                 ("Weather V2", WeatherArbitrageStrategyV2, weather_grid)
@@ -306,13 +260,7 @@ class Lab:
 
                 # Pre-filter for speed
                 relevant_data = self.data  # Default all
-                if name in ("Crypto V2", "Crypto V3"):
-                    relevant_data = [
-                        d
-                        for d in self.data
-                        if "BTC" in d["Symbol"] or "ETH" in d["Symbol"]
-                    ]
-                elif name == "Weather V2":
+                if name == "Weather V2":
                     relevant_data = [
                         d
                         for d in self.data
@@ -333,19 +281,10 @@ class Lab:
                     except Exception:
                         continue
 
-                    if name in ("Crypto V2", "Crypto V3") and "BTC" in md.symbol:
-                        oms.update_market("BTC", md.price)
-
                     sigs = strategy.analyze(md)
                     for s in sigs:
-                        # Unique ID for simulation
-                        ticker = (
-                            s.symbol
-                            if "BTC-USD" not in s.symbol
-                            else f"KXBTC-{i}-{count}"
-                        )
                         oms.open_position(
-                            ticker,
+                            s.symbol,
                             s.side,
                             s.limit_price,
                             s.quantity,
@@ -427,10 +366,9 @@ class Lab:
         # 2. Optimize
         print(f"\n🔄 initiating Optimization for: {', '.join(strategies_to_optimize)}")
 
-        # Map friendly names to "crypto"/"weather" keys
-        for s_name in strategies_to_optimize:
-            target = "crypto" if "Crypto" in s_name else "weather"
-            self.run_optimization(target_strategy=target)
+        # Only weather strategies remain post-teardown.
+        for _s_name in strategies_to_optimize:
+            self.run_optimization(target_strategy="weather")
 
         print("\n✅ Refinement Cycle Complete.")
 
@@ -453,7 +391,7 @@ if __name__ == "__main__":
         "--strategy",
         type=str,
         default="all",
-        help="Target strategy for optimization (crypto/weather)",
+        help="Target strategy for optimization (weather)",
     )
     parser.add_argument(
         "--threshold",
@@ -465,8 +403,8 @@ if __name__ == "__main__":
         "--bot",
         type=str,
         default=None,
-        choices=["btc_15m", "btc_hourly", "weather"],
-        help="Filter strategies by bot (btc_15m, btc_hourly, weather)",
+        choices=["weather"],
+        help="Filter strategies by bot (weather)",
     )
 
     args = parser.parse_args()

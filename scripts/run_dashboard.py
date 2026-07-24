@@ -1,3 +1,4 @@
+import fnmatch
 import shutil
 import time
 import threading
@@ -15,9 +16,8 @@ from src.data.kalshi_provider import KalshiProvider, is_test_symbol
 from src.core.risk_manager import RiskManager
 from src.bots.registry import BotRegistry
 from src.utils.system_utils import prevent_sleep
-from src.utils.logger import logger
+from src.utils.logger import logger, get_active_log_path, configure_root_logging
 from src.ml.trade_journal import TradeJournal, TradeOutcome
-from src.ml.online_updater import OnlineModelUpdater
 from src.strategies.counter_trade import CounterTradeAnalyzer
 from src.ml.settlement_resolver import SettlementResolver
 from src.notifications.discord import send_discord_notification
@@ -28,17 +28,17 @@ import src.bots  # noqa: F401
 
 class OrchestratorEngine:
     _TRAINING_STATE_PATH = os.path.join("data", "training_state.json")
-    _PERIODIC_RETRAIN_INTERVAL = 2 * 3600  # 2 hours
-    # 2026-06-10 fix (a) — if a (periodic) retrain finished within this window,
-    # the cycle-reset path skips its own redundant ~30-min in-process retrain
-    # and reuses the just-computed model/diagnostics, so the trading loop is not
-    # frozen on the live thread. The async daemon already keeps models current.
-    _CYCLE_RETRAIN_SKIP_WINDOW_S = 30 * 60  # 30 minutes
 
-    # 2026-06-10 fix (c) — runtime state marker the external watchdogs read so a
-    # normal retrain freeze widens their staleness margin instead of alerting.
-    # Contents: a single line "running" or "retraining" + a unix timestamp.
-    _STATE_MARKER_PATH = os.path.join("logs", ".orchestrator_state")
+    # Phase 0 teardown (2026-07-24, PRD FR-0.2): ALL runtime retrains removed —
+    # the periodic 2h daemon retrain, the cycle-boundary in-process retrain, the
+    # startup retrain, and the on-trade-close online updater. Training modules
+    # (src/ml/, scripts/train_*.py) remain on disk and are invocable OFFLINE
+    # only; nothing in the runtime path may import-and-run training.
+
+    # Phase 0 (2026-07-24): the ".orchestrator_state" runtime marker was
+    # removed — the redesigned watchdog no longer reads it (see comments in
+    # scripts/host_watchdog.sh, scripts/watchdog_cron.sh, scripts/vm_watchdog.py).
+
     # 2026-06-10 fix (b) — records the sim balance this process launched with so
     # a watchdog auto-restart reuses it instead of hardcoding $3000 (which would
     # silently override a future Phase-2 $500 run).
@@ -92,28 +92,14 @@ class OrchestratorEngine:
         self._cycle_start_time = time.time()
         self._profitable_since = None  # timestamp when PnL last went positive
         self.cycle_history = []  # list of cycle result dicts
-        self._training_diagnostics = {}  # latest training metrics
+        self._training_diagnostics = {}  # legacy training metrics (offline only)
         self._training_history = []  # accumulated training history (max 20)
-        self._last_periodic_retrain = time.time()
-        # Periodic retrain runs on a daemon thread so a ~30-min retrain never
-        # blocks market polling, bot ticks, or position management. The lock
-        # guards against overlapping retrains; the flag lets the market loop
-        # skip scheduling a new one while one is in flight.
-        self._retrain_lock = threading.Lock()
-        self._is_retraining = False
 
         # Load persisted training state from prior runs
         self._load_training_state()
 
-        # Trade journal — records every closed trade for learning feedback
+        # Trade journal — records every closed trade for offline analysis
         self.trade_journal = TradeJournal()
-
-        # Online model updater — retrains between drawdown cycles
-        self.online_updater = OnlineModelUpdater(
-            predictor=None,  # set after bots are wired up
-            trade_journal=self.trade_journal,
-            kalshi_provider=self.kalshi,
-        )
 
         # Counter-trade analyzer — LOG-ONLY mode until validated
         self.counter_analyzer = CounterTradeAnalyzer(live=False)
@@ -122,16 +108,6 @@ class OrchestratorEngine:
         self.settlement_resolver = SettlementResolver(
             kalshi_provider=self.kalshi,
         )
-
-        # Wire online updater to the first available predictor
-        for bot in self.bots:
-            for strat in bot.strategies.values():
-                pred = getattr(strat, "predictor", None)
-                if pred:
-                    self.online_updater._predictor = pred
-                    break
-            if self.online_updater._predictor:
-                break
 
         logger.info(
             f"[Orchestrator] Active bots: {[b.name for b in self.bots]} | "
@@ -189,18 +165,16 @@ class OrchestratorEngine:
             f"[Orchestrator] Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}"
         )
 
-        # Record to trade journal for learning feedback
+        # Record to trade journal for offline analysis
         try:
             outcome = TradeOutcome.from_position(position)
             self.trade_journal.record(outcome)
         except Exception as exc:
             logger.warning("[Orchestrator] Journal record failed: %s", exc)
 
-        # Trigger online model update check (retrains if enough new data)
-        try:
-            self.online_updater.on_trade_close()
-        except Exception as exc:
-            logger.warning("[Orchestrator] Online update failed: %s", exc)
+        # NOTE (FR-0.2): the online-model-update trigger that used to run here
+        # (a full in-runtime retrain on the closing thread) was removed in the
+        # Phase 0 teardown. Training is offline-only now.
 
         # Forward Late Sniper closes for adaptive threshold
         for bot in self.bots:
@@ -208,21 +182,8 @@ class OrchestratorEngine:
                 bot.strategies["late_sniper"]._handle_position_close(position)
 
     # ------------------------------------------------------------------
-    # Runtime state markers (2026-06-10 fixes b + c) — best-effort, never raise
+    # Runtime state markers (2026-06-10 fix b) — best-effort, never raise
     # ------------------------------------------------------------------
-
-    def _write_state_marker(self, state: str) -> None:
-        """Write a tiny "running"/"retraining" + timestamp marker for the
-        external watchdog (scripts/host_watchdog.sh). During a "retraining"
-        state the watchdog widens its log-staleness margin so a normal ~30-min
-        retrain freeze does NOT trigger a false alert. Best-effort: any failure
-        is swallowed so this can never affect trading."""
-        try:
-            os.makedirs("logs", exist_ok=True)
-            with open(self._STATE_MARKER_PATH, "w", encoding="utf-8") as f:
-                f.write(f"{state} {int(time.time())}\n")
-        except Exception:
-            pass  # marker is advisory only
 
     def _write_sim_balance_marker(self) -> None:
         """Persist the sim balance this process launched with so a watchdog
@@ -235,15 +196,43 @@ class OrchestratorEngine:
         except Exception:
             pass
 
-    # 2026-06-10 fix (c): watchdog logs (host_watchdog.log / watchdog.log) live
-    # in logs/ and end in .log, so the .log cleanup passes below used to delete
-    # them at session start / cycle reset — destroying the very alert history the
-    # external watchdog appends to. Preserve them across all cleanup passes.
-    _PRESERVED_LOG_NAMES = ("host_watchdog.log", "watchdog.log")
+    # FR-0.3: files in logs/ that NO cleanup pass may ever remove — watchdog
+    # state/timestamp files, watchdog logs (the Phase-0 watchdog redesign
+    # depends on these surviving the startup and cycle sweeps), and the
+    # restart-balance marker. fnmatch patterns so timestamped variants match.
+    _PRESERVED_LOG_PATTERNS = (
+        "host_watchdog*.ts",
+        "watchdog_cron_endpoint_fail.ts",
+        "watchdog_last_alert.ts",
+        ".sim_balance",
+        "host_watchdog.log",
+        "watchdog_*.log",
+        "watchdog.log",  # legacy name, kept from the 2026-06-10 fix (c)
+    )
 
     @classmethod
     def _is_preserved_log(cls, filename: str) -> bool:
-        return filename in cls._PRESERVED_LOG_NAMES
+        return any(
+            fnmatch.fnmatch(filename, pattern)
+            for pattern in cls._PRESERVED_LOG_PATTERNS
+        )
+
+    def _protected_log_paths(self) -> set:
+        """Absolute paths the sweeps must never remove (FR-0.3): the current
+        dashboard session files plus this process's own active
+        money_printer_*.log (the 2026-07-24 review found the startup sweep
+        deleting the log the process was actively writing to)."""
+        protected = set()
+        dashboard = getattr(self, "dashboard", None)
+        if dashboard is not None:
+            for attr in ("data_log_path", "session_log_path", "portfolio_log_path"):
+                path = getattr(dashboard, attr, None)
+                if path:
+                    protected.add(os.path.abspath(path))
+        active_log = get_active_log_path()
+        if active_log:
+            protected.add(os.path.abspath(active_log))
+        return protected
 
     # ------------------------------------------------------------------
     # Training state persistence
@@ -425,209 +414,23 @@ class OrchestratorEngine:
         )
 
     # ------------------------------------------------------------------
-    # Shared retrain logic
+    # Startup archive
     # ------------------------------------------------------------------
 
-    def _retrain_from_all_data(self, include_live=False) -> dict:
-        """Retrain model from all archived (and optionally live) CSV data.
+    def _startup_archive(self):
+        """Archive stale CSVs from previous sessions.
 
-        Returns training metrics dict, empty on failure.
+        FR-0.2: the startup retrain that used to follow the archive pass was
+        removed in the Phase 0 teardown — training is offline-only now.
         """
-        import json as _json
-
-        try:
-            from scripts.train_from_csv import (
-                load_session,
-                extract_strikes_from_logs,
-                compute_labels_with_settlement,
-                infer_strikes,
-                build_features,
-                walk_forward_split,
-                train_xgboost,
-                compute_outcome_weights,
-            )
-            from pathlib import Path
-            import pandas as pd
-
-            archive_dir = Path("logs/_archive")
-            data_csvs = (
-                sorted(archive_dir.rglob("data_*.csv")) if archive_dir.exists() else []
-            )
-            log_files = (
-                sorted(archive_dir.rglob("money_printer_*.log"))
-                if archive_dir.exists()
-                else []
-            )
-
-            # Optionally include live CSVs from logs/ (for periodic/startup retrain)
-            if include_live:
-                logs_dir = Path("logs")
-                if logs_dir.exists():
-                    data_csvs.extend(sorted(logs_dir.glob("data_*.csv")))
-                    log_files.extend(sorted(logs_dir.glob("money_printer_*.log")))
-
-            if not data_csvs:
-                logger.warning("[Retrain] No data CSVs found")
-                return {}
-
-            log_strikes = extract_strikes_from_logs([str(p) for p in log_files])
-
-            # Deduplicate by filename
-            seen_names = set()
-            unique_csvs = []
-            for csv_path in data_csvs:
-                if csv_path.name not in seen_names:
-                    seen_names.add(csv_path.name)
-                    unique_csvs.append(csv_path)
-            skipped = len(data_csvs) - len(unique_csvs)
-            if skipped:
-                logger.info(
-                    "[Retrain] Dedup: %d unique CSVs (skipped %d duplicates)",
-                    len(unique_csvs),
-                    skipped,
-                )
-
-            all_btc, all_contract = [], []
-            for csv_path in unique_csvs:
-                btc_df, contract_df = load_session(str(csv_path))
-                if not btc_df.empty:
-                    all_btc.append(btc_df)
-                if not contract_df.empty:
-                    all_contract.append(contract_df)
-
-            if not all_btc or not all_contract:
-                logger.warning("[Retrain] No BTC or contract data found")
-                return {}
-
-            btc_df = (
-                pd.concat(all_btc, ignore_index=True)
-                .drop_duplicates(subset=["timestamp"])
-                .sort_values("timestamp")
-                .reset_index(drop=True)
-            )
-            contract_df = (
-                pd.concat(all_contract, ignore_index=True)
-                .drop_duplicates(subset=["timestamp", "symbol"])
-                .sort_values("timestamp")
-                .reset_index(drop=True)
-            )
-
-            unique_contracts = contract_df["symbol"].nunique()
-            logger.info(
-                "[Retrain] Data: %d BTC rows, %d contract rows, %d unique contracts, "
-                "%d unique CSVs",
-                len(btc_df),
-                len(contract_df),
-                unique_contracts,
-                len(unique_csvs),
-            )
-
-            labels = compute_labels_with_settlement(
-                contract_df, kalshi_provider=self.kalshi
-            )
-            if not labels:
-                logger.warning("[Retrain] No contracts could be labeled")
-                return {}
-
-            strikes = infer_strikes(btc_df, contract_df, log_strikes)
-            df = build_features(
-                btc_df, contract_df, strikes, labels, sample_interval_s=60
-            )
-
-            if len(df) < 20:
-                logger.warning("[Retrain] Not enough samples (%d) to train", len(df))
-                return {}
-
-            X_tr, y_tr, X_v, y_v, X_te, y_te = walk_forward_split(df)
-
-            # Compute outcome-weighted samples from trade journal
-            journal_outcomes = self.trade_journal.load_all()
-            weights = compute_outcome_weights(df, journal_outcomes)
-            n_tr = len(X_tr)
-            weights_tr = weights[:n_tr] if len(weights) >= n_tr else None
-
-            model = train_xgboost(X_tr, y_tr, X_v, y_v, sample_weight=weights_tr)
-
-            import joblib
-
-            feat_cols = [c for c in df.columns if c.startswith("feat_")]
-            joblib.dump(
-                {"model": model, "feature_names": feat_cols},
-                "data/models/btc_xgboost_latest.joblib",
-            )
-
-            # Compute metrics
-            from sklearn.metrics import roc_auc_score
-
-            val_auc = 0.0
-            try:
-                val_auc = roc_auc_score(y_v, model.predict_proba(X_v)[:, 1])
-            except Exception:
-                pass
-
-            train_metrics = {
-                "contracts_labeled": len(labels),
-                "training_samples": len(df),
-                "unique_contracts_observed": unique_contracts,
-                "unique_csvs": len(unique_csvs),
-                "feature_names": feat_cols,
-                "results": {
-                    "val": {"auc": float(val_auc), "n": len(X_v)},
-                },
-                "label_distribution": {
-                    "yes": int(sum(labels.values())),
-                    "no": len(labels) - int(sum(labels.values())),
-                },
-            }
-
-            # Save metadata
-            meta_path = os.path.join("data", "models", "btc_xgboost_feature_meta.json")
-            with open(meta_path, "w") as mf:
-                _json.dump(train_metrics, mf, indent=2)
-
-            logger.info(
-                "[Retrain] OK: %d labeled of %d observed contracts, "
-                "val AUC=%.4f, %d samples from %d CSVs",
-                len(labels),
-                unique_contracts,
-                val_auc,
-                len(df),
-                len(unique_csvs),
-            )
-            return train_metrics
-
-        except Exception as exc:
-            logger.error("[Retrain] Error: %s", exc)
-            return {}
-
-    def _reload_models_into_strategies(self) -> int:
-        """Hot-reload retrained models into all running strategies."""
-        reloaded = 0
-        for bot in self.bots:
-            for strat in bot.strategies.values():
-                pred = getattr(strat, "predictor", None)
-                if pred and hasattr(pred, "load_models"):
-                    pred.load_models()
-                    reloaded += 1
-        if reloaded:
-            logger.info("[Retrain] Reloaded models into %d strategies", reloaded)
-        return reloaded
-
-    # ------------------------------------------------------------------
-    # Startup archive + retrain
-    # ------------------------------------------------------------------
-
-    def _startup_archive_and_retrain(self):
-        """Archive stale CSVs from previous sessions and retrain from all data."""
         # Log data inventory BEFORE archiving to see what survived from last run
         self._log_data_inventory("STARTUP-BEFORE")
 
-        # Archive any leftover CSVs from logs/ that aren't the current session
-        active_files = {
-            os.path.abspath(self.dashboard.data_log_path),
-            os.path.abspath(self.dashboard.session_log_path),
-            os.path.abspath(self.dashboard.portfolio_log_path),
-        }
+        # Archive any leftover CSVs from logs/ that aren't the current session.
+        # FR-0.3: the protected set includes this process's own active
+        # money_printer_*.log — the old whitelist held only the dashboard's
+        # three files, so the sweep deleted the log it was writing to.
+        active_files = self._protected_log_paths()
 
         stale_files = []
         for f in os.listdir("logs"):
@@ -638,7 +441,7 @@ class OrchestratorEngine:
                 continue
             if os.path.abspath(fpath) in active_files:
                 continue
-            if self._is_preserved_log(f):  # 2026-06-10 fix (c): keep watchdog logs
+            if self._is_preserved_log(f):  # FR-0.3: keep watchdog state/logs
                 continue
             stale_files.append((f, fpath))
 
@@ -661,117 +464,110 @@ class OrchestratorEngine:
                 archived,
             )
 
-        # Retrain from all accumulated data (archive + any live CSVs)
-        prev_samples = self._training_diagnostics.get("training_samples", 0)
-        logger.info("[Startup] Retraining from all accumulated data...")
-        train_metrics = self._retrain_from_all_data(include_live=True)
-
-        if train_metrics:
-            new_samples = train_metrics.get("training_samples", 0)
-            self._training_diagnostics = train_metrics
-            self._reload_models_into_strategies()
-            self._save_training_state()
-
-            growth = new_samples - prev_samples
-            self.dashboard.log(
-                f"[Startup] Retrained: {new_samples} samples "
-                f"({growth:+d} vs last), "
-                f"{train_metrics.get('contracts_labeled', 0)} contracts"
-            )
-            if growth > 0:
-                self.dashboard.alert(
-                    f"STARTUP RETRAIN | {new_samples} samples "
-                    f"(+{growth} new) | "
-                    f"{train_metrics.get('contracts_labeled', 0)} contracts"
-                )
-        else:
-            logger.info("[Startup] No training data available (yet)")
-
-        # Log data inventory AFTER archiving/retrain for comparison
+        # Log data inventory AFTER archiving for comparison
         self._log_data_inventory("STARTUP-AFTER")
 
-    # ------------------------------------------------------------------
-    # Periodic retrain (every 2 hours)
-    # ------------------------------------------------------------------
+    def _cycle_archive_and_clean(self, archive_dir):
+        """Copy session CSV/log files into ``archive_dir``, then remove the
+        old ones from logs/ in a single pass.
 
-    def _periodic_retrain(self):
-        """Retrain from all data including the current live session."""
-        from datetime import datetime as _dt
-
-        prev_samples = self._training_diagnostics.get("training_samples", 0)
-        logger.info("[Periodic] Scheduled retrain from all data (including live)...")
-        train_metrics = self._retrain_from_all_data(include_live=True)
-
-        if train_metrics:
-            new_samples = train_metrics.get("training_samples", 0)
-            self._training_diagnostics = train_metrics
-
-            # Append to training history
-            self._training_history.append(
-                {
-                    "timestamp": _dt.now().isoformat(),
-                    "trigger": "periodic",
-                    "diagnostics": train_metrics,
-                }
-            )
-            if len(self._training_history) > 20:
-                self._training_history = self._training_history[-20:]
-
-            self._reload_models_into_strategies()
-            self._save_training_state()
-
-            growth = new_samples - prev_samples
-            self.dashboard.log(
-                f"[Periodic] Retrained: {new_samples} samples "
-                f"({growth:+d} vs last), "
-                f"{train_metrics.get('contracts_labeled', 0)} contracts"
-            )
-            if growth > 0:
-                self.dashboard.alert(
-                    f"PERIODIC RETRAIN | {new_samples} samples "
-                    f"(+{growth} new) | "
-                    f"{train_metrics.get('contracts_labeled', 0)} contracts"
-                )
-
-        self._last_periodic_retrain = time.time()
-
-    def _start_periodic_retrain_async(self):
-        """Launch _periodic_retrain on a daemon thread so it never blocks the
-        market loop.
-
-        _periodic_retrain computes new models and, on success, hot-swaps them
-        into the running strategies via _reload_models_into_strategies()
-        (which it calls internally). The market loop keeps ticking throughout.
-        The lock/flag prevent overlapping retrains, and the interval timer
-        (_last_periodic_retrain) is reset on BOTH success and failure so the
-        every-2h cadence is preserved either way.
+        Called AFTER the new Dashboard exists (FR-0.5) so the removal pass
+        can protect the new session files. Never removes (FR-0.3):
+          - the current dashboard session files,
+          - this process's own active money_printer_*.log,
+          - watchdog state/log files (_PRESERVED_LOG_PATTERNS).
         """
-        if not self._retrain_lock.acquire(blocking=False):
-            # A retrain is already running — skip scheduling another.
-            return
+        # COPY only NEW files — use a manifest to prevent re-archiving.
+        manifest_path = os.path.join("logs", "_archive", "_archived_files.json")
+        archived_set = set()
+        try:
+            if os.path.exists(manifest_path):
+                import json as _mj
 
-        def _worker():
+                with open(manifest_path, encoding="utf-8") as _mf:
+                    archived_set = set(_mj.load(_mf))
+        except Exception:
+            pass
+
+        protected = self._protected_log_paths()
+
+        newly_archived = []
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
+                try:
+                    shutil.copy2(fpath, os.path.join(archive_dir, f))
+                    newly_archived.append(f)
+                except Exception as exc:
+                    logger.warning("[Cycle] Could not copy %s: %s", f, exc)
+
+        # Update manifest with all known archived filenames
+        archived_set.update(newly_archived)
+        try:
+            import json as _mj
+
+            with open(manifest_path, "w", encoding="utf-8") as _mf:
+                _mj.dump(sorted(archived_set), _mf, indent=2)
+        except Exception:
+            pass
+
+        # Remove archived files from logs/ — except protected + preserved.
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if not os.path.isfile(fpath):
+                continue
+            if not (f.endswith(".csv") or f.endswith(".log")):
+                continue
+            if os.path.abspath(fpath) in protected:
+                continue  # FR-0.3: active session files + own process log
+            if self._is_preserved_log(f):
+                continue  # FR-0.3: watchdog state/logs
             try:
-                self._is_retraining = True
-                # 2026-06-10 fix (c): mark "retraining" so the external watchdog
-                # widens its staleness margin during this CPU-bound retrain.
-                self._write_state_marker("retraining")
-                self._periodic_retrain()
+                os.remove(fpath)
             except Exception as exc:
-                logger.error("[Periodic] Retrain failed: %s", exc)
-                # _periodic_retrain resets the timer on success; ensure it is
-                # also reset on failure so the cadence stays on the 2h grid.
-                self._last_periodic_retrain = time.time()
-            finally:
-                self._is_retraining = False
-                self._write_state_marker("running")
-                self._retrain_lock.release()
+                logger.warning("[Cycle] Could not remove old file %s: %s", f, exc)
 
-        t = threading.Thread(target=_worker, name="periodic-retrain", daemon=True)
-        t.start()
+    # ------------------------------------------------------------------
+    # FR-0.4: per-bot status for cycle summaries
+    # ------------------------------------------------------------------
+
+    def _bot_status(self, bot) -> str:
+        """TRADING / FEED-ONLY / DISABLED for one bot.
+
+        DISABLED: the bot is deactivated in the orchestrator (not ticking).
+        FEED-ONLY: ticking (feeds/prices run) but trading is switched off.
+        Trading state is derived generically: a ``trading_enabled`` attribute
+        on the bot wins; otherwise any boolean ``*TRADING_ENABLED`` constant
+        in the bot's module is read (weather_bot.py gates its waterfall on
+        module-level WEATHER_TRADING_ENABLED and exposes no attribute).
+        """
+        if bot.name not in self.active_bots:
+            return "DISABLED"
+
+        enabled = getattr(bot, "trading_enabled", None)
+        if enabled is None:
+            module = sys.modules.get(type(bot).__module__)
+            if module is not None:
+                flags = [
+                    value
+                    for name, value in vars(module).items()
+                    if name.endswith("TRADING_ENABLED") and isinstance(value, bool)
+                ]
+                if flags:
+                    enabled = all(flags)
+        if enabled is None:
+            enabled = True
+        return "TRADING" if enabled else "FEED-ONLY"
+
+    def _bot_status_summary(self) -> str:
+        """One line listing every registered bot with its status,
+        e.g. ``Weather=FEED-ONLY`` (FR-0.4)."""
+        if not self.bots:
+            return "(no bots registered)"
+        return ", ".join(f"{bot.name}={self._bot_status(bot)}" for bot in self.bots)
 
     def _run_drawdown_cycle(self):
-        """Archive logs, retrain model, reset state for next cycle."""
+        """Archive logs and reset state for next cycle (no retrain — FR-0.2)."""
         from datetime import datetime as _dt
 
         # Immediately clear the flag to prevent re-triggering
@@ -802,99 +598,9 @@ class OrchestratorEngine:
         )
         logger.info("[Cycle] Archiving session data to %s", archive_dir)
 
-        # COPY only NEW files — use a manifest to prevent re-archiving.
-        manifest_path = os.path.join("logs", "_archive", "_archived_files.json")
-        archived_set = set()
-        try:
-            if os.path.exists(manifest_path):
-                import json as _mj
-
-                with open(manifest_path, encoding="utf-8") as _mf:
-                    archived_set = set(_mj.load(_mf))
-        except Exception:
-            pass
-
-        newly_archived = []
-        for f in os.listdir("logs"):
-            fpath = os.path.join("logs", f)
-            if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
-                try:
-                    shutil.copy2(fpath, os.path.join(archive_dir, f))
-                    newly_archived.append(f)
-                except Exception as exc:
-                    logger.warning("[Cycle] Could not copy %s: %s", f, exc)
-
-        # Update manifest with all known archived filenames
-        archived_set.update(newly_archived)
-        try:
-            import json as _mj
-
-            with open(manifest_path, "w", encoding="utf-8") as _mf:
-                _mj.dump(sorted(archived_set), _mf, indent=2)
-        except Exception:
-            pass
-
-        # Clean up ALL CSV/log files from logs/ — they are now in the archive.
-        # The current dashboard files will be closed soon (new Dashboard below),
-        # so aggressively remove everything we can.
-        for f in os.listdir("logs"):
-            fpath = os.path.join("logs", f)
-            if not os.path.isfile(fpath):
-                continue
-            if not (f.endswith(".csv") or f.endswith(".log")):
-                continue
-            if self._is_preserved_log(f):  # 2026-06-10 fix (c): keep watchdog logs
-                continue
-            try:
-                os.remove(fpath)
-            except Exception as exc:
-                logger.warning("[Cycle] Could not remove old file %s: %s", f, exc)
-
-        # Retrain model from all accumulated archive data.
-        #
-        # 2026-06-10 fix (a): the in-process retrain here used to freeze the
-        # whole trading loop ~30 min every cycle. The async daemon
-        # (_start_periodic_retrain_async, every 2h) already keeps models
-        # current AND hot-swaps them on the live thread. So we now SKIP this
-        # synchronous retrain when the models are already fresh:
-        #   - a retrain is currently running on the daemon thread, OR
-        #   - a (periodic) retrain finished within _CYCLE_RETRAIN_SKIP_WINDOW_S.
-        # In either case we reuse the last good diagnostics; the models on disk
-        # are already the latest, and _reload_models_into_strategies() below
-        # picks them up. Otherwise we retrain in-process (rare — only when no
-        # recent retrain exists), guarded by the same lock/state-marker the
-        # async path uses so it never overlaps a daemon retrain and the watchdog
-        # does not false-alert on the freeze.
-        recent_retrain = (
-            time.time() - self._last_periodic_retrain
-        ) < self._CYCLE_RETRAIN_SKIP_WINDOW_S
-        if self._is_retraining or recent_retrain:
-            logger.info(
-                "[Cycle] Skipping in-process retrain (fresh models: "
-                "is_retraining=%s, recent=%s) — reusing last diagnostics",
-                self._is_retraining,
-                recent_retrain,
-            )
-            train_metrics = self._training_diagnostics or {}
-        elif self._retrain_lock.acquire(blocking=False):
-            # No recent/in-flight retrain — do it in-process but guarded.
-            logger.info("[Cycle] Retraining model in-process (no recent retrain)...")
-            try:
-                self._is_retraining = True
-                self._write_state_marker("retraining")
-                train_metrics = self._retrain_from_all_data(include_live=False)
-                # Keep the 2h periodic cadence aligned so we don't immediately
-                # retrain again on the daemon thread right after this one.
-                self._last_periodic_retrain = time.time()
-            finally:
-                self._is_retraining = False
-                self._write_state_marker("running")
-                self._retrain_lock.release()
-        else:
-            # Lock held by a daemon retrain that started between the check and
-            # here — reuse last diagnostics rather than block.
-            logger.info("[Cycle] Retrain lock busy — reusing last diagnostics")
-            train_metrics = self._training_diagnostics or {}
+        # FR-0.2 (Phase 0 teardown): the cycle-boundary retrain that used to
+        # run here (in-process or via the 2h daemon) was removed. Cycle records
+        # no longer carry training metrics.
 
         # Save cycle record
         cycle_record = {
@@ -906,32 +612,14 @@ class OrchestratorEngine:
             "wins": cycle_wins,
             "losses": cycle_losses,
             "win_rate": round(cycle_wins / max(1, cycle_wins + cycle_losses) * 100, 1),
-            "train_contracts": train_metrics.get("contracts_labeled", 0),
-            "train_val_auc": round(
-                train_metrics.get("results", {}).get("val", {}).get("auc", 0), 4
-            ),
-            "train_samples": train_metrics.get("training_samples", 0),
         }
         self.cycle_history.append(cycle_record)
-
-        # Preserve training history across cycles (max 20 entries)
-        self._training_history.append(
-            {
-                "timestamp": _dt.now().isoformat(),
-                "cycle": self._cycle_count,
-                "diagnostics": train_metrics,
-                "cycle_record": cycle_record,
-            }
-        )
-        if len(self._training_history) > 20:
-            self._training_history = self._training_history[-20:]
-
-        self._training_diagnostics = train_metrics
 
         # Persist win rates before cycle reset (they survive across cycles)
         self.risk_manager._save_win_rates()
 
-        # Reset risk manager for new cycle
+        # Reset risk manager for new cycle. Position closes below still record
+        # against the OLD dashboard/session (self.dashboard is swapped after).
         new_bal = self.sim_balance if self.sim_balance > 0 else 3000.0
         self.risk_manager.update_balance(new_bal)
         self.risk_manager.daily_pnl = 0.0
@@ -946,38 +634,30 @@ class OrchestratorEngine:
         self.risk_manager.exchange._next_id = 1
         self.risk_manager.active_positions = 0
 
-        # Reload retrained model into all running strategies
-        self._reload_models_into_strategies()
-
-        # Re-init dashboard with fresh log files, preserving alerts
+        # FR-0.5: create the NEW session log files BEFORE archiving/removing
+        # the old ones, so there is never a zero-session-log window at
+        # rollover (the watchdog reads session-log freshness; the old order
+        # archived first and left a gap until the new Dashboard appeared).
+        # Dashboard.__init__ writes the SESSION STARTED line immediately, so
+        # the new session log exists on disk from this point on. The
+        # dashboard opens its files per write (no held handles), so the old
+        # files can be archived and removed right away.
         prev_alerts = list(self.dashboard.alerts) if self.dashboard else []
         self.dashboard = Dashboard()
         self.dashboard.alerts = prev_alerts
         self.risk_manager.exchange.on_close = self._on_trade_close
         self._cycle_start_time = time.time()
 
-        # Second cleanup pass — old dashboard file handles are now closed,
-        # so we can remove orphaned files that Windows may have locked earlier.
-        new_active = {
-            os.path.abspath(self.dashboard.data_log_path),
-            os.path.abspath(self.dashboard.session_log_path),
-            os.path.abspath(self.dashboard.portfolio_log_path),
-        }
-        for f in os.listdir("logs"):
-            fpath = os.path.join("logs", f)
-            if not os.path.isfile(fpath):
-                continue
-            if not (f.endswith(".csv") or f.endswith(".log")):
-                continue
-            if os.path.abspath(fpath) in new_active:
-                continue
-            if self._is_preserved_log(f):  # 2026-06-10 fix (c): keep watchdog logs
-                continue
-            try:
-                os.remove(fpath)
-            except Exception:
-                pass  # best effort
+        # Archive + clean in a single pass, now that the new session files
+        # exist and are protected (FR-0.3/FR-0.5).
+        self._cycle_archive_and_clean(archive_dir)
         self._profitable_since = None
+
+        # FR-0.4: cycle summary lists EVERY registered bot with its status.
+        bot_status_line = self._bot_status_summary()
+        cycle_record["bot_status"] = bot_status_line
+        logger.info("[Cycle] Bot status: %s", bot_status_line)
+        self.dashboard.alert(f"BOTS | {bot_status_line}")
 
         # Post diagnostics to ALERTS (persistent, visible anytime)
         cr = cycle_record
@@ -988,35 +668,18 @@ class OrchestratorEngine:
             f"PnL=${cr['pnl']:.0f}"
         )
 
-        if cr["train_val_auc"] > 0:
-            self.dashboard.alert(
-                f"RETRAINED | {cr['train_contracts']} contracts | "
-                f"val AUC={cr['train_val_auc']:.4f} | "
-                f"{cr['train_samples']} samples"
-            )
-        elif cr["train_contracts"] == 0:
-            self.dashboard.alert("RETRAIN FAILED — model unchanged")
-
         # Show trend vs previous cycle
         if len(self.cycle_history) >= 2:
             prev = self.cycle_history[-2]
             dur_d = cr["duration_min"] - prev["duration_min"]
             wr_d = cr["win_rate"] - prev["win_rate"]
-            auc_d = cr["train_val_auc"] - prev["train_val_auc"]
             trend_parts = []
             if dur_d != 0:
                 trend_parts.append(f"duration {dur_d:+.0f}min")
             if wr_d != 0:
                 trend_parts.append(f"winrate {wr_d:+.1f}%")
-            if auc_d != 0 and cr["train_val_auc"] > 0:
-                trend_parts.append(f"AUC {auc_d:+.4f}")
             if trend_parts:
                 self.dashboard.alert(f"TREND | {' | '.join(trend_parts)}")
-
-        # Show top features learned
-        feat_names = train_metrics.get("feature_names", [])
-        if feat_names:
-            self.dashboard.alert(f"TOP FEATURES | {', '.join(feat_names[:5])}")
 
         # Show running sample count from trade journal
         journal_count = self.trade_journal.get_sample_count()
@@ -1066,51 +729,6 @@ class OrchestratorEngine:
                 send_discord_notification(discord_url, cycle_record, journal_count)
             except Exception as exc:
                 logger.warning("[Cycle] Discord notification failed: %s", exc)
-
-    def _graduate_model(self, hours: float, pnl: float):
-        """Model is profitable after 8+ hours — save and exit training loop."""
-        import json as _json
-
-        self.auto_cycle = False  # Stop the training loop
-
-        # Save model as graduated
-        grad_path = os.path.join("data", "models", "btc_xgboost_graduated.joblib")
-        src_path = os.path.join("data", "models", "btc_xgboost_latest.joblib")
-        if os.path.exists(src_path):
-            shutil.copy2(src_path, grad_path)
-
-        # Save graduation metadata
-        meta = {
-            "graduated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "cycle_count": self._cycle_count,
-            "final_cycle_hours": round(hours, 1),
-            "final_cycle_pnl": round(pnl, 2),
-            "cycle_history": self.cycle_history,
-        }
-        meta_path = os.path.join("data", "models", "graduation_meta.json")
-        with open(meta_path, "w") as f:
-            _json.dump(meta, f, indent=2)
-
-        # Switch to small seed balance
-        self.risk_manager.update_balance(300.0)
-        self.sim_balance = 300.0
-
-        # Alert on dashboard
-        self.dashboard.alert(
-            f"MODEL GRADUATED after {self._cycle_count} cycles! "
-            f"Profitable for {hours:.1f}h (PnL=${pnl:.2f}). "
-            f"Switched to $300 seed. Saved to {grad_path}"
-        )
-        self.dashboard.log(
-            f"[Graduation] Training loop complete. {self._cycle_count} cycles, "
-            f"{len(self.cycle_history)} drawdowns survived."
-        )
-        logger.info(
-            "[Graduation] Model graduated after %d cycles. PnL=$%.2f over %.1fh",
-            self._cycle_count,
-            pnl,
-            hours,
-        )
 
     # ------------------------------------------------------------------
     # FakeEngine guard — defense in depth against silent fixture-only mode
@@ -1173,27 +791,23 @@ class OrchestratorEngine:
         last_heartbeat = time.time()
         last_fake_engine_check = time.time()
 
-        # 2026-06-10 fix (b)+(c): publish the launch balance + initial "running"
-        # state so the external watchdog (a) restarts with the right balance and
-        # (b) doesn't false-alert during the long startup/periodic retrains.
+        # 2026-06-10 fix (b): publish the launch balance so a watchdog
+        # auto-restart reuses it. (The ".orchestrator_state" marker write that
+        # used to accompany this was removed in Phase 0 — the redesigned
+        # watchdog no longer reads it.)
         self._write_sim_balance_marker()
-        self._write_state_marker("running")
 
         # Layer 2: refuse to start the trading loop if discovery is fixture-only
         if not self._check_fake_engine(context="startup"):
             self.running = False
             sys.exit(1)
 
-        # Startup: archive stale CSVs and retrain from all accumulated data.
-        # The startup retrain is a long (~30-min) synchronous freeze, so mark
-        # "retraining" around it to widen the watchdog's staleness margin.
+        # Startup: archive stale CSVs from previous sessions (fast — the
+        # startup retrain was removed per FR-0.2).
         try:
-            self._write_state_marker("retraining")
-            self._startup_archive_and_retrain()
+            self._startup_archive()
         except Exception as exc:
-            logger.error("[Startup] Archive/retrain failed: %s", exc)
-        finally:
-            self._write_state_marker("running")
+            logger.error("[Startup] Archive failed: %s", exc)
 
         while self.running:
             try:
@@ -1270,30 +884,9 @@ class OrchestratorEngine:
                     last_heartbeat = time.time()
                     continue
 
-                # Graduation check: 8+ continuous hours of positive PnL
-                if self.auto_cycle:
-                    pnl = self.risk_manager.daily_pnl
-                    if pnl > 0:
-                        if self._profitable_since is None:
-                            self._profitable_since = time.time()
-                        profitable_h = (time.time() - self._profitable_since) / 3600
-                        if profitable_h >= 8:
-                            self._graduate_model(profitable_h, pnl)
-                    else:
-                        self._profitable_since = None  # reset clock
-
-                # Periodic retrain: every 2 hours, re-label settled contracts
-                # and retrain from all data (including current live session).
-                # Runs on a daemon thread (see _start_periodic_retrain_async)
-                # so the ~30-min retrain never blocks market polling, bot
-                # ticks, or position management. The market loop keeps ticking
-                # throughout; models hot-swap in on completion.
-                if (
-                    not self._is_retraining
-                    and time.time() - self._last_periodic_retrain
-                    > self._PERIODIC_RETRAIN_INTERVAL
-                ):
-                    self._start_periodic_retrain_async()
+                # NOTE (FR-0.2): the "graduation" check and the 2h periodic
+                # retrain trigger that used to run here were removed in the
+                # Phase 0 teardown — no training runs in the runtime process.
 
                 # Tick all active bots (skip deactivated ones)
                 for bot in self.bots:
@@ -1357,6 +950,11 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv(override=True)
+
+    # FR-0.3: route module-level loggers (strategies, bots, mixins,
+    # providers) into the shared money_printer_*.log via the root logger.
+    # Console output stays WARNING+ so the terminal UI is not flooded.
+    configure_root_logging()
 
     parser = argparse.ArgumentParser(description="Money Printer Trading Dashboard")
     parser.add_argument(

@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 # watchdog_cron.sh — Lightweight bash watchdog for Money Printer trading system.
 # Pure bash, no LLM, designed to run every 5 minutes via cron.
-# Complementary to scripts/vm_watchdog.py (which does AI-assisted deep fixes).
+# Complementary to scripts/vm_watchdog.py (which does AI-assisted deep fixes)
+# and scripts/host_watchdog.sh (alert-only last line of defense).
+#
+# Phase 0 hardening (FR-0.5, 2026-07-24):
+#   * If the health endpoint fails but the process is ALIVE, do not kill it on
+#     a single failed probe (a busy cycle transition or slow request can time
+#     out the 10s curl). The failure must persist across two consecutive cron
+#     runs (a confirmation marker aged 240–1800 s) before a restart.
+#   * If the process is DEAD, restart immediately on the first failing check.
+#   * Discord reporting is per-incident: the whole restart sequence (initial
+#     alert + outcome) counts as ONE incident against ALERT_COOLDOWN. This
+#     fixes the old bug where writing the cooldown timestamp on the initial
+#     "attempting restart" message suppressed the far more important
+#     "restart FAILED — manual intervention" outcome message seconds later.
+#   * No dependence on the retired retrain marker (logs/.orchestrator_state);
+#     runtime retrains were removed in Phase 0 (FR-0.2).
 #
 # Deploy (on VM):
 #   chmod +x ~/money_printer/scripts/watchdog_cron.sh
@@ -17,16 +32,22 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (env-overridable for tests / ops tuning)
 # ---------------------------------------------------------------------------
 HEALTH_URL="http://localhost:8050/api/status"
 TMUX_SESSION="money"
-PROJECT_DIR="$HOME/money_printer"
+PROJECT_DIR="${WATCHDOG_PROJECT_DIR:-$HOME/money_printer}"
 STATE_DIR="$PROJECT_DIR/logs"
 LAST_ALERT_FILE="$STATE_DIR/watchdog_last_alert.ts"
-ALERT_COOLDOWN=1800       # seconds between Discord alerts
-HEALTH_TIMEOUT=10         # curl max-time seconds
-RESTART_STARTUP_WAIT=30   # seconds to wait after tmux session start
+FAIL_MARKER="$STATE_DIR/watchdog_cron_endpoint_fail.ts"
+ALERT_COOLDOWN="${WATCHDOG_ALERT_COOLDOWN:-1800}"   # seconds between reported incidents
+HEALTH_TIMEOUT=10                                   # curl max-time seconds
+RESTART_STARTUP_WAIT="${WATCHDOG_RESTART_STARTUP_WAIT:-30}"  # seconds after tmux start
+PROCESS_PATTERN="run_web_dashboard"
+# Endpoint-failure confirmation window: the marker must come from a previous
+# cron run (>= MIN) but not from an ancient forgotten incident (<= MAX).
+CONFIRM_MIN_AGE="${WATCHDOG_CONFIRM_MIN_AGE:-240}"
+CONFIRM_MAX_AGE="${WATCHDOG_CONFIRM_MAX_AGE:-1800}"
 
 # 2026-06-10 fix (b): never hardcode the sim balance on auto-restart — that
 # would silently override a future Phase-2 $500 run. Reuse the balance the
@@ -62,6 +83,8 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Lightweight watchdog for the Money Printer trading dashboard.
+Dead process: restarts immediately. Endpoint down but process alive: restarts
+only after the failure persists across two consecutive runs.
 
 Options:
   --check-only   Health check only; no restarts, no alerts. Exit 0=OK, 1=failing.
@@ -93,24 +116,47 @@ check_health() {
     fi
 }
 
-# Send a Discord message, respecting the cooldown.
+# Returns 0 if a run_web_dashboard.py process is alive, else 1.
+check_process() {
+    pgrep -f "$PROCESS_PATTERN" >/dev/null 2>&1
+}
+
+# Read a unix timestamp from a state file; echoes 0 if absent/corrupt.
+read_ts() {
+    local ts=""
+    [[ -r "$1" ]] && ts=$(head -n1 "$1" 2>/dev/null)
+    [[ "$ts" =~ ^[0-9]+$ ]] || ts=0
+    printf '%s' "$ts"
+}
+
+# Decide once per restart sequence whether this incident may report to
+# Discord. One incident = initial alert + outcome message; both share the
+# decision so an important outcome is never suppressed by its own alert.
+INCIDENT_REPORT=true
+begin_incident() {
+    local now last elapsed
+    now=$(date +%s)
+    last=$(read_ts "$LAST_ALERT_FILE")
+    elapsed=$(( now - last ))
+    if (( last > 0 && elapsed < ALERT_COOLDOWN )); then
+        INCIDENT_REPORT=false
+        log "Incident within cooldown ($(( ALERT_COOLDOWN - elapsed ))s remaining) — restart proceeds, Discord silent"
+    else
+        INCIDENT_REPORT=true
+        mkdir -p "$STATE_DIR"
+        echo "$now" > "$LAST_ALERT_FILE"
+    fi
+}
+
+# Send a Discord message for the current incident (delivery only; the
+# per-incident throttle is decided in begin_incident).
 # Args: $1 = message text
-# When within cooldown: logs a skip notice and returns without sending.
 send_discord() {
     local message="$1"
-    local now
-    now=$(date +%s)
 
-    # Cooldown check
-    if [[ -f "$LAST_ALERT_FILE" ]]; then
-        local last_ts
-        last_ts=$(cat "$LAST_ALERT_FILE" 2>/dev/null || echo 0)
-        local elapsed=$(( now - last_ts ))
-        if (( elapsed < ALERT_COOLDOWN )); then
-            local remaining=$(( ALERT_COOLDOWN - elapsed ))
-            log "Discord alert suppressed (cooldown: ${remaining}s remaining): $message"
-            return 0
-        fi
+    if ! $INCIDENT_REPORT; then
+        log "Discord message suppressed (incident cooldown): $message"
+        return 0
     fi
 
     if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
@@ -118,12 +164,8 @@ send_discord() {
         return 0
     fi
 
-    # Ensure state dir exists
-    mkdir -p "$STATE_DIR"
-
-    local payload
+    local payload http_code
     payload=$(printf '{"content": "%s"}' "$message")
-    local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' \
         -H "Content-Type: application/json" \
         -d "$payload" \
@@ -132,7 +174,6 @@ send_discord() {
 
     if [[ "$http_code" == "204" || "$http_code" == "200" ]]; then
         log "Discord alert sent (HTTP $http_code): $message"
-        echo "$now" > "$LAST_ALERT_FILE"
     else
         log "Discord alert failed (HTTP $http_code): $message"
     fi
@@ -213,6 +254,7 @@ fi
 
 # Normal mode — check health first
 if check_health; then
+    rm -f "$FAIL_MARKER"
     log "Health check: OK — no action needed"
     exit 0
 fi
@@ -225,8 +267,30 @@ if [[ -f "$PROJECT_DIR/.watchdog_disabled" ]]; then
     exit 0
 fi
 
+NOW=$(date +%s)
+
+if check_process; then
+    # Endpoint down but the process is alive — could be a busy cycle
+    # transition or one slow request. Require the failure to persist across
+    # two consecutive cron runs before killing a live process.
+    marker_ts=$(read_ts "$FAIL_MARKER")
+    marker_age=$(( NOW - marker_ts ))
+    if (( marker_ts > 0 && marker_age >= CONFIRM_MIN_AGE && marker_age <= CONFIRM_MAX_AGE )); then
+        log "Endpoint failure CONFIRMED across consecutive checks (marker ${marker_age}s old) — restarting"
+    else
+        echo "$NOW" > "$FAIL_MARKER"
+        log "Endpoint failing but process alive — confirmation armed; restart only if still failing next run"
+        exit 1
+    fi
+else
+    log "Process '$PROCESS_PATTERN' not running — restarting immediately"
+fi
+
+rm -f "$FAIL_MARKER"
+
 log "Health check FAILED — initiating restart sequence"
 
+begin_incident
 send_discord "🔴 Money Printer health check failed — attempting restart"
 
 # Kill stale process and tmux session

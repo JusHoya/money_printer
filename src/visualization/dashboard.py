@@ -5,9 +5,34 @@ import os
 import sys
 import time
 import csv
+import json
 from datetime import datetime
 import re
 from src.visualization.mascot import Mascot
+
+# Data-CSV schema (FR-0.7 harvester). The first five columns preserve the
+# legacy layout (Timestamp, Symbol, Price, Type, Status) so existing
+# consumers (train_from_csv.py, lab.py, web state_manager — all of which
+# read by column name) keep working; the harvester columns extend it.
+# "Price" keeps its legacy display semantics (best bid, falling back to
+# ask/last); "Last" is the true last-trade price. "Depth" holds a JSON
+# top-3 orderbook snapshot ({"yes": [[price, qty], ...], "no": [...]})
+# and is only populated on Type=DEPTH rows, which MARKET_DATA consumers
+# filter out by Type.
+DATA_CSV_HEADER = [
+    "Timestamp",
+    "Symbol",
+    "Price",
+    "Type",
+    "Status",
+    "Bid",
+    "Ask",
+    "NoBid",
+    "NoAsk",
+    "Last",
+    "Volume",
+    "Depth",
+]
 
 # Force UTF-8 output on Windows to support emoji/Unicode
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -48,10 +73,10 @@ class Dashboard:
             self.log_dir, f"portfolio_{timestamp}.csv"
         )
 
-        # Init Data CSV
+        # Init Data CSV (FR-0.7 harvester schema)
         with open(self.data_log_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
+            writer.writerow(DATA_CSV_HEADER)
 
         # Init Portfolio CSV
         with open(self.portfolio_log_path, "w", newline="", encoding="utf-8") as f:
@@ -125,6 +150,14 @@ class Dashboard:
         # File
         self._write_to_log(full_msg)
 
+    def _append_data_row(self, row):
+        """Append one row to the data CSV; never crash the dashboard."""
+        try:
+            with open(self.data_log_path, "a", newline="", encoding="utf-8") as f:
+                csv.writer(f).writerow(row)
+        except Exception:
+            pass  # Don't crash dashboard on log fail
+
     def update_price(self, symbol: str, price: float, **kwargs):
         # Store Price + Timestamp + Metadata
         self.latest_prices[symbol] = {
@@ -133,32 +166,83 @@ class Dashboard:
             "extra": kwargs,
         }
 
-        # Record Data for Training
+        # Record data for training / microstructure harvesting (FR-0.7).
+        # Quote fields come from the caller's kwargs (bid/ask/no_bid/no_ask/
+        # last/volume); absent fields are recorded as empty strings so
+        # non-market rows (temperatures, spot prices) stay valid.
         ts = datetime.now().isoformat()
-        try:
-            with open(self.data_log_path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([ts, symbol, price, "MARKET_DATA", "REAL"])
-        except Exception:
-            pass  # Don't crash dashboard on log fail
+
+        def _col(key):
+            val = kwargs.get(key)
+            return "" if val is None else val
+
+        self._append_data_row(
+            [
+                ts,
+                symbol,
+                price,
+                "MARKET_DATA",
+                "REAL",
+                _col("bid"),
+                _col("ask"),
+                _col("no_bid"),
+                _col("no_ask"),
+                _col("last"),
+                _col("volume"),
+                "",
+            ]
+        )
+
+    def record_depth(self, symbol: str, levels: dict, last_price=None):
+        """Record an hourly top-3 orderbook snapshot row (FR-0.7).
+
+        ``levels`` is ``{"yes": [(price, qty), ...], "no": [...]}`` — resting
+        bids per side, best-first, float dollars (KalshiProvider.
+        fetch_orderbook output). The row is tagged Type=DEPTH with the raw
+        levels JSON-encoded in the Depth column; MARKET_DATA consumers filter
+        on Type and never see these rows.
+        """
+        yes = list(levels.get("yes") or [])[:3]
+        no = list(levels.get("no") or [])[:3]
+        best_yes_bid = yes[0][0] if yes else ""
+        best_no_bid = no[0][0] if no else ""
+        # A resting NO bid at q implies a YES ask at 1-q (and vice versa)
+        implied_yes_ask = round(1.0 - no[0][0], 4) if no else ""
+        implied_no_ask = round(1.0 - yes[0][0], 4) if yes else ""
+
+        ts = datetime.now().isoformat()
+        depth_json = json.dumps({"yes": yes, "no": no}, separators=(",", ":"))
+        lp = last_price if last_price is not None else ""
+        self._append_data_row(
+            [
+                ts,
+                symbol,
+                lp,
+                "DEPTH",
+                "REAL",
+                best_yes_bid,
+                implied_yes_ask,
+                best_no_bid,
+                implied_no_ask,
+                lp,
+                "",
+                depth_json,
+            ]
+        )
 
     def record_signal(self, signal, status="EXECUTED", strategy_name=None):
         """Log a trade signal specifically for training data."""
         ts = datetime.now().isoformat()
-        try:
-            with open(self.data_log_path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        ts,
-                        signal.symbol,
-                        signal.limit_price,
-                        f"SIGNAL_{signal.side.upper()}",
-                        status,
-                    ]
-                )
-        except Exception:
-            pass
+        self._append_data_row(
+            [
+                ts,
+                signal.symbol,
+                signal.limit_price,
+                f"SIGNAL_{signal.side.upper()}",
+                status,
+            ]
+            + [""] * 7
+        )
 
         # Track strategy performance
         if strategy_name:

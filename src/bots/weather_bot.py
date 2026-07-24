@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timedelta
 from typing import List
 
 from src.bots.base import Bot
@@ -49,6 +50,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         "KMIA": "KMIA",
     }
 
+    # FR-0.7 harvester cadence: orderbook depth snapshots are HOURLY only —
+    # the per-tick path must never issue per-market orderbook calls.
+    DEPTH_SNAPSHOT_INTERVAL_S = 3600
+    # Safety cap on orderbook calls per city per hourly snapshot pass.
+    MAX_DEPTH_MARKETS_PER_CITY = 30
+
     def __init__(self):
         Bot.__init__(self, name="Weather")
         TickerResolverMixin.__init__(self)
@@ -56,6 +63,9 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.nws = None
         self.metar = None
         self.nws_stations = ["KNYC", "KLAX", "KMDW", "KMIA"]
+        # Epoch of last hourly orderbook-depth snapshot (0 = snapshot on
+        # first tick so a fresh session records a baseline immediately).
+        self._last_depth_snapshot = 0.0
 
         # ML-driven primary + V2 rule-based fallback
         self.strategies = {
@@ -79,6 +89,13 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
     def tick(self, risk_manager, dashboard) -> List[TradeSignal]:
         if not self.nws:
             return []
+
+        # FR-0.7: decide ONCE per tick whether the hourly depth snapshot is
+        # due. Timestamp is advanced after the city loop so all cities get
+        # snapshotted in the same pass.
+        depth_due = (
+            time.time() - self._last_depth_snapshot
+        ) >= self.DEPTH_SNAPSHOT_INTERVAL_S
 
         for metar_station in self.METAR_STATIONS:
             kalshi_ticker = self.METAR_TO_KALSHI.get(metar_station)
@@ -131,46 +148,86 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
             temp = obs_data.extra.get("temperature_f") if obs_data.extra else None
 
-            # --- Fetch live Kalshi price and fuse ---
+            # --- FR-0.7 harvester: record the FULL ladder, fuse the active ---
+            # One /markets list call per city per tick supplies bid/ask/no-side/
+            # last/volume for every bracket; no per-market quote calls.
+            k_data = None
             if self.kalshi and kalshi_ticker:
                 try:
-                    active_ticker = self._resolve_smart_ticker(
-                        kalshi_ticker, criteria="sentiment", kalshi=self.kalshi
+                    max_t = (
+                        obs_data.extra.get("max_temp_today_f")
+                        if obs_data.extra
+                        else None
                     )
+                    ladder = self._ladder_for_city(kalshi_ticker)
 
-                    if active_ticker:
-                        k_data = self.kalshi.fetch_latest(active_ticker)
-                        if k_data:
-                            max_t = (
-                                obs_data.extra.get("max_temp_today_f")
-                                if obs_data.extra
-                                else None
-                            )
+                    if ladder:
+                        # Active market = highest YES bid (same "sentiment"
+                        # criterion the legacy resolver used).
+                        k_data = max(ladder, key=lambda m: m.bid)
+                        active_ticker = k_data.symbol
+
+                        for m in ladder:
                             best_price = (
-                                k_data.bid
-                                if k_data.bid > 0
-                                else (k_data.ask if k_data.ask > 0 else k_data.price)
+                                m.bid
+                                if m.bid > 0
+                                else (m.ask if m.ask > 0 else m.price)
                             )
+                            m_extra = m.extra or {}
+                            kwargs = dict(
+                                bid=m.bid,
+                                ask=m.ask,
+                                no_bid=m_extra.get("no_bid", 0.0),
+                                no_ask=m_extra.get("no_ask", 0.0),
+                                last=m.price,
+                                volume=m.volume,
+                            )
+                            if m.symbol == active_ticker and max_t is not None:
+                                kwargs["max_temp"] = max_t
                             dashboard.update_price(
-                                f"{active_ticker} (Market)",
-                                best_price,
-                                bid=k_data.bid,
-                                ask=k_data.ask,
-                                no_bid=k_data.extra.get("no_bid", 0.0)
-                                if k_data.extra
-                                else 0.0,
-                                no_ask=k_data.extra.get("no_ask", 0.0)
-                                if k_data.extra
-                                else 0.0,
-                                volume=k_data.volume,
-                                max_temp=max_t,
+                                f"{m.symbol} (Market)", best_price, **kwargs
                             )
+                    else:
+                        # Fallback: legacy single-market resolution path
+                        active_ticker = self._resolve_smart_ticker(
+                            kalshi_ticker, criteria="sentiment", kalshi=self.kalshi
+                        )
+                        if active_ticker:
+                            k_data = self.kalshi.fetch_latest(active_ticker)
+                            if k_data:
+                                best_price = (
+                                    k_data.bid
+                                    if k_data.bid > 0
+                                    else (
+                                        k_data.ask if k_data.ask > 0 else k_data.price
+                                    )
+                                )
+                                dashboard.update_price(
+                                    f"{active_ticker} (Market)",
+                                    best_price,
+                                    bid=k_data.bid,
+                                    ask=k_data.ask,
+                                    no_bid=k_data.extra.get("no_bid", 0.0)
+                                    if k_data.extra
+                                    else 0.0,
+                                    no_ask=k_data.extra.get("no_ask", 0.0)
+                                    if k_data.extra
+                                    else 0.0,
+                                    last=k_data.price,
+                                    volume=k_data.volume,
+                                    max_temp=max_t,
+                                )
 
-                            # Fuse Kalshi prices into observation data
-                            obs_data.bid = k_data.bid
-                            obs_data.ask = k_data.ask
-                            obs_data.price = k_data.price
-                            obs_data.symbol = active_ticker
+                    # Hourly top-3 orderbook depth snapshot (never per tick)
+                    if depth_due and ladder:
+                        self._snapshot_depth(ladder, dashboard)
+
+                    if k_data and active_ticker:
+                        # Fuse Kalshi prices into observation data
+                        obs_data.bid = k_data.bid
+                        obs_data.ask = k_data.ask
+                        obs_data.price = k_data.price
+                        obs_data.symbol = active_ticker
                 except Exception as e:
                     logger.error(f"[Weather] Market Fetch Fail ({kalshi_ticker}): {e}")
 
@@ -229,7 +286,46 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
             time.sleep(1)  # 1 sec between cities
 
+        if depth_due:
+            self._last_depth_snapshot = time.time()
+
         return []
+
+    def _ladder_for_city(self, series_base):
+        """Full-quote ladder for a city's series, filtered to tracked dates.
+
+        One /markets list call (via ``fetch_market_ladder``) — no per-market
+        fetches. Tracked = today's and tomorrow's events, mirroring the
+        legacy sentiment resolver's date targeting; if none match, the full
+        active ladder is returned defensively.
+        """
+        if not hasattr(self.kalshi, "fetch_market_ladder"):
+            return []
+        ladder = self.kalshi.fetch_market_ladder(series_base) or []
+        if not ladder:
+            return []
+        now = datetime.now()
+        target_dates = [
+            now.strftime("%y%b%d").upper(),
+            (now + timedelta(days=1)).strftime("%y%b%d").upper(),
+        ]
+        tracked = [m for m in ladder if any(d in m.symbol for d in target_dates)]
+        return tracked or ladder
+
+    def _snapshot_depth(self, ladder, dashboard):
+        """Record hourly top-3 orderbook levels for each tracked market.
+
+        Called only when the hourly snapshot is due (see tick); throttled
+        between calls to stay well under Kalshi rate limits.
+        """
+        for m in ladder[: self.MAX_DEPTH_MARKETS_PER_CITY]:
+            try:
+                book = self.kalshi.fetch_orderbook(m.symbol, depth=3)
+                if book and (book.get("yes") or book.get("no")):
+                    dashboard.record_depth(m.symbol, book, last_price=m.price)
+            except Exception as e:
+                logger.warning(f"[Weather] Depth snapshot failed for {m.symbol}: {e}")
+            time.sleep(0.15)
 
     def get_symbols(self) -> List[str]:
         return list(self.STATION_MAP.values())

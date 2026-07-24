@@ -4,29 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Money Printer is an algorithmic trading system for the **Kalshi** prediction market. It fetches live data (crypto prices, weather forecasts, market orderbooks), runs trading strategies against that data, and manages simulated/demo positions with full risk management. The goal is paper-trading validation before any real capital deployment.
+Money Printer is an algorithmic trading system for the **Kalshi** prediction market. It fetches live data (weather forecasts, market orderbooks), runs trading strategies against that data, and manages simulated/demo positions with full risk management. The goal is paper-trading validation before any real capital deployment.
+
+**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/`) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. The weather bot is the only registered bot and runs **feed-only** (data harvesting, no trading) until the Phase 1-3 weather rebuild proves an edge. `PRD.md` drives all pivot work.
 
 ## Commands
 
 ```bash
-# Run the live dashboard (all bots)
+# Run the live dashboard (weather bot, feed-only)
 python scripts/run_dashboard.py
+python scripts/run_dashboard.py --bot weather
 
-# Run specific bot(s)
-python scripts/run_dashboard.py --bot btc_15m
-python scripts/run_dashboard.py --bot btc_15m --bot weather
-
-# Run simulation
-python scripts/simulate.py --bot btc_15m --days 30 --live
+# Run simulation (weather only)
 python scripts/simulate.py --bot weather --days 10
 
-# Lab: audit, compare, optimize strategies against harvested data
+# Lab: audit / optimize the weather strategy against harvested data
 $env:PYTHONPATH = "."; python scripts/lab.py --audit
-$env:PYTHONPATH = "."; python scripts/lab.py --compare
 $env:PYTHONPATH = "."; python scripts/lab.py --optimize
 
-# Tests (pytest)
-python -m pytest tests/
+# Offline ML training (NEVER runs in the runtime process — PRD FR-0.2)
+$env:PYTHONPATH = "."; python scripts/train_from_csv.py
+$env:PYTHONPATH = "."; python scripts/train_models.py
+
+# Tests (pytest) — run targeted files; avoid the full suite on this machine
 python -m pytest tests/test_v3_risk_rules.py -v
 
 # Install deps
@@ -53,15 +53,15 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`src/bots/`** — Bot implementations:
 - `base.py`: Bot ABC defining `setup()`, `tick()`, `get_symbols()`
-- `registry.py`: Bot registry for CLI `--bot` selection
+- `registry.py`: Bot registry for CLI `--bot` selection — registers ONLY `weather` post-teardown
 - `mixins.py`: `SignalProcessorMixin` — shared signal processing logic (risk check → execution)
-- `btc_15m.py`, `btc_hourly.py`, `weather.py`: Concrete bot implementations
+- `weather_bot.py`: The only concrete bot. Feed-only: `WEATHER_TRADING_ENABLED = False` gates the strategy waterfall; price/data feeds still run. (Crypto bots deleted 2026-07-24, PRD FR-0.1.)
 
 **`src/core/risk_manager.py` — RiskManager**: Enforces capital preservation rules (max risk per trade, daily drawdown limits, per-strategy drawdown, portfolio exposure caps, trade interval throttling, loss cooldown per symbol). Owns a `SimulatedExchange` instance and syncs balance via `_on_trade_close` callback.
 
 **`src/core/matching_engine.py` — SimulatedExchange + LimitOrderBook**: Full simulated exchange with limit orders, order book depth tracking, trailing stops, and position lifecycle management. Tracks per-strategy PnL stats.
 
-**`scripts/run_dashboard.py` — OrchestratorEngine**: The main runtime loop. Wires together bots, risk manager, and dashboard. Uses `--bot` flag to select which bots to run. Runs bot tick loops in a continuous cycle with threading.
+**`scripts/run_dashboard.py` — OrchestratorEngine**: The main runtime loop. Wires together bots, risk manager, and dashboard. Uses `--bot` flag to select which bots to run. Runs bot tick loops in a continuous cycle with threading. **No ML retraining runs in this process** (PRD FR-0.2): the periodic/cycle-boundary/startup retrains and the on-trade-close online updater were removed; `src/ml/` and `scripts/train_*.py` are offline-only.
 
 **`src/data/kalshi_provider.py`**: Kalshi API client handling RSA-signed auth, market discovery (series/events/tickers), and orderbook fetching. Uses demo API by default. See **Kalshi API** section below for critical field-name details.
 
@@ -70,8 +70,11 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 **`src/data/nws_provider.py`**: Fetches weather observations from National Weather Service stations.
 
 ### Strategies (`src/strategies/`)
-- **crypto_strategy.py**: Multiple versions (V1-V3) of crypto momentum/trend strategies plus `CryptoLongShotFader`. Uses 15-min momentum breakouts, RSI/MACD confirmation, mean reversion, trailing stops.
-- **weather_strategy.py**: V1/V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction.
+- **weather_strategy.py**: V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction. Phase 1-3 rebuild target; currently not trading (feed-only flag in `weather_bot.py`).
+- **ml_weather.py**: ML-driven weather bracket strategy. Phase 1-3 rebuild target; currently not trading.
+- **counter_trade.py**: `CounterTradeAnalyzer` — LOG-ONLY hedge analyzer still invoked by the orchestrator's market loop.
+- **latency_arb.py**: MOTHBALLED (2026-07-24, PRD §4 A2) — kept on disk, unregistered, not-for-capital. See its header for revival preconditions (websocket feeds, <1s loop, maker/IOC, realistic fills, ≥200 paper trades).
+- All crypto strategies (`crypto_strategy.py`, `ml_btc_15m.py`, `ml_btc_hourly.py`, `longshot_fader_v2.py`, `cross_spread_arb.py`) were **deleted** in the Phase 0 teardown.
 
 ### Dashboard (`src/visualization/dashboard.py`)
 Real-time terminal UI showing PnL, market feeds, strategy signals, and position tracking.

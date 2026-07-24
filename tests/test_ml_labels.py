@@ -1,17 +1,15 @@
 """Tests for the 2026-06-10 ML-label corruption fix.
 
-Two complementary fixes are covered:
+FIX 1 (settlement-result labeling) — ``compute_labels_with_settlement`` and
+``compute_labels_from_terminal_price`` in ``scripts.train_from_csv``: a
+terminal price pinned at ~1.0 is treated as a locked-book artifact and routed
+to the Kalshi settlement result instead of being trusted as YES. With no API
+available, such contracts are *withheld* (left unlabeled) — never mislabeled.
 
-* FIX 2 (price-logging at the source) — ``_best_observable_price`` in
-  ``src.bots.btc_15m_bot``: a cleared/locked book (bid==0, ask pinned at ~1.0)
-  must never be logged as 1.0, because the terminal-price labeler would then
-  mislabel a NO-settled contract as YES.
-
-* FIX 1 (settlement-result labeling) — ``compute_labels_with_settlement`` and
-  ``compute_labels_from_terminal_price`` in ``scripts.train_from_csv``: a
-  terminal price pinned at ~1.0 is treated as a locked-book artifact and routed
-  to the Kalshi settlement result instead of being trusted as YES. With no API
-  available, such contracts are *withheld* (left unlabeled) — never mislabeled.
+Phase 0 teardown (2026-07-24): the FIX 2 tests for ``_best_observable_price``
+in ``src.bots.btc_15m_bot`` were removed with that deleted bot module. The
+``train_from_csv`` labeler remains on disk as an OFFLINE-only training entry
+point (PRD FR-0.2), so its label-correctness regression tests stay.
 
 All tests are offline and deterministic (synthetic DataFrames + a fake provider
 stub; ``time.sleep`` is monkeypatched to a no-op). The optional end-to-end guard
@@ -29,7 +27,6 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.bots.btc_15m_bot import _best_observable_price, _LOCKED_BOOK_HI
 from scripts import train_from_csv
 from scripts.train_from_csv import (
     compute_labels_from_terminal_price,
@@ -86,38 +83,8 @@ def _isolate_cache(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# A) Price-logging helper (Fix 2)
+# A) (removed) Price-logging helper tests — btc_15m_bot deleted in Phase 0
 # --------------------------------------------------------------------------- #
-
-
-def test_cleared_book_not_logged_as_one():
-    """THE corrupted case: empty YES book (bid=0), ask pinned at 1.0, last=0.001.
-
-    Must log the real last-traded price, NOT the 1.0 artifact.
-    """
-    assert _best_observable_price(bid=0.0, ask=1.0, price=0.001) == 0.001
-
-
-def test_locked_book_no_last_price_returns_zero():
-    """Locked book with no usable last price -> 0.0, never a fabricated 1.0."""
-    assert _best_observable_price(bid=0.0, ask=1.0, price=0.0) == 0.0
-
-
-def test_normal_book_uses_bid():
-    """A genuine two-sided book logs the bid (most reliable observable)."""
-    assert _best_observable_price(bid=0.62, ask=0.65, price=0.60) == 0.62
-
-
-def test_one_sided_genuine_ask():
-    """A real one-sided book (no bid, plausible ask) still logs the ask."""
-    assert _best_observable_price(bid=0.0, ask=0.40, price=0.0) == 0.40
-
-
-def test_ask_at_lock_boundary_is_treated_as_locked():
-    """ask exactly == _LOCKED_BOOK_HI is conservatively treated as locked."""
-    # No bid, ask==0.995 (locked boundary), but a real last trade exists.
-    assert _best_observable_price(bid=0.0, ask=_LOCKED_BOOK_HI, price=0.012) == 0.012
-
 
 # --------------------------------------------------------------------------- #
 # B) Labeler — settlement path (Fix 1)
