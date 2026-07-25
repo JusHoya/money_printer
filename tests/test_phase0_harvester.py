@@ -390,16 +390,18 @@ def _today_code():
 
 def _make_bot(ladder, orderbook=None):
     """WeatherBot without __init__ (avoids ML model loading), wired to mocks."""
-    from src.bots.weather_bot import WeatherBot
+    from src.bots.weather_bot import WeatherBot, CITY_CONFIG
 
     bot = WeatherBot.__new__(WeatherBot)
     bot.name = "Weather"
     bot.ticker_cache = {}
     bot._last_depth_snapshot = 0.0
-    bot.METAR_STATIONS = ["KJFK"]  # single city keeps tests fast
+    # PRD FR-1.4: cities are the authoritative config; NY observes KNYC
+    # (Central Park), the station Kalshi settles KXHIGHNY on — not KJFK.
+    bot.CITIES = (CITY_CONFIG["NY"],)  # single city keeps tests fast
 
     obs = MarketData(
-        symbol="KJFK",
+        symbol="KNYC",
         timestamp=datetime.now(),
         price=0.0,
         volume=0,

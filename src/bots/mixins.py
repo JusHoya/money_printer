@@ -510,6 +510,12 @@ class SignalProcessorMixin:
                     contract_side=cs,
                     disable_profit_targets=dpt,
                     strike=strike_val,
+                    # PRD FR-1.1/FR-1.2: carry the API bracket semantics from
+                    # the signal onto the position so settlement can use
+                    # bracket_payoff instead of inferring from the ticker.
+                    strike_type=getattr(sig, "strike_type", None),
+                    floor_strike=getattr(sig, "floor_strike", None),
+                    cap_strike=getattr(sig, "cap_strike", None),
                 )
                 # Store ML context in position for trade journal
                 positions = risk_manager.exchange.positions

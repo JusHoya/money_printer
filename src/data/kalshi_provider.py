@@ -197,12 +197,65 @@ class KalshiProvider(DataProvider):
                 pass
         return 0.0
 
+    @staticmethod
+    def _parse_strike(data: dict, key: str, symbol: str) -> Optional[float]:
+        """Return ``data[key]`` as a float, or ``None`` when the API omits it.
+
+        NEVER coerces a missing strike to ``0.0``. Kalshi omits ``cap_strike``
+        on ``greater`` markets and ``floor_strike`` on ``less`` markets; a 0.0
+        there would read downstream as "settles at zero degrees" and silently
+        invert the payoff (PRD FR-1.1). A malformed value is logged and
+        returned as ``None`` so ``bracket_payoff.parse_bracket_spec`` aborts
+        loudly rather than trading on a guess.
+        """
+        value = data.get(key)
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[KalshiProvider] %s: %s=%r is not numeric; treating as absent",
+                symbol,
+                key,
+                value,
+            )
+            return None
+
+    @staticmethod
+    def _parse_strike_type(data: dict, symbol: str) -> Optional[str]:
+        """Normalized ``strike_type`` (``between`` / ``greater`` / ``less``).
+
+        Returned lowercase and stripped so downstream comparisons never depend
+        on API casing. ``None`` when the field is absent or blank — callers
+        must abort rather than infer direction from the ticker string.
+        """
+        raw = data.get("strike_type")
+        if raw is None:
+            return None
+        normalized = str(raw).strip().lower()
+        if not normalized:
+            logger.warning(
+                "[KalshiProvider] %s: blank strike_type in API response", symbol
+            )
+            return None
+        return normalized
+
     def _parse_market_data(self, symbol: str, data: dict, source: str) -> MarketData:
         """Parse a market JSON object into a MarketData instance.
 
         Handles both V2 API responses (``*_dollars`` string fields) and
-        V1 API responses (``yes_bid`` etc. as integer cents).
+        V1 API responses (``yes_bid`` etc. as integer cents, ``close_date``
+        instead of ``close_time``, ``sub_title`` instead of ``yes_sub_title``).
+
+        THE SINGLE ``MarketData`` CONSTRUCTION SITE for this provider: every
+        fetch path (``fetch_latest``, ``fetch_market_ladder``,
+        ``fetch_btc_hourly_markets``) routes through here, so bracket
+        semantics (``strike_type`` / ``floor_strike`` / ``cap_strike``, PRD
+        FR-1.1) are present on every ``MarketData`` regardless of endpoint.
+        Do not patch these fields on after the fact.
         """
+        data = data or {}
         yes_bid = self._parse_price(data, "yes_bid_dollars", "yes_bid")
         yes_ask = self._parse_price(data, "yes_ask_dollars", "yes_ask")
         no_bid = self._parse_price(data, "no_bid_dollars", "no_bid")
@@ -220,14 +273,22 @@ class KalshiProvider(DataProvider):
         else:
             volume = data.get("volume", 0) or 0
 
-        # Extract strike from floor_strike (BTC) or ticker parsing (weather)
-        strike = None
-        floor_strike = data.get("floor_strike")
-        if floor_strike is not None:
-            try:
-                strike = float(floor_strike)
-            except (TypeError, ValueError):
-                pass
+        # Bracket semantics, straight from the API (PRD FR-1.1). Raw numeric
+        # passthroughs: None when Kalshi omits the field, never 0.0.
+        floor_strike = self._parse_strike(data, "floor_strike", symbol)
+        cap_strike = self._parse_strike(data, "cap_strike", symbol)
+        strike_type = self._parse_strike_type(data, symbol)
+
+        # Legacy single-strike alias, kept for the mothballed crypto path
+        # (latency_arb / matching_engine read extra["strike"]). Crypto markets
+        # are all one-sided with a floor_strike. DEPRECATED for weather: use
+        # floor_strike/cap_strike/strike_type via src.core.bracket_payoff.
+        strike = floor_strike
+
+        # V1 (BTC hourly discovery) names two of these differently.
+        close_time = data.get("close_time") or data.get("close_date")
+        sub_title = data.get("sub_title")
+        yes_sub_title = data.get("yes_sub_title") or sub_title
 
         return MarketData(
             symbol=symbol,
@@ -238,12 +299,19 @@ class KalshiProvider(DataProvider):
             ask=yes_ask,
             extra={
                 "status": data.get("status"),
-                "close_time": data.get("close_time"),
+                "close_time": close_time,
                 "source": source,
                 "no_bid": no_bid,
                 "no_ask": no_ask,
                 "strike": strike,
-                "strike_type": data.get("strike_type"),
+                "strike_type": strike_type,
+                "floor_strike": floor_strike,
+                "cap_strike": cap_strike,
+                # Kalshi's human-readable YES rule ("86 to 87", "88 or above").
+                # Carried so logs and the reconcile report are auditable
+                # against what the exchange actually published.
+                "yes_sub_title": yes_sub_title,
+                "sub_title": sub_title,
             },
         )
 
@@ -337,9 +405,16 @@ class KalshiProvider(DataProvider):
                         symbol, pub_data, "live_kalshi_public"
                     )
                     if pub_result.bid > 0 or pub_result.ask > 0 or pub_result.price > 0:
-                        # Preserve status/close_time from primary API, overlay prices
-                        pub_result.extra["status"] = result.extra.get("status")
-                        pub_result.extra["close_time"] = result.extra.get("close_time")
+                        # Overlay prices from production, but keep the primary
+                        # API's lifecycle fields when it actually supplied
+                        # them (a blank demo response must not blank out
+                        # production's status). Bracket semantics
+                        # (strike_type/floor_strike/cap_strike) are identical
+                        # on both APIs and are left as production parsed them.
+                        for key in ("status", "close_time"):
+                            primary_val = result.extra.get(key)
+                            if primary_val is not None:
+                                pub_result.extra[key] = primary_val
                         return pub_result
                 except Exception:
                     pass  # Fall through to original result
@@ -467,7 +542,9 @@ class KalshiProvider(DataProvider):
 
         Returns one MarketData per market with parsed float quotes —
         yes bid/ask (``bid``/``ask``), last price (``price``), volume, and
-        no_bid/no_ask/strike/status/close_time in ``extra`` — i.e. everything
+        no_bid/no_ask/status/close_time plus the bracket fields
+        ``strike_type``/``floor_strike``/``cap_strike``/``yes_sub_title`` in
+        ``extra`` (PRD FR-1.1) — i.e. everything
         the per-tick harvester records, with NO per-market API calls.
         Quotes are parsed via ``_parse_price`` so both V2 ``*_dollars``
         strings and legacy integer cents are handled.
@@ -586,11 +663,11 @@ class KalshiProvider(DataProvider):
                             symbol = m.get("ticker_name")
                             if is_test_symbol(symbol):
                                 continue
+                            # V1's close_date / sub_title aliases and its
+                            # strike fields are handled inside
+                            # _parse_market_data — the single construction
+                            # site (PRD FR-1.1). No post-hoc patching here.
                             md = self._parse_market_data(symbol, m, "v1_discovery")
-                            # V1 uses close_date instead of close_time
-                            md.extra["close_time"] = m.get("close_date")
-                            md.extra["strike_type"] = m.get("strike_type")
-                            md.extra["sub_title"] = m.get("sub_title")
                             markets.append(md)
             except Exception:
                 # logger.debug(f"Probe failed for {event_ticker}: {e}")

@@ -64,3 +64,8 @@ review_2026_06_03/
 
 # Playwright
 test-results/
+
+# Phase 1 (FR-1.6): the IEM CLI response cache is a regenerable HTTP cache with
+# per-fetch timestamps; the derived daily-high CSVs beside it ARE the committed
+# ground-truth record and stay tracked.
+data/weather_truth/cache/

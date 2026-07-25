@@ -8,14 +8,25 @@ Sprint 3, Task 3.3 of Money Printer V2.
 """
 
 import logging
-import re
+import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from src.core.bracket_payoff import (
+    BracketSpecError,
+    attach_spec_to_signals,
+    parse_bracket_spec,
+    yes_bounds,
+)
 from src.core.interfaces import MarketData, Strategy, TradeSignal
+from src.core.risk_manager import log_rejection
 from src.ml.predictor import ModelPredictor
 
 logger = logging.getLogger(__name__)
+
+# FR-0.4 reason code, shared with weather_strategy: the API did not give us
+# this market's bracket semantics, so we skip it loudly instead of silently.
+REJECT_NO_BRACKET_SPEC = "BRACKET_SPEC_UNAVAILABLE"
 
 # City configuration (aligned with weather_strategy.py)
 CITY_CONFIG = {
@@ -61,18 +72,6 @@ class MLWeatherStrategy(Strategy):
                 return cfg
         return None
 
-    @staticmethod
-    def _parse_strike(symbol: str):
-        """Return (strike_val, is_above_contract) from ticker."""
-        try:
-            parts = symbol.split("-")
-            strike_str = parts[-1]
-            is_above = not strike_str.startswith("B")
-            val = float(re.sub(r"[A-Za-z]", "", strike_str))
-            return val, is_above
-        except Exception:
-            return None, None
-
     def _hours_until_settlement(self, symbol: str, now: datetime = None) -> float:
         now = now or datetime.now()
         today_str = now.strftime("%y%b%d").upper()
@@ -101,6 +100,15 @@ class MLWeatherStrategy(Strategy):
     # ------------------------------------------------------------------
 
     def analyze(self, market_data: MarketData) -> List[TradeSignal]:
+        """Public entry point: analyse, then stamp bracket semantics.
+
+        See ``WeatherArbitrageStrategyV2.analyze`` — signals must carry
+        ``strike_type``/``floor_strike``/``cap_strike`` to be settleable at
+        expiry (PRD FR-1.2).
+        """
+        return attach_spec_to_signals(self._analyze(market_data), market_data)
+
+    def _analyze(self, market_data: MarketData) -> List[TradeSignal]:
         # Only trade 10 AM – 2 PM (use data timestamp when available)
         check_time = market_data.timestamp or datetime.now()
         if not (10 <= check_time.hour < 14):
@@ -122,9 +130,22 @@ class MLWeatherStrategy(Strategy):
         if market_data.bid <= 0:
             return signals
 
-        strike, is_above = self._parse_strike(symbol)
-        if strike is None:
+        # Bracket semantics from the API fields only (PRD FR-1.1). ``yes_bounds``
+        # is the inclusive daily-high interval that settles YES; ``band_lo`` is
+        # the temperature we need to reach, ``band_hi`` the one we must not
+        # exceed. Either may be infinite for a one-sided contract.
+        try:
+            spec = parse_bracket_spec(symbol, extra)
+        except BracketSpecError as exc:
+            log_rejection(
+                REJECT_NO_BRACKET_SPEC,
+                strategy=self.name(),
+                symbol=symbol,
+                detail=str(exc),
+            )
             return signals
+
+        band_lo, band_hi = yes_bounds(spec)
 
         # Extract weather data
         current_temp = extra.get("temperature_f")
@@ -138,11 +159,20 @@ class MLWeatherStrategy(Strategy):
         today_str = check_time.strftime("%y%b%d").upper()
         is_today = today_str in symbol
 
+        # A daily maximum only rises: a band that is open at the top is WON the
+        # moment the observed max reaches it, and any band with a finite top is
+        # LOST the moment the observed max passes it. A `between` bracket the
+        # max has merely entered is neither — the day can warm through it.
         if is_today and daily_max:
-            if is_above and daily_max >= strike:
+            if math.isinf(band_hi) and daily_max >= band_lo:
                 # Already won — buy remaining value
                 if market_data.ask < 0.98:
-                    logger.info("[ML Weather] WON: %s. BUY YES.", symbol)
+                    logger.info(
+                        "[ML Weather] WON: %s (%s, observed max %sF). BUY YES.",
+                        symbol,
+                        spec.describe(),
+                        daily_max,
+                    )
                     signals.append(
                         TradeSignal(
                             symbol=symbol,
@@ -153,19 +183,29 @@ class MLWeatherStrategy(Strategy):
                         )
                     )
                 return signals
-            if not is_above and daily_max > strike:
-                # Below-contract already lost
+            if daily_max > band_hi:
+                # Already lost — the observed max is above the YES band.
+                logger.info(
+                    "[ML Weather] SKIP %s: observed max %sF is above the YES "
+                    "band (%s)",
+                    symbol,
+                    daily_max,
+                    spec.describe(),
+                )
                 return signals
 
         # ── Yogi Berra end-of-day check ──────────────────────────────
-        if is_today and current_temp and hours_left < 1.0 and is_above:
+        # Only for bands with a finite lower edge: falling short of the band is
+        # a certain NO for `greater`/`between`, but it is how a `less` bracket
+        # WINS, so a `less` contract must never take this branch.
+        if is_today and current_temp and hours_left < 1.0 and math.isfinite(band_lo):
             max_rise = 10.0
             projected = max(daily_max or -999, current_temp + max_rise)
-            if projected < strike and market_data.bid > 0.05:
+            if projected < band_lo and market_data.bid > 0.05:
                 logger.info(
-                    "[ML Weather] YOGI BERRA: proj %.1f < strike %.1f. BUY NO %s",
+                    "[ML Weather] YOGI BERRA: proj %.1f below YES band (%s). BUY NO %s",
                     projected,
-                    strike,
+                    spec.describe(),
                     symbol,
                 )
                 sig = TradeSignal(
@@ -189,13 +229,14 @@ class MLWeatherStrategy(Strategy):
         hrrr_forecast = extra.get("hrrr_forecast", nws_high or 0)
         nws_forecast = nws_high or (current_temp or 70)
 
-        # Determine bracket bounds from strike
-        if is_above:
-            bracket_lower = strike
-            bracket_upper = strike + 10
-        else:
-            bracket_lower = strike - 10
-            bracket_upper = strike
+        # The predictor wants a finite [lower, upper] window and returns
+        # P(daily high lands in it) — which IS P(YES) once the window is the
+        # contract's own YES band. Open ends are clamped to a 50F tail, wide
+        # enough to carry effectively all the mass of a day-ahead temperature
+        # distribution (day-of NWS sigma is ~2.5F).
+        OPEN_END_F = 50.0
+        bracket_lower = band_lo if math.isfinite(band_lo) else band_hi - OPEN_END_F
+        bracket_upper = band_hi if math.isfinite(band_hi) else band_lo + OPEN_END_F
 
         try:
             pred = self.predictor.predict_weather(
@@ -212,23 +253,25 @@ class MLWeatherStrategy(Strategy):
         ml_prob = pred["probability"]
         ml_conf = pred["confidence"]
 
-        # For "above" contracts: ml_prob ≈ P(temp in bracket above strike)
-        # Translate to P(YES wins) for the specific contract
-        if is_above:
-            yes_prob = ml_prob
-        else:
-            yes_prob = 1.0 - ml_prob
+        # The window handed to the predictor IS the contract's YES band, so its
+        # probability is already P(YES). The old code asked for a band derived
+        # from the ticker suffix and then flipped the answer for "below"
+        # contracts — two guesses that had to cancel out, and did not.
+        yes_prob = ml_prob
 
         # ── Temperature velocity boost ───────────────────────────────
         if current_temp:
             vel = self._temp_velocity(symbol, current_temp)
             if vel is not None:
-                # Rapid cooling → boost NO confidence
-                if vel < -1.0 and current_temp < strike - 3 and is_above:
-                    ml_conf = min(0.95, ml_conf + 0.10)
-                # Rapid heating → boost YES confidence
-                if vel > 2.0 and current_temp > strike - 5 and is_above:
-                    ml_conf = min(0.95, ml_conf + 0.10)
+                # Both boosts are about distance from the YES band's lower edge,
+                # so they apply only when that edge is finite.
+                if math.isfinite(band_lo):
+                    # Rapid cooling → boost NO confidence
+                    if vel < -1.0 and current_temp < band_lo - 3:
+                        ml_conf = min(0.95, ml_conf + 0.10)
+                    # Rapid heating → boost YES confidence
+                    if vel > 2.0 and current_temp > band_lo - 5:
+                        ml_conf = min(0.95, ml_conf + 0.10)
 
         # ── Signal generation (edge-based) ───────────────────────────
         # YES side

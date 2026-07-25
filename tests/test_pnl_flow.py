@@ -157,36 +157,49 @@ class TestPnLFlow(unittest.TestCase):
         print("✅ Equity correctly calculated")
 
     # === TEST 7: Tanh Price Formula Behavior ===
-    def test_tanh_price_formula_temperature(self):
-        """Test tanh formula produces expected prices for temperature."""
-        print("\n--- Test: Tanh Price Formula (Temperature) ---")
+    def test_weather_mark_is_observed_price_never_tanh(self):
+        """REWRITTEN 2026-07-25 (PRD FR-1.2 / Phase 1 B3).
+
+        This test used to assert the tanh estimator's temperature scaling on a
+        KXHIGH position: 0.50 at the strike, ~0.73 five degrees above, >0.90
+        twenty degrees above. Those marks were manufactured — a daily-high
+        bracket's value is P(YES) over a band, which a signed distance to one
+        number cannot express, and the ``less``/``between`` types are not even
+        monotone in that distance. Weather is no longer tanh-marked at all: the
+        mark is the observed Kalshi price, or entry when there is none. The
+        tanh path itself is unchanged and still covered for crypto by
+        ``test_tanh_price_formula_btc``.
+        """
+        print("\n--- Test: Weather Mark (observed price, never tanh) ---")
 
         exchange = SimulatedExchange()
         exchange.TAKE_PROFIT_PCT = 100.0
         exchange.STOP_LOSS_PCT = 100.0
 
-        # Open position on KXHIGH with strike 75 (must contain city fragment for routing)
-        exchange.open_position("KXHIGHNY-TEST-75", "buy", 0.50, 100)
-
-        # Test at strike (should be ~0.50)
-        exchange.update_market("TEMP_KNYC", 75.0)
+        exchange.open_position(
+            "KXHIGHNY-TEST-75",
+            "buy",
+            0.50,
+            100,
+            strike_type="between",
+            floor_strike=75,
+            cap_strike=76,
+        )
         pos = exchange.positions[0]
-        self.assertAlmostEqual(pos["current_price"], 0.50, places=2)
-        print(f"  At strike (75°F): {pos['current_price']:.4f}")
 
-        # Test above strike by 5° (scale=10, diff=5, tanh(0.5)≈0.46)
-        # probability_shift = 0.46 * 0.49 ≈ 0.23, price ≈ 0.73
-        exchange.update_market("TEMP_KNYC", 80.0)
-        self.assertGreater(pos["current_price"], 0.60)
-        self.assertLess(pos["current_price"], 0.85)
-        print(f"  Above strike (80°F): {pos['current_price']:.4f}")
+        # No observed price: the mark holds at entry no matter the temperature.
+        for temp in (75.0, 80.0, 95.0):
+            exchange.update_market("TEMP_KNYC", temp)
+            self.assertAlmostEqual(pos["current_price"], 0.50, places=6)
+        print(f"  No observed price, 75-95°F: {pos['current_price']:.4f}")
 
-        # Test far above strike (20°) - should approach 0.99
+        # An observed Kalshi price becomes the mark verbatim.
+        exchange.update_market_price("KXHIGHNY-TEST-75", 0.81)
         exchange.update_market("TEMP_KNYC", 95.0)
-        self.assertGreater(pos["current_price"], 0.90)
-        print(f"  Far above strike (95°F): {pos['current_price']:.4f}")
+        self.assertAlmostEqual(pos["current_price"], 0.81, places=6)
+        print(f"  Observed $0.81: {pos['current_price']:.4f}")
 
-        print("✅ Tanh formula produces expected temperature scaling")
+        print("✅ Weather marks track the market, not a synthetic curve")
 
 
 class TestExposureCalculation(unittest.TestCase):

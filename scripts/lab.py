@@ -15,6 +15,15 @@ Usage:
 
 import os
 import sys
+
+# Force UTF-8 output on Windows: this script's banners are emoji-heavy and the
+# default cp1252 console encoding aborted the run with UnicodeEncodeError
+# before any analysis was printed. Same guard the dashboard uses.
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+import csv
 import glob
 import json
 import itertools
@@ -25,6 +34,14 @@ from typing import Dict, Any
 # Ensure project root is in path
 sys.path.append(os.getcwd())
 
+from src.backtest.data_loader import (
+    HARVEST_BRACKET_COLUMNS,
+    HarvestBracketStats,
+    bracket_extra_from_row,
+    spec_for_harvest_row,
+    strip_market_suffix,
+)
+from src.core.bracket_payoff import is_weather_symbol
 from src.core.interfaces import MarketData
 from src.core.matching_engine import SimulatedExchange
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
@@ -46,14 +63,34 @@ BOT_STRATEGY_KEYS = {
 }
 
 
+BASE_COLUMNS = ["Timestamp", "Symbol", "Price", "Type", "Bid", "Ask"]
+
+
+def _csv_header(path):
+    """Column names of a data CSV, or [] if unreadable."""
+    try:
+        with open(path, "r", newline="", encoding="utf-8") as fh:
+            return next(csv.reader(fh))
+    except Exception:
+        return []
+
+
 class Lab:
     def __init__(self, bot_filter: str = None):
         self.bot_filter = bot_filter
         self.data = []
+        # FR-1.1 bracket-usability tally over the replayed harvest.
+        self.bracket_stats = HarvestBracketStats()
         self._load_data()
 
     def _load_data(self):
-        """Loads and merges all data logs."""
+        """Loads and merges all data logs.
+
+        Reads by column NAME so both harvest widths work: files written before
+        the FR-1.1 bracket columns were appended simply lack them, and their
+        rows are counted as unusable-for-brackets rather than being parsed with
+        invented semantics.
+        """
         files = glob.glob(os.path.join(LOG_DIR, "data_*.csv"))
         if not files:
             print("❌ No log files found.")
@@ -61,23 +98,22 @@ class Lab:
 
         df_list = []
         for f in files:
+            header = _csv_header(f)
+            # Only ask pandas for columns this file actually has — a legacy
+            # (pre-bracket) file must still load, not raise.
+            wanted = [c for c in BASE_COLUMNS if c in header]
+            wanted += [c for c in HARVEST_BRACKET_COLUMNS if c in header]
+            if not all(c in header for c in HARVEST_BRACKET_COLUMNS):
+                self.bracket_stats.files_missing_columns.append(os.path.basename(f))
             try:
-                # Optimized load: only read needed columns
-                df = pd.read_csv(
-                    f, usecols=["Timestamp", "Symbol", "Price", "Type", "Bid", "Ask"]
-                )
-                if "MARKET_DATA" in df["Type"].values:
+                if wanted:
+                    df = pd.read_csv(f, usecols=wanted)
+                else:
+                    df = pd.read_csv(f)
+                self.bracket_stats.files += 1
+                if "Type" in df.columns and "MARKET_DATA" in df["Type"].values:
                     df = df[df["Type"] == "MARKET_DATA"]
                     df_list.append(df)
-            except ValueError:
-                # Fallback if strict cols missing
-                try:
-                    df = pd.read_csv(f)
-                    if "MARKET_DATA" in df["Type"].values:
-                        df = df[df["Type"] == "MARKET_DATA"]
-                        df_list.append(df)
-                except Exception:
-                    pass
             except Exception:
                 pass
 
@@ -87,11 +123,60 @@ class Lab:
 
         print(f"📂 Loading {len(df_list)} log files...")
         full_df = pd.concat(df_list, ignore_index=True)
-        full_df["Timestamp"] = pd.to_datetime(full_df["Timestamp"])
+        # Harvest timestamps are datetime.isoformat(), which omits the
+        # microseconds when they happen to be zero. Concatenating files then
+        # yields a mixed-precision column that pandas' single-format inference
+        # rejects outright, so parse them as ISO8601 explicitly.
+        try:
+            full_df["Timestamp"] = pd.to_datetime(
+                full_df["Timestamp"], format="ISO8601"
+            )
+        except (TypeError, ValueError):
+            full_df["Timestamp"] = pd.to_datetime(full_df["Timestamp"], format="mixed")
         full_df = full_df.sort_values("Timestamp")
 
         self.data = full_df.to_dict("records")
+
+        # Establish bracket semantics ONCE per row here (not per genome in the
+        # optimizer). Each row's spec is cached on the record; failures are
+        # counted at this call site and reported below.
+        for row in self.data:
+            row["_bracket_extra"] = bracket_extra_from_row(row)
+            if not is_weather_symbol(strip_market_suffix(row.get("Symbol"))):
+                continue
+            self.bracket_stats.market_rows += 1
+            self.bracket_stats.weather_rows += 1
+            row["_bracket_spec"] = spec_for_harvest_row(row, self.bracket_stats)
+
         print(f"✅ Loaded {len(self.data):,} data points.")
+        for line in self.bracket_stats.report_lines():
+            print(f"   {line}")
+
+    def _market_data(self, row, source: str):
+        """Row -> MarketData, carrying FR-1.1 bracket semantics in ``extra``.
+
+        Returns ``None`` when the row's prices are unusable. Bracket fields are
+        forwarded verbatim: ``None`` for a pre-bracket row, which makes
+        ``parse_bracket_spec`` raise downstream instead of guessing.
+        """
+        try:
+            price = float(row["Price"])
+            bid = float(row.get("Bid", price)) if not pd.isna(row.get("Bid")) else price
+            ask = float(row.get("Ask", price)) if not pd.isna(row.get("Ask")) else price
+        except Exception:
+            return None
+
+        extra = {"source": source}
+        extra.update(row.get("_bracket_extra") or bracket_extra_from_row(row))
+        return MarketData(
+            symbol=row["Symbol"],
+            price=price,
+            bid=bid,
+            ask=ask,
+            volume=0,
+            timestamp=row["Timestamp"],
+            extra=extra,
+        )
 
     def run_audit(self) -> Dict[str, Any]:
         """
@@ -123,29 +208,8 @@ class Lab:
 
         count = 0
         for row in self.data:
-            try:
-                price = float(row["Price"])
-                bid = (
-                    float(row.get("Bid", price))
-                    if not pd.isna(row.get("Bid"))
-                    else price
-                )
-                ask = (
-                    float(row.get("Ask", price))
-                    if not pd.isna(row.get("Ask"))
-                    else price
-                )
-
-                md = MarketData(
-                    symbol=row["Symbol"],
-                    price=price,
-                    bid=bid,
-                    ask=ask,
-                    volume=0,
-                    timestamp=row["Timestamp"],
-                    extra={"source": "audit"},
-                )
-            except Exception:
+            md = self._market_data(row, "audit")
+            if md is None:
                 continue
 
             # Route to correct strategy
@@ -174,6 +238,17 @@ class Lab:
             count += 1
 
         print(f"Processed {count} ticks.")
+
+        # FR-1.1: state offline-settleability explicitly, every run.
+        print("\n🧾 BRACKET SEMANTICS (PRD FR-1.1)")
+        for line in self.bracket_stats.report_lines():
+            print(f"   {line}")
+        results["_bracket_coverage"] = {
+            "weather_rows": self.bracket_stats.weather_rows,
+            "usable": self.bracket_stats.usable,
+            "unusable_pre_bracket_rows": self.bracket_stats.unusable,
+            "legacy_files": self.bracket_stats.files_missing_columns,
+        }
 
         # Collate Results
         print("\n📊 STRATEGY PERFORMANCE")
@@ -268,17 +343,8 @@ class Lab:
                     ]
 
                 for row in relevant_data:
-                    try:
-                        md = MarketData(
-                            symbol=row["Symbol"],
-                            price=float(row["Price"]),
-                            bid=float(row.get("Bid", row["Price"])),
-                            ask=float(row.get("Ask", row["Price"])),
-                            volume=0,
-                            timestamp=row["Timestamp"],
-                            extra={"source": "opt"},
-                        )
-                    except Exception:
+                    md = self._market_data(row, "opt")
+                    if md is None:
                         continue
 
                     sigs = strategy.analyze(md)
@@ -350,6 +416,10 @@ class Lab:
         strategies_to_optimize = []
 
         for name, stats in report.items():
+            # Underscore-prefixed keys are report metadata (e.g. the FR-1.1
+            # bracket-coverage block), not strategies.
+            if name.startswith("_") or "win_rate" not in stats:
+                continue
             wr = stats["win_rate"]
             if wr < threshold:
                 print(

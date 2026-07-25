@@ -466,13 +466,38 @@ class MockKalshiProvider(DataProvider):
 # ======================================================================
 
 # Default station configurations: station_id -> (name, base_temp_f, amplitude_f)
+#
+# PRD FR-1.4 / Phase 1 exit criterion 6: these keys are the SETTLEMENT stations
+# Kalshi resolves the KXHIGH* markets on, imported from the authoritative city
+# registry rather than re-listing a fifth copy of the station map. Simulation
+# is a strategy-input path (``scripts/simulate.py --bot weather`` runs a real
+# strategy against this provider), so a non-settlement airport here would have
+# fed the same wrong-station defect the rebuild is removing.
+#
+# HONESTY NOTE on the numbers: (base_temp_f, amplitude_f) are the ORIGINAL
+# synthetic parameters carried over unchanged from the airport entries this
+# table replaces — KNYC inherits the old JFK pair, KMDW the old ORD pair.
+# They were never climatology for those airports either; they exist only to
+# shape a sinusoid for offline smoke tests. They have NOT been retuned to
+# settlement-station climatology, and nothing calibration-facing may read
+# them: Phase 2 calibration uses IEM CLI truth (FR-1.6), not this mock.
 _DEFAULT_STATIONS: Dict[str, Tuple[str, float, float]] = {
-    "KJFK": ("John F. Kennedy International Airport, NY", 55.0, 15.0),
+    "KNYC": ("New York City, Central Park, NY", 55.0, 15.0),
+    "KMDW": ("Chicago Midway Airport, IL", 50.0, 18.0),
     "KLAX": ("Los Angeles International Airport, CA", 68.0, 12.0),
-    "KORD": ("O'Hare International Airport, Chicago, IL", 50.0, 18.0),
+    # Coarse placeholder, same provenance caveat as above (no prior entry).
+    "KMIA": ("Miami International Airport, FL", 75.0, 10.0),
     "KIAH": ("George Bush Intercontinental Airport, Houston, TX", 72.0, 14.0),
     "KDEN": ("Denver International Airport, CO", 48.0, 22.0),
 }
+
+
+# The station a bare ``MockNWSProvider()`` simulates. Sourced from the city
+# registry so it can never drift from the settlement station Kalshi uses.
+def _default_mock_station() -> str:
+    from src.bots.weather_bot import CITY_CONFIG
+
+    return CITY_CONFIG["NY"].settlement_station
 
 
 class MockNWSProvider(DataProvider):
@@ -488,7 +513,8 @@ class MockNWSProvider(DataProvider):
     Parameters
     ----------
     stations : str or list of str, optional
-        Station ID(s) to simulate.  Defaults to ``["KJFK"]``.
+        Station ID(s) to simulate.  Defaults to the NY settlement station
+        from the city registry (``KNYC``) — see ``_DEFAULT_STATIONS``.
     base_temp_f : float, optional
         Override base temperature (Fahrenheit). If None, uses per-station
         defaults from ``_DEFAULT_STATIONS``.
@@ -515,7 +541,7 @@ class MockNWSProvider(DataProvider):
         seed: Optional[int] = None,
     ):
         if stations is None:
-            self._station_ids = ["KJFK"]
+            self._station_ids = [_default_mock_station()]
         elif isinstance(stations, str):
             self._station_ids = [stations]
         else:

@@ -803,6 +803,9 @@ class RiskManager:
         contract_side: str = "YES",
         disable_profit_targets: bool = False,
         strike: float = None,
+        strike_type: str = None,
+        floor_strike: float = None,
+        cap_strike: float = None,
     ):
         """Call this AFTER a trade is executed."""
         # Hard position size cap: never record more than 50 contracts per entry
@@ -829,6 +832,11 @@ class RiskManager:
             contract_side=contract_side,
             disable_profit_targets=disable_profit_targets,
             strike=strike,
+            # PRD FR-1.2: bracket semantics must reach the position record, or
+            # the exchange cannot settle it and closes SETTLEMENT_UNRESOLVED.
+            strike_type=strike_type,
+            floor_strike=floor_strike,
+            cap_strike=cap_strike,
         )
 
         self._sync_balance()

@@ -10,6 +10,19 @@ import random
 import tempfile
 from pathlib import Path
 from src.utils.logger import logger
+from src.core.bracket_payoff import (
+    BracketSpecError,
+    is_weather_symbol,
+    settles_yes,
+    spec_from_position,
+)
+from src.core.weather_settlement import (
+    SETTLEMENT_TRUTH_GRACE_HOURS,
+    city_key_for_station,
+    city_keys,
+    hours_since_settlement_day_close,
+    resolve_settlement_high,
+)
 
 # ---------------------------------------------------------------------------
 # Persistence helpers
@@ -351,6 +364,17 @@ class SimulatedExchange:
         self.unrealized_pnl = 0.0
         self.realized_pnl = 0.0
         self.on_close = on_close  # Callback function(position)
+        # Optional operator-visible alert sink, wired by the orchestrator to
+        # ``Dashboard.alert``. Used for conditions an operator must see even
+        # though the engine keeps running (e.g. a weather position whose
+        # bracket semantics cannot be established). None = log-only.
+        self.on_alert = None
+        # Monotonic position-id floor. Position ids were derived purely from
+        # ``len(positions) + len(closed_trades) + 1``; that is fine while every
+        # position is closed at each cycle boundary, but FR-1.5 lets weather
+        # positions survive the boundary, so an id must never be reissued while
+        # its owner is still open. See _allocate_position_id.
+        self._next_id = 1
 
         # Simulation Settings
         self.TAKE_PROFIT_PCT = 0.15
@@ -486,6 +510,18 @@ class SimulatedExchange:
                 f"cumulative_net=${self.get_cumulative_net_pnl():+.2f}"
             )
 
+            # Restored positions and closed rows own their ids; never reissue
+            # one. ``next_position_id`` is authoritative when present (written
+            # by _save_state since 2026-07-25); _bump_next_id() then raises it
+            # to the open+closed high-water mark, which is also the whole
+            # recovery story for a legacy state file that predates the key.
+            self._next_id = max(
+                int(getattr(self, "_next_id", 1)),
+                int(data.get("next_position_id", 1) or 1),
+            )
+            self._bump_next_id()
+            self._warn_on_duplicate_ids(context="load")
+
             if n_shells_dropped:
                 logger.info(
                     f"[OMS] STATE HYGIENE: dropped {n_shells_dropped} qty<=0 "
@@ -518,6 +554,36 @@ class SimulatedExchange:
             self.cumulative_realized_pnl = 0.0
             self.cumulative_fees_paid = 0.0
             self.cumulative_entry_fees = 0.0
+            self._next_id = 1
+
+    def _warn_on_duplicate_ids(self, context: str = ""):
+        """Log once if the restored book already contains duplicate ids.
+
+        A state file written before ``next_position_id`` existed can carry
+        duplicates (the production VM has 158 among 1583 closed rows). We do
+        NOT rewrite history to repair them — the journal, the reconciler and
+        every archived analysis reference those ids. Loading recovers to the
+        open+closed high-water mark (see ``_bump_next_id``) so no *new*
+        duplicate is created, and this makes the pre-existing damage visible
+        instead of silent.
+        """
+        all_ids = [p.get("id") for p in self.positions] + [
+            t.get("id") for t in self.closed_trades
+        ]
+        int_ids = [i for i in all_ids if isinstance(i, int)]
+        dupes = len(int_ids) - len(set(int_ids))
+        if dupes:
+            logger.warning(
+                "[OMS] POSITION ID DUPLICATES (%s): %d duplicate id(s) across "
+                "%d open + %d closed rows in the restored state. Pre-existing "
+                "history is left untouched; new ids resume above %d so no "
+                "further collision is created.",
+                context,
+                dupes,
+                len(self.positions),
+                len(self.closed_trades),
+                self._next_id - 1,
+            )
 
     def _save_state(self):
         """Atomically persist exchange state to disk.
@@ -541,6 +607,11 @@ class SimulatedExchange:
                 "total_fees_paid": self.total_fees_paid,
                 "maker_fills": self.maker_fills,
                 "taker_fills": self.taker_fills,
+                # Monotonic id floor. Without it a restart recomputed the floor
+                # from the open book alone and handed the next position an id
+                # that a closed trade already owned (FR-1.5 makes that the
+                # normal case, not a corner case).
+                "next_position_id": int(getattr(self, "_next_id", 1)),
                 # Task F: immutable cumulative ledger (never zeroed by reset_stats)
                 "cumulative_realized_pnl": self.cumulative_realized_pnl,
                 "cumulative_fees_paid": self.cumulative_fees_paid,
@@ -668,6 +739,68 @@ class SimulatedExchange:
         penalty = 0.5 + 0.5 * (price - self.PENNY_FLOOR_LO) / band  # [0.5, 1.0]
         return max(0.0, min(1.0, self.penny_fill_prob * penalty))
 
+    # ------------------------------------------------------------------
+    # Operator alerts + position ids
+    # ------------------------------------------------------------------
+
+    def _alert(self, message: str):
+        """Surface an operator-visible alert, if a sink is wired. Never raises."""
+        if not self.on_alert:
+            return
+        try:
+            self.on_alert(message)
+        except Exception as exc:  # an alert sink must never break settlement
+            logger.warning("[OMS] alert sink failed (%s): %s", exc, message)
+
+    def _known_position_ids(self) -> set:
+        """Every id this exchange currently accounts for — open AND closed.
+
+        ``closed_trades`` matters as much as ``positions``: the trade journal,
+        the reconciler and Phase 1 exit criterion 5 all join a position to its
+        closed row by id, so a reissued id silently merges two different trades
+        in the evidence. (The production VM state carries 158 duplicate ids
+        among 1583 closed rows from the era when only the open book was
+        consulted.)
+        """
+        ids = {p.get("id") for p in self.positions if isinstance(p.get("id"), int)}
+        ids |= {t.get("id") for t in self.closed_trades if isinstance(t.get("id"), int)}
+        return ids
+
+    def _allocate_position_id(self) -> int:
+        """Next position id, unique against every open position and closed trade.
+
+        The legacy formula ``len(positions) + len(closed_trades) + 1`` is kept
+        as the floor so ids are unchanged for the ordinary case (fresh exchange,
+        every position closed at each cycle boundary). ``_next_id`` raises that
+        floor when positions survive a boundary (FR-1.5) or are restored from
+        disk.
+
+        Guarantee: the returned id is not in use by any position in
+        ``self.positions`` and does not appear on any row in
+        ``self.closed_trades``. It is NOT a guarantee about rows that have
+        already been evicted from ``closed_trades`` (nothing evicts them today)
+        or about ids issued by a *different* exchange instance writing the same
+        journal.
+        """
+        candidate = len(self.positions) + len(self.closed_trades) + 1
+        pid = max(candidate, int(getattr(self, "_next_id", 1)))
+        in_use = self._known_position_ids()
+        while pid in in_use:
+            pid += 1
+        self._next_id = pid + 1
+        return pid
+
+    def _bump_next_id(self):
+        """Raise the id floor above every id this exchange has ever issued.
+
+        Open positions alone are not enough: a high-id weather survivor (FR-1.5)
+        pins ``_next_id`` above a dense closed list, which is exactly the state
+        in which the legacy ``len(positions)+len(closed)+1`` floor lands back
+        inside the closed range and starts reissuing ids.
+        """
+        ids = self._known_position_ids()
+        self._next_id = max(list(ids) + [int(getattr(self, "_next_id", 1)) - 1]) + 1
+
     def open_position(
         self,
         symbol: str,
@@ -682,6 +815,9 @@ class SimulatedExchange:
         disable_profit_targets: bool = False,
         is_maker: bool = True,
         strike: float = None,
+        strike_type: str = None,
+        floor_strike: float = None,
+        cap_strike: float = None,
     ):
         """Records a new position with fee deduction and audit trail.
 
@@ -751,7 +887,7 @@ class SimulatedExchange:
             self.taker_fills += 1
 
         position = {
-            "id": len(self.positions) + len(self.closed_trades) + 1,
+            "id": self._allocate_position_id(),
             "symbol": symbol,
             "side": side,
             "entry_price": entry_price,
@@ -768,8 +904,24 @@ class SimulatedExchange:
             "last_market_price": 0,  # 0 = not yet updated by real market data
             "contract_side": contract_side,
             "strike": strike,
+            # PRD FR-1.1/FR-1.2: the bracket's settlement semantics, cached
+            # verbatim from the API fields at open time. Settlement rebuilds a
+            # BracketSpec from these three keys (bracket_payoff.spec_from_position)
+            # and never re-derives direction from the ticker. A position opened
+            # without them settles SETTLEMENT_UNRESOLVED rather than guessing.
+            "strike_type": strike_type,
+            "floor_strike": floor_strike,
+            "cap_strike": cap_strike,
+            # PRD FR-1.5 (defence 1 of 3): a binary weather bracket is held to
+            # settlement, so it never carries a profit-target ladder — whatever
+            # the caller asked for. The production signal path leaves
+            # ``disable_profit_targets`` at its default False
+            # (src/bots/mixins.py reads getattr(sig, "disable_profit_targets",
+            # False) and no weather strategy sets it), so honouring the caller
+            # here meant every live weather position got the ladder and exited
+            # on an invented mark instead of settling via FR-1.2.
             "profit_targets": []
-            if disable_profit_targets
+            if (disable_profit_targets or is_weather_symbol(symbol))
             else [
                 # Alt A: 1/2 + 1/2, no residual. Empirically the 1/3+1/3+1/3
                 # ladder's residual tranche bled $240/24h via EARLY_SETTLEMENT
@@ -805,37 +957,43 @@ class SimulatedExchange:
             if symbol in pos["symbol"] or pos["symbol"] in symbol:
                 pos["last_market_price"] = real_price
 
+    @staticmethod
+    def _map_symbol_fragment(fragment: str) -> str:
+        """Station id -> the city fragment that appears in the Kalshi ticker.
+
+        PRD FR-1.4: the mapping is derived from the one city registry
+        (``KNYC``->``NY``, ``KMDW``->``CHI``, ``KLAX``->``LAX``, ``KMIA``->``MIA``),
+        so it tracks the settlement stations automatically. The old hardcoded
+        table mapped the *non-settlement* airports ``KJFK``->``NY`` and
+        ``KORD``->``CHI`` and had no ``KMDW`` entry at all — after FR-1.4 the
+        bot emits ``TEMP_KMDW``/``PRECIP_KMDW``, which that table silently
+        failed to route to any Chicago position.
+        """
+        if fragment == "BTC":
+            return "BTC"
+        return city_key_for_station(fragment) or fragment
+
     def update_market(self, symbol_fragment: str, current_spot_price: float):
         """
         Updates the valuation of open positions based on the underlying spot price.
         """
-        # Mapping station IDs to Ticker fragments
-        symbol_map = {
-            "KNYC": "NY",
-            "KJFK": "NY",
-            "KLAX": "LAX",
-            "KORD": "CHI",
-            "KMIA": "MIA",
-            "BTC": "BTC",
-        }
-
         # Determine Update Type
         update_type = "GENERIC"
         target_fragment = symbol_fragment
 
         if symbol_fragment.startswith("PRECIP_"):
             update_type = "PRECIP"
-            target_fragment = symbol_map.get(
-                symbol_fragment.replace("PRECIP_", ""), symbol_fragment
+            target_fragment = self._map_symbol_fragment(
+                symbol_fragment.replace("PRECIP_", "")
             )
         elif symbol_fragment.startswith("TEMP_"):
             update_type = "TEMP"
-            target_fragment = symbol_map.get(
-                symbol_fragment.replace("TEMP_", ""), symbol_fragment
+            target_fragment = self._map_symbol_fragment(
+                symbol_fragment.replace("TEMP_", "")
             )
         else:
-            target_fragment = symbol_map.get(symbol_fragment, symbol_fragment)
-            if target_fragment in ["NY", "LAX", "CHI", "MIA"]:
+            target_fragment = self._map_symbol_fragment(symbol_fragment)
+            if target_fragment in city_keys():
                 update_type = "TEMP"
 
         # Timestamp for expiration comparisons (unused directly but keeps code intent clear)
@@ -860,6 +1018,8 @@ class SimulatedExchange:
                 self._save_state()
                 continue
 
+            is_weather = is_weather_symbol(pos["symbol"])
+
             # --- EXPIRATION CHECK ---
             if pos.get("expiration_time"):
                 exp = pos["expiration_time"]
@@ -870,6 +1030,18 @@ class SimulatedExchange:
                     comp_now = datetime.now().astimezone()
 
                 if comp_now >= exp:
+                    if is_weather:
+                        # PRD FR-1.2/FR-1.5: a weather contract settles on the
+                        # NWS Climatological Report daily high, which is not
+                        # published until the following morning. `current_spot_price`
+                        # here is a Kalshi market price (or a raw temperature),
+                        # never the settlement high — resolve the real thing.
+                        if self._settle_weather_position(pos):
+                            continue
+                        # Truth not published yet: hold the position and retry
+                        # on a later sweep (logged inside the helper). Skip the
+                        # rest of this position's valuation — the market is gone.
+                        continue
                     self._close_position(pos, current_spot_price, reason="EXPIRATION")
                     continue
 
@@ -899,14 +1071,21 @@ class SimulatedExchange:
             # Research (Whelan et al.): stops on binary contracts crystallize
             # losses from normal price oscillation, not thesis invalidation.
             # Max loss is already bounded at entry_price * quantity.
+            # PRD FR-1.5 extends this to weather: a daily-high contract is a
+            # binary event too, and a stop-loss on one crystallizes a loss from
+            # ordinary intraday oscillation while the settlement outcome is
+            # still undetermined. Expiry IS the stop.
             is_binary_event = (
                 "KXBTC15M" in pos["symbol"]
                 or "KXBTCD" in pos["symbol"]
                 or "kxbtcd" in pos["symbol"]
+                or is_weather
             )
 
             # Check Time Limit (Legacy fallback)
-            if age >= self.TIME_LIMIT_MIN:
+            # PRD FR-1.5: weather positions are exempt — they are held to
+            # settlement, so a 60-minute wall clock must never close one.
+            if age >= self.TIME_LIMIT_MIN and not is_weather:
                 # Use estimated option price, NOT raw spot price
                 self._close_position(
                     pos,
@@ -922,16 +1101,45 @@ class SimulatedExchange:
                 # --- CASE 1: PRECIPITATION ---
                 if "PRECIP" in pos["symbol"]:
                     estimated_price = current_spot_price
-                # --- CASE 2: STRIKE BASED (KXHIGH, KXBTC, kxbtcd) ---
-                elif (
-                    "KXHIGH" in pos["symbol"]
-                    or "KXBTC" in pos["symbol"]
-                    or "kxbtcd" in pos["symbol"]
-                ):
+                # --- CASE 2a: WEATHER (binary daily-high bracket) ---
+                # PRD FR-1.2/FR-1.5. A bracket's value is P(YES), which the tanh
+                # estimator cannot express: it maps a signed distance to a
+                # strike, and a `between` bracket has TWO bounds while a `less`
+                # bracket pays in the opposite direction from what the estimator
+                # assumed. Running it on KXHIGH (scale=10.0) manufactured
+                # phantom marks that the profit-target ladder then traded
+                # against. There is exactly one honest mark for a binary
+                # weather contract: the observed Kalshi price. With no observed
+                # price the mark holds at entry (unrealized PnL 0) until one
+                # arrives or the position settles.
+                elif is_weather:
+                    lmp = pos.get("last_market_price", 0) or 0
+                    if lmp > 0:
+                        estimated_price = lmp
+                    else:
+                        estimated_price = pos["entry_price"]
+                        logger.debug(
+                            "[OMS] %s: no observed Kalshi price yet; holding mark "
+                            "at entry %.2f (no synthetic price for a binary "
+                            "weather contract)",
+                            pos["symbol"],
+                            pos["entry_price"],
+                        )
+
+                # --- CASE 2b: STRIKE BASED (legacy crypto: KXBTC, kxbtcd) ---
+                elif "KXBTC" in pos["symbol"] or "kxbtcd" in pos["symbol"]:
                     try:
                         parts = pos["symbol"].split("-")
                         strike_str = parts[-1]
-                        is_above = not strike_str.startswith("B")
+                        # Crypto 15m/hourly tickers are all "is spot above the
+                        # strike?" markets, and no crypto ticker suffix begins
+                        # with "B" (they end in a minute label 00/15/30/45 or a
+                        # T-prefixed strike), so the deleted suffix-letter test
+                        # evaluated to True on every crypto symbol it ever saw.
+                        # Hardcoding True is therefore behaviour-preserving, and
+                        # it removes the last direction-inference-from-ticker in
+                        # this valuation path (PRD FR-1.1).
+                        is_above = True
                         parsed_strike = float(re.sub(r"[A-Za-z]", "", strike_str))
 
                         # Use cached strike if available — ticker suffix can be
@@ -954,9 +1162,11 @@ class SimulatedExchange:
                         else:
                             diff = strike - current_spot_price
 
-                        # Sigmoid-like scaling using tanh for smooth probability mapping
-                        # Scale factor: 10 for temp (degrees matter), 1000 for BTC (dollars matter)
-                        scale = 10.0 if "KXHIGH" in pos["symbol"] else 1000.0
+                        # Sigmoid-like scaling using tanh for smooth probability
+                        # mapping. Crypto only: dollars matter, so scale=1000.
+                        # (The KXHIGH scale=10.0 branch is gone — weather is
+                        # handled in CASE 2a above and never reaches tanh.)
+                        scale = 1000.0
                         normalized_diff = diff / scale
                         # tanh maps (-inf, inf) -> (-1, 1), then scale to price range
                         probability_shift = math.tanh(normalized_diff) * 0.49
@@ -1008,7 +1218,11 @@ class SimulatedExchange:
 
                 # --- EARLY SETTLEMENT (Liquidity/Heuristic) ---
                 # If price is pegged at 0.99 or 0.01 for a sustained period (10m), assume market has decided.
-                if age >= 10:
+                # PRD FR-1.5 exempts weather: this heuristic invents a 1.00/0.00
+                # outcome from a price peg, which is precisely NOT "settle via
+                # FR-1.2". A weather bracket resolves against the CLI daily high
+                # at expiry and nothing else.
+                if age >= 10 and not is_weather:
                     if (pos["side"] == "buy" and estimated_price >= 0.99) or (
                         pos["side"] == "sell" and estimated_price <= 0.01
                     ):
@@ -1025,9 +1239,17 @@ class SimulatedExchange:
                         continue
 
                 # --- PROFIT TARGET LADDER (Partial Exits) ---
-                # Skip during grace period to prevent instant tanh gaming
-                if not in_grace_period and self._check_profit_targets(
-                    pos, display_price
+                # Skip during grace period to prevent instant tanh gaming.
+                # PRD FR-1.5 (defence 2 of 3) exempts weather: a profit-target
+                # exit closes the position at an invented mark with no
+                # ``settlement_high``, which is precisely NOT "settle via
+                # FR-1.2". Positions restored from a state file written before
+                # the ladder was withheld at open still carry targets, so the
+                # skip must live at the call site too, not only at open time.
+                if (
+                    not in_grace_period
+                    and not is_weather
+                    and self._check_profit_targets(pos, display_price)
                 ):
                     continue
 
@@ -1073,7 +1295,12 @@ class SimulatedExchange:
                         )
                         continue
 
-                # Fallback: PCT Based Stops (skip during grace period and for short-duration contracts)
+                # Fallback: PCT stops and the PCT take-profit. Skipped during
+                # the grace period and for every binary event contract —
+                # which includes weather (``is_binary_event`` above ORs in
+                # ``is_weather``). PRD FR-1.5: TAKE_PROFIT closes at an
+                # invented mark with no settlement_high, exactly like the
+                # ladder, so weather must never reach it.
                 if in_grace_period or is_binary_event:
                     continue
                 pnl_pct = (
@@ -1104,6 +1331,18 @@ class SimulatedExchange:
         """
         targets = pos.get("profit_targets", [])
         if not targets:
+            return False
+
+        # PRD FR-1.5 (defence 3 of 3, the hard guard). A partial profit-target
+        # close never routes through _close_position, so it bypassed the
+        # invariant guard entirely: a production-shaped weather position with
+        # the default ladder was fully closed on two PROFIT_TARGET tranches at
+        # an invented exit price and with no settlement_high. Refuse here as
+        # well as at the two call sites, so reverting either one is caught
+        # rather than absorbed.
+        if self._weather_close_refused(
+            pos, "PROFIT_TARGET", context="_check_profit_targets"
+        ):
             return False
 
         entry = pos["entry_price"]
@@ -1198,23 +1437,249 @@ class SimulatedExchange:
 
         return False
 
+    # ------------------------------------------------------------------
+    # FR-1.5 close-reason policy for weather positions
+    # ------------------------------------------------------------------
+    # The guard is a WHITELIST, not a blacklist: a weather bracket may only
+    # leave the book through settlement. Enumerating forbidden reasons was
+    # provably incomplete — the original tuple below covered TIME_LIMIT /
+    # CYCLE_RESET / STOP_LOSS* but not TAKE_PROFIT, PROFIT_TARGET,
+    # EARLY_SETTLEMENT or the default reason="MARKET", and a weather position
+    # was observed closing TAKE_PROFIT with no guard, no alert and no test
+    # failure. Any reason not listed here is refused, so a close reason added
+    # in the future cannot silently bypass the invariant.
+    #
+    #   EXPIRATION            -> FR-1.2 payoff against the published CLI high
+    #   SETTLEMENT_UNRESOLVED -> set by _weather_exit_price AFTER the guard,
+    #                            when bracket semantics are unavailable; the
+    #                            position closes flat at entry, loudly.
+    _WEATHER_SETTLEMENT_CLOSE_REASONS = ("EXPIRATION", "SETTLEMENT_UNRESOLVED")
+
+    # Every non-settlement reason string that exists in this file, in
+    # run_dashboard.py and in src/backtest/engine.py, kept as explicit
+    # documentation of what the whitelist excludes. Matched by prefix so every
+    # STOP_LOSS_*/PROFIT_TARGET (+x) variant is covered. It is NOT the
+    # enforcement mechanism (the whitelist above is);
+    # tests/test_weather_lifecycle.py walks the sources and asserts every
+    # literal reason is classified by one list or the other.
+    _WEATHER_FORBIDDEN_CLOSE_PREFIXES = (
+        "TIME_LIMIT",
+        "CYCLE_RESET",
+        "STOP_LOSS",
+        "TAKE_PROFIT",
+        "PROFIT_TARGET",
+        "EARLY_SETTLEMENT",
+        "MARKET",
+    )
+
+    def _weather_close_refused(self, pos, reason, context: str = "close") -> bool:
+        """True when ``reason`` must not be applied to weather position ``pos``.
+
+        The single enforcement point for FR-1.5's "held to settlement" rule,
+        shared by :meth:`_close_position` (full closes) and
+        :meth:`_check_profit_targets` (partial closes, which never route
+        through ``_close_position`` and so had no guard at all).
+        """
+        symbol = pos.get("symbol", "")
+        if not is_weather_symbol(symbol):
+            return False
+        if str(reason) in self._WEATHER_SETTLEMENT_CLOSE_REASONS:
+            return False
+
+        logger.error(
+            "[OMS] FR-1.5 VIOLATION REFUSED (%s): attempt to close weather "
+            "position id=%s %s with reason=%s. Weather positions are exempt "
+            "from TIME_LIMIT, cycle-reset liquidation, stop-losses, profit "
+            "targets and early settlement; they are held to settlement "
+            "(FR-1.2). No-op.",
+            context,
+            pos.get("id"),
+            symbol,
+            reason,
+        )
+        # PRD §6 budgets <1 false alarm/day. A caller that keeps trying is
+        # re-evaluated on every tick, so alert once per (position, reason) and
+        # leave the per-tick record to the ERROR log above — a reverted
+        # exemption must not turn into an alert storm.
+        alerted = pos.setdefault("_fr15_alerted_reasons", [])
+        if str(reason) not in alerted:
+            alerted.append(str(reason))
+            self._alert(f"FR-1.5 REFUSED | {symbol} | close reason {reason} blocked")
+        return True
+
+    def _settle_weather_position(self, pos) -> bool:
+        """Settle one expired weather position against published CLI truth.
+
+        Returns ``True`` when the position was closed (settled, or explicitly
+        closed flat as ``SETTLEMENT_UNRESOLVED``), ``False`` when settlement
+        truth is not published yet and the position must stay open for a later
+        sweep. PRD FR-1.2 / FR-1.5.
+        """
+        symbol = pos["symbol"]
+        high = resolve_settlement_high(symbol)
+        if high is not None:
+            self._close_position(pos, float(high), reason="EXPIRATION")
+            return True
+
+        # No published high. The position is NOT closed and NOT marked: the
+        # running observed max is not the CLI product and guessing settles the
+        # book against fiction (abort-on-missing-critical-input).
+        age_h = hours_since_settlement_day_close(symbol)
+        pending_key = "_settlement_pending_logged"
+        if age_h is not None and age_h > SETTLEMENT_TRUTH_GRACE_HOURS:
+            logger.error(
+                "[OMS] SETTLEMENT_TRUTH_OVERDUE %s: no CLI daily high %.1fh after "
+                "the settlement day closed (grace %.0fh). Position id=%s held open; "
+                "check the FR-1.3 settlement recorder.",
+                symbol,
+                age_h,
+                SETTLEMENT_TRUTH_GRACE_HOURS,
+                pos.get("id"),
+            )
+            if pos.get(pending_key) != "OVERDUE":  # alert once, then log only
+                self._alert(
+                    f"SETTLEMENT TRUTH OVERDUE | {symbol} | "
+                    f"{age_h:.0f}h past close, position held open"
+                )
+                pos[pending_key] = "OVERDUE"
+        else:
+            logger.info(
+                "[OMS] SETTLEMENT_TRUTH_PENDING %s: CLI daily high not published "
+                "yet (%s); holding position id=%s open for a later sweep",
+                symbol,
+                f"{age_h:+.1f}h vs day close" if age_h is not None else "age unknown",
+                pos.get("id"),
+            )
+            pos[pending_key] = "PENDING"
+        return False
+
+    def _weather_exit_price(self, pos, final_spot_price):
+        """``(exit_price, reason_override)`` for a settling weather position.
+
+        Returns ``None`` when settlement truth is unavailable, meaning the
+        caller must leave the position open and retry later.
+        ``reason_override`` is ``None`` to keep the caller's reason.
+
+        ``final_spot_price`` is the **settlement daily high in F** (the only
+        runtime caller, :meth:`_settle_weather_position`, resolves it from the
+        FR-1.3 truth cache first; ``src/backtest/engine.py`` passes Kalshi's own
+        ``expiration_value``). ``None`` makes this resolve the high itself.
+
+        PRD FR-1.2: direction comes from the API's ``strike_type`` via
+        :mod:`src.core.bracket_payoff`, never from the ticker. The settlement
+        high and the exact bracket spec used are stamped onto the position so
+        the journal and ``exchange_state.json`` record what the outcome was
+        computed from.
+        """
+        symbol = pos.get("symbol", "")
+        try:
+            spec = spec_from_position(pos)
+        except BracketSpecError as exc:
+            # A legacy position opened before FR-1.1 cached the API fields.
+            # Settling it NO would be a systematically-wrong "safe" default
+            # (~90% of brackets settle NO, so it would look plausible and be
+            # wrong): the project's abort-on-missing-critical-input rule
+            # forbids it. Close flat instead — zero PnL, loudly.
+            logger.error(
+                "[OMS] SETTLEMENT_UNRESOLVED %s (id=%s): bracket semantics "
+                "unavailable (%s). Refusing to fabricate a settlement outcome; "
+                "closing flat at entry price $%.2f with zero PnL.",
+                symbol,
+                pos.get("id"),
+                exc,
+                pos.get("entry_price", 0.0),
+            )
+            self._alert(
+                f"SETTLEMENT UNRESOLVED | {symbol} | no bracket spec on "
+                f"position — closed flat at entry"
+            )
+            pos["settlement_error"] = str(exc)
+            return (pos["entry_price"], "SETTLEMENT_UNRESOLVED")
+
+        high = final_spot_price
+        if high is None:
+            high = resolve_settlement_high(symbol)
+        if high is None:
+            return None
+
+        try:
+            outcome_is_yes = settles_yes(spec, high)
+        except BracketSpecError as exc:
+            logger.error(
+                "[OMS] SETTLEMENT_UNRESOLVED %s (id=%s): %s. Closing flat at "
+                "entry price with zero PnL.",
+                symbol,
+                pos.get("id"),
+                exc,
+            )
+            self._alert(
+                f"SETTLEMENT UNRESOLVED | {symbol} | unusable daily high — "
+                f"closed flat at entry"
+            )
+            pos["settlement_error"] = str(exc)
+            return (pos["entry_price"], "SETTLEMENT_UNRESOLVED")
+
+        # Provenance: what settled this, and under which rule.
+        pos["settlement_high"] = float(high)
+        pos["settlement_spec"] = spec.as_dict()
+        pos["settlement_rule"] = spec.describe()
+        pos["settlement_outcome"] = "yes" if outcome_is_yes else "no"
+        logger.info(
+            "[OMS] FR-1.2 SETTLED %s: daily high %.0fF vs %s (%s) -> %s",
+            symbol,
+            float(high),
+            spec.describe(),
+            spec.strike_type,
+            "YES" if outcome_is_yes else "NO",
+        )
+        return (1.00 if outcome_is_yes else 0.00, None)
+
     def _close_position(self, pos, final_spot_price, reason="MARKET"):
         """
         Simulates a closing trade.
 
         For BINARY SETTLEMENT (EXPIRATION, EARLY_SETTLEMENT):
-            final_spot_price = the underlying spot value (temp, BTC$)
+            final_spot_price = the underlying spot value.
+            * weather (KXHIGH*): the **settlement daily high in F**, as published
+              in the NWS Climatological Report — not a market price, not the
+              running observed max. Callers that do not have it must use
+              ``_settle_weather_position`` (or pass ``None``) so the position is
+              held open instead of settled against a substitute.
+            * crypto: the underlying spot ($).
             exit_price is determined as 1.00 or 0.00 based on outcome.
 
         For NON-SETTLEMENT closes (TAKE_PROFIT, STOP_LOSS, TIME_LIMIT):
             final_spot_price should be the ESTIMATED OPTION PRICE (0.00-1.00),
             NOT the raw underlying spot price.
+
+        FR-1.5: a weather position accepts ONLY the settlement reasons in
+        ``_WEATHER_SETTLEMENT_CLOSE_REASONS``. Every other reason is refused
+        (logged + alerted) and the position stays open.
         """
         try:
+            symbol = pos.get("symbol", "")
+            is_weather = is_weather_symbol(symbol)
+
+            # --- FR-1.5 HARD INVARIANT ---------------------------------
+            # Weather positions persist across cycles and settle via FR-1.2.
+            # Refuse every non-settlement close outright rather than relying on
+            # each caller to remember, so "no TIME_LIMIT or CYCLE_RESET close
+            # reason appears on any weather position" is an enforced property.
+            if self._weather_close_refused(pos, reason, context="_close_position"):
+                return
+
             # Determine Exit Price Strategy
             is_binary_settlement = reason in ["EXPIRATION", "EARLY_SETTLEMENT"]
 
-            if is_binary_settlement:
+            if is_binary_settlement and is_weather:
+                # --- FR-1.2 WEATHER SETTLEMENT (shared payoff module) ---
+                resolved = self._weather_exit_price(pos, final_spot_price)
+                if resolved is None:
+                    return  # truth pending — position stays open (logged inside)
+                exit_price, reason_override = resolved
+                if reason_override:
+                    reason = reason_override
+            elif is_binary_settlement:
                 # --- BINARY SETTLEMENT LOGIC (0.00 or 1.00) ---
                 outcome_is_yes = False
 
@@ -1223,11 +1688,13 @@ class SimulatedExchange:
                         outcome_is_yes = True
                 else:
                     # ----------------------------------------------------------
+                    # LEGACY CRYPTO SETTLEMENT (weather never reaches here —
+                    # KXHIGH* is routed to the FR-1.2 payoff module above).
+                    #
                     # 2026-06-10 SETTLEMENT FIX (strike resolution)
                     #
                     # The legacy code parsed the LAST dash-segment of the ticker
-                    # as the settlement strike. That is correct for weather
-                    # (KXHIGHNY-26JUN04-B86.5 -> 86.5) and hourly
+                    # as the settlement strike. That is correct for hourly
                     # (KXBTCD-...-T78499.99) tickers whose suffix IS the strike,
                     # but it is WRONG for 15m crypto tickers
                     # (KXBTC15M-26JUN032130-30, KXETH15M-...-00, KXSOL15M-...-15,
@@ -1246,7 +1713,7 @@ class SimulatedExchange:
                     # for sub-1000 alt strikes (SOL ~$150, DOGE ~$0.4, XRP ~$2,
                     # ETH ~$3k). Rule: if pos["strike"] is present, USE IT; only
                     # fall back to the suffix when strike is absent AND the
-                    # suffix is a plausible real strike (weather/hourly). For a
+                    # suffix is a plausible real strike (hourly). For a
                     # 15m-crypto family with NO cached strike (current
                     # latency_arb reality — ETH/SOL/DOGE/XRP never set
                     # sig.strike, so pos["strike"] is None) we FAIL-SAFE to NO
@@ -1267,9 +1734,17 @@ class SimulatedExchange:
                         # Defensive suffix parse (FALLBACK only).
                         parts = pos["symbol"].split("-")
                         strike_str = parts[-1]
-                        # B-prefix (weather below-bucket) => below; everything
-                        # else (T-prefix weather/hourly, bare crypto) => above.
-                        is_above = not strike_str.startswith("B")
+                        # Every ticker that still reaches this branch is a
+                        # crypto "is spot above the strike?" market — 15m
+                        # (suffix = minute label 00/15/30/45) or hourly (suffix
+                        # = T-prefixed strike). No crypto suffix has ever begun
+                        # with "B", so the deleted suffix-letter test was True
+                        # on every symbol it saw here and hardcoding True is
+                        # behaviour-preserving. Weather, the only family that
+                        # ever had a below-bucket, is handled by the FR-1.2
+                        # payoff module above and derives direction from the
+                        # API's strike_type (PRD FR-1.1).
+                        is_above = True
                         try:
                             parsed_strike = float(re.sub(r"[A-Za-z]", "", strike_str))
                         except Exception:
@@ -1283,12 +1758,9 @@ class SimulatedExchange:
                         # strategy that mis-parsed the ticker — so it fail-safes
                         # to NO below instead of auto-YES (spot >= 0 always true).
                         if cached_strike is not None and cached_strike > 0:
-                            # Real API floor_strike — always preferred. Direction
-                            # from the suffix prefix: 15m crypto minute labels
-                            # never start with "B" so is_above=True (YES iff
-                            # spot >= strike), which is correct for KX*15M
-                            # "above strike?" markets; weather B-buckets stay
-                            # below (is_above=False).
+                            # Real API floor_strike — always preferred. YES iff
+                            # spot >= strike, which is what a KX*15M / KXBTCD
+                            # "above strike?" market pays.
                             strike = float(cached_strike)
                             if is_above:
                                 outcome_is_yes = final_spot_price >= strike
@@ -1310,9 +1782,8 @@ class SimulatedExchange:
                             )
                             outcome_is_yes = False
                         elif parsed_strike is not None:
-                            # Weather (KXHIGH...-T65 / -B86.5) and hourly
-                            # (KXBTCD-...-T78499.99): the suffix IS the real
-                            # strike — preserve exact legacy behavior.
+                            # Hourly (KXBTCD-...-T78499.99): the suffix IS the
+                            # real strike — preserve exact legacy behavior.
                             strike = parsed_strike
                             if is_above:
                                 outcome_is_yes = final_spot_price >= strike

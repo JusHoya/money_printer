@@ -1,8 +1,43 @@
-from src.core.interfaces import Strategy, MarketData, TradeSignal
-from typing import List, Optional, Dict
+import math
 from datetime import datetime, timedelta
-import re
+from typing import Dict, List, Optional
+
+from src.core.bracket_payoff import (
+    BracketSpecError,
+    attach_spec_to_signals,
+    parse_bracket_spec,
+    yes_bounds,
+)
+from src.core.interfaces import Strategy, MarketData, TradeSignal
+from src.core.risk_manager import log_rejection
 from src.utils.logger import logger
+
+# FR-0.4 reason code for "the API did not give us this market's bracket
+# semantics". A silent ``return []`` here is exactly the failure mode Phase 0
+# was built to eliminate, so the skip is always logged once, at INFO.
+REJECT_NO_BRACKET_SPEC = "BRACKET_SPEC_UNAVAILABLE"
+
+
+def distance_to_yes_band(value: float, lo: float, hi: float) -> float:
+    """Degrees of margin between ``value`` and the edge of the YES band.
+
+    Inside the band it is the distance to the nearest *finite* edge (how safely
+    inside we are); outside it is the distance to the nearest edge (how clearly
+    we are out). Both are non-negative, which lets one ``min_edge_degrees``
+    threshold gate both directions the way the old ``abs(forecast - strike)``
+    did for one-sided contracts.
+
+    A consequence worth stating plainly: a 2F-wide ``between`` bracket can never
+    offer more than 1F of interior margin, so it cannot clear a 2F threshold on
+    forecast alone. That is the honest answer given published NWS day-of
+    accuracy (~2.5F), not a limitation to tune around.
+    """
+    if lo <= value <= hi:
+        edges = [abs(value - e) for e in (lo, hi) if math.isfinite(e)]
+        return min(edges) if edges else math.inf
+    if value < lo:
+        return lo - value
+    return value - hi
 
 
 # ==============================================================================
@@ -14,22 +49,21 @@ from src.utils.logger import logger
 # Positive bias = NWS tends to over-predict temperature
 # Negative bias = NWS tends to under-predict temperature
 #
-# NOTE: metar_station = airport ASOS station used for METAR observations.
-# Bias corrections were tuned against NWS park stations (e.g., KNYC Central Park).
-# Airport stations (e.g., KJFK) have different microclimate characteristics
-# (tarmac heat, elevation, coastal exposure). Bias values may need retuning
-# once we have enough METAR-sourced data to compare.
+# PRD FR-1.4: the ``metar_station`` keys ("KJFK" for NY, "KORD" for CHI,
+# "KDFW") were removed on 2026-07-25. Nothing ever read them, and they named
+# the NON-settlement airports — the same wrong-station error that FR-1.4 exists
+# to close. Observations now come from ``station`` (the settlement station) and
+# from it alone; the authoritative per-city registry lives in
+# ``src.bots.weather_bot.WEATHER_CITIES``.
 CITY_CONFIG = {
     "KXHIGHNY": {
         "station": "KNYC",
-        "metar_station": "KJFK",
         "name": "New York (Central Park)",
         "bias_f": -0.5,  # NWS slightly under-predicts NYC highs
         "accuracy_window_days": 3,  # Forecast accurate within 3 days
     },
     "KXHIGHCHI": {
         "station": "KMDW",
-        "metar_station": "KORD",
         "name": "Chicago (Midway)",
         # bias_f reset to 0.0 on 2026-04-16 pending 7-day data collection.
         # Prior value of 0.8 was set 2026-04-05 without empirical data.
@@ -40,21 +74,18 @@ CITY_CONFIG = {
     },
     "KXHIGHLAX": {
         "station": "KLAX",
-        "metar_station": "KLAX",
         "name": "Los Angeles (LAX)",
         "bias_f": 0.2,
         "accuracy_window_days": 5,
     },
     "KXHIGHMIA": {
         "station": "KMIA",
-        "metar_station": "KMIA",
         "name": "Miami (MIA)",
         "bias_f": -0.3,  # Humidity often pushes actual temps higher
         "accuracy_window_days": 4,
     },
     "KXHIGHDFW": {
         "station": "KDFW",
-        "metar_station": "KDFW",
         "name": "Dallas-Fort Worth",
         "bias_f": 1.0,  # Great Plains volatility
         "accuracy_window_days": 2,
@@ -192,6 +223,16 @@ class WeatherArbitrageStrategyV2(Strategy):
         return velocity
 
     def analyze(self, market_data: MarketData) -> List[TradeSignal]:
+        """Public entry point: analyse, then stamp bracket semantics.
+
+        Every signal leaves here carrying ``strike_type``/``floor_strike``/
+        ``cap_strike`` so the resulting position can be settled through
+        ``bracket_payoff`` at expiry (PRD FR-1.2). Stamping at the single
+        return boundary means no internal early-return path can omit them.
+        """
+        return attach_spec_to_signals(self._analyze(market_data), market_data)
+
+    def _analyze(self, market_data: MarketData) -> List[TradeSignal]:
         # 0. Warmup Period (Don't trade before 10 AM)
         if not (10 <= datetime.now().hour < 14):
             return []
@@ -236,46 +277,62 @@ class WeatherArbitrageStrategyV2(Strategy):
         else:
             return []
 
-        # 3. Parse Ticker for Strike & Date
+        # 3. Bracket semantics from the API fields — never from the ticker
+        # (PRD FR-1.1). ``yes_bounds`` gives the inclusive daily-high interval
+        # that settles YES: [86, 87] for a `between`, [88, inf) for a `greater`,
+        # (-inf, 79] for a `less`.
         try:
-            parts = symbol.split("-")
-            strike_str = parts[-1]  # e.g. T80 or B85.5
-
-            is_above_contract = True
-            if strike_str.startswith("B"):
-                is_above_contract = False
-
-            strike_val = float(re.sub(r"[A-Za-z]", "", strike_str))
-
-            today_str = datetime.now().strftime("%y%b%d").upper()
-            is_today = today_str in symbol
-        except Exception:
+            spec = parse_bracket_spec(symbol, extra)
+        except BracketSpecError as exc:
+            log_rejection(
+                REJECT_NO_BRACKET_SPEC,
+                strategy=self.name(),
+                symbol=symbol,
+                detail=str(exc),
+            )
             return []
+
+        band_lo, band_hi = yes_bounds(spec)
+        today_str = datetime.now().strftime("%y%b%d").upper()
+        is_today = today_str in symbol
 
         # 4. Calculate Confidence and Timing
         hours_until_settlement = self._get_hours_until_settlement(symbol)
         time_confidence = get_forecast_confidence(hours_until_settlement)
 
         # --- MANDATORY PROTECTION: THE WINNER GUARD ---
+        # A daily maximum only ever rises, so:
+        #   * the contract has WON once the observed max is inside a YES band
+        #     that is open at the top (`greater`) — nothing can take it back;
+        #   * the contract has LOST once the observed max is above a finite
+        #     upper bound (`between` overshoot, or any `less` bracket).
+        # A `between` bracket whose band the max has merely *entered* is NOT
+        # won: the day can keep warming straight through the top of the band.
+        #
+        # This is where the ticker-suffix parser bit hardest. It read every
+        # T-prefixed ticker as "above", so a `less` contract (T80 = "79 or
+        # below") was evaluated exactly backwards: the guard called it a WINNER
+        # the moment the observed max passed 80 — the precise moment it became
+        # unwinnable — and bought YES into a certain loss.
         contract_has_won = False
         if is_today and daily_max_obs:
-            if is_above_contract:
-                if daily_max_obs >= strike_val:
-                    contract_has_won = True
-
-        # IF LOST (Below contract with temp above strike):
-        if (
-            is_today
-            and daily_max_obs
-            and not is_above_contract
-            and daily_max_obs > strike_val
-        ):
-            return []
+            if math.isinf(band_hi) and daily_max_obs >= band_lo:
+                contract_has_won = True
+            elif daily_max_obs > band_hi:
+                # Already lost: the max can only go higher from here.
+                logger.info(
+                    f"[MeteorV2] SKIP: {symbol} already lost — observed max "
+                    f"{daily_max_obs}F is above the YES band ({spec.describe()})"
+                )
+                return []
 
         # IF WON (buy remaining value):
         if contract_has_won:
             if market_ask < 0.98:
-                logger.info(f"[MeteorV2] 🏆 HIGH MET: {symbol} WON. BUY YES.")
+                logger.info(
+                    f"[MeteorV2] 🏆 HIGH MET: {symbol} WON "
+                    f"({spec.describe()}, observed max {daily_max_obs}F). BUY YES."
+                )
                 signals.append(
                     TradeSignal(
                         symbol=symbol,
@@ -299,11 +356,15 @@ class WeatherArbitrageStrategyV2(Strategy):
                 max_rise = 10.0
                 projected_max = max(daily_max_obs or -999, current_temp + max_rise)
 
-                # If even with a miracle rise, we are below strike (for Above contract)
-                if is_above_contract and projected_max < strike_val:
+                # Even a miracle rise leaves us short of the YES band's lower
+                # edge => certain NO. Only meaningful when that edge is finite:
+                # a `less` bracket has no lower edge, and being cold is exactly
+                # how it WINS, so it must never take this branch.
+                if math.isfinite(band_lo) and projected_max < band_lo:
                     if market_bid > 0.05:
                         logger.info(
-                            f"[MeteorV2] ⚾ YOGI BERRA: Proj Max {projected_max:.1f} < Strike {strike_val}. BUY NO."
+                            f"[MeteorV2] ⚾ YOGI BERRA: Proj Max {projected_max:.1f} "
+                            f"below YES band ({spec.describe()}). BUY NO."
                         )
                         sig = TradeSignal(
                             symbol=symbol,
@@ -318,11 +379,13 @@ class WeatherArbitrageStrategyV2(Strategy):
                         return signals
 
             if velocity is not None:
-                # High confidence short: temp dropping and already below strike
+                # High confidence short: temp dropping and already well below
+                # the YES band. Gated on a finite lower edge for the same
+                # reason as the Yogi Berra branch above.
                 if (
-                    is_above_contract
+                    math.isfinite(band_lo)
                     and velocity < -1.0
-                    and current_temp < (strike_val - 3)
+                    and current_temp < (band_lo - 3)
                 ):
                     if market_bid > 0.40:
                         logger.info(
@@ -340,11 +403,11 @@ class WeatherArbitrageStrategyV2(Strategy):
                         signals.append(sig)
                         return signals
 
-                # High confidence long: temp rising rapidly toward strike
+                # High confidence long: temp rising rapidly toward the band
                 if (
-                    is_above_contract
+                    math.isfinite(band_lo)
                     and velocity > 2.0
-                    and current_temp > (strike_val - 5)
+                    and current_temp > (band_lo - 5)
                 ):
                     if market_ask < 0.70:
                         logger.info(
@@ -369,12 +432,12 @@ class WeatherArbitrageStrategyV2(Strategy):
         if market_bid < 0.10 and market_bid > 0.02:
             # Only fade if we have NO other signal and time is running out (< 4 hours)
             if hours_until_settlement < 4.0 and not signals:
-                # Check if we are comfortably safe
-                # For Above contract: Current Temp < Strike - 5
+                # Check if we are comfortably safe: 5F clear of the YES band's
+                # lower edge (finite-edge brackets only).
                 if (
-                    is_above_contract
+                    math.isfinite(band_lo)
                     and current_temp
-                    and current_temp < (strike_val - 5)
+                    and current_temp < (band_lo - 5)
                 ):
                     logger.info(
                         f"[MeteorV2] 📉 FADE LONGSHOT: Bid {market_bid:.2f} < 0.10. BUY NO pennies."
@@ -407,8 +470,10 @@ class WeatherArbitrageStrategyV2(Strategy):
                     f"[MeteorV2] Bias correction for {city_config['name']}: {raw_nws_high}°F -> {nws_high:.1f}°F"
                 )
 
-        # Calculate edge (difference between forecast and strike)
-        edge = abs(nws_high - strike_val)
+        # Edge = margin between the corrected forecast and the YES band.
+        # Inside the band -> how safely inside; outside -> how clearly out.
+        forecast_says_yes = band_lo <= nws_high <= band_hi
+        edge = distance_to_yes_band(nws_high, band_lo, band_hi)
 
         # Tag raw NWS forecast onto signals for trade journal instrumentation.
         # Downstream (mixins.py ml_context) picks up nws_forecast_high so each
@@ -426,69 +491,44 @@ class WeatherArbitrageStrategyV2(Strategy):
         base_confidence = min(0.95, 0.6 + (edge / 20))  # More edge = more confidence
         final_confidence = base_confidence * time_confidence
 
-        # Forecast Arbitrage
-        if is_above_contract:
-            if nws_high > (strike_val + self.min_edge_degrees) and market_ask < 0.80:
-                logger.info(
-                    f"[MeteorV2] 🌡️ FORECAST LONG: {nws_high:.1f}°F > {strike_val}°F (conf={final_confidence:.2f})"
-                )
-                signals.append(
-                    _tag_forecast(
-                        TradeSignal(
-                            symbol=symbol,
-                            side="buy",
-                            quantity=50,
-                            limit_price=market_ask,
-                            confidence=final_confidence,
-                        )
-                    )
-                )
-            elif nws_high < (strike_val - self.min_edge_degrees) and market_bid > 0.20:
-                logger.info(
-                    f"[MeteorV2] ❄️ FORECAST SHORT: {nws_high:.1f}°F < {strike_val}°F (conf={final_confidence:.2f}) BUY NO"
-                )
-                sig = _tag_forecast(
+        # Forecast Arbitrage. One rule for all three contract types: the
+        # forecast either lands inside the YES band (buy YES) or clearly
+        # outside it (buy NO). The old code had a two-branch above/below split
+        # driven by the ticker suffix, which mis-classified every `less`
+        # bracket and had no representation at all for a two-sided `between`.
+        if forecast_says_yes and market_ask < 0.80:
+            logger.info(
+                f"[MeteorV2] 🌡️ FORECAST LONG: {nws_high:.1f}°F inside YES band "
+                f"({spec.describe()}), margin {edge:.1f}°F (conf={final_confidence:.2f})"
+            )
+            signals.append(
+                _tag_forecast(
                     TradeSignal(
                         symbol=symbol,
                         side="buy",
                         quantity=50,
-                        limit_price=1.0 - market_bid,
+                        limit_price=market_ask,
                         confidence=final_confidence,
                     )
                 )
-                sig.contract_side = "NO"
-                sig.stop_loss = 0.25
-                signals.append(sig)
-        else:
-            # Below Contract
-            if nws_high < (strike_val - self.min_edge_degrees) and market_ask < 0.80:
-                signals.append(
-                    _tag_forecast(
-                        TradeSignal(
-                            symbol=symbol,
-                            side="buy",
-                            quantity=50,
-                            limit_price=market_ask,
-                            confidence=final_confidence,
-                        )
-                    )
+            )
+        elif not forecast_says_yes and market_bid > 0.20:
+            logger.info(
+                f"[MeteorV2] ❄️ FORECAST SHORT: {nws_high:.1f}°F outside YES band "
+                f"({spec.describe()}) by {edge:.1f}°F (conf={final_confidence:.2f}) BUY NO"
+            )
+            sig = _tag_forecast(
+                TradeSignal(
+                    symbol=symbol,
+                    side="buy",
+                    quantity=50,
+                    limit_price=1.0 - market_bid,
+                    confidence=final_confidence,
                 )
-            elif nws_high > (strike_val + self.min_edge_degrees) and market_bid > 0.20:
-                logger.info(
-                    f"[MeteorV2] FORECAST SHORT (Below): BUY NO (conf={final_confidence:.2f})"
-                )
-                sig = _tag_forecast(
-                    TradeSignal(
-                        symbol=symbol,
-                        side="buy",
-                        quantity=50,
-                        limit_price=1.0 - market_bid,
-                        confidence=final_confidence,
-                    )
-                )
-                sig.contract_side = "NO"
-                sig.stop_loss = 0.25
-                signals.append(sig)
+            )
+            sig.contract_side = "NO"
+            sig.stop_loss = 0.25
+            signals.append(sig)
 
         return signals
 

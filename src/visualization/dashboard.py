@@ -10,15 +10,36 @@ from datetime import datetime
 import re
 from src.visualization.mascot import Mascot
 
-# Data-CSV schema (FR-0.7 harvester). The first five columns preserve the
-# legacy layout (Timestamp, Symbol, Price, Type, Status) so existing
-# consumers (train_from_csv.py, lab.py, web state_manager — all of which
-# read by column name) keep working; the harvester columns extend it.
+# Data-CSV schema (FR-0.7 harvester + FR-1.1 bracket semantics). The first
+# five columns preserve the legacy layout (Timestamp, Symbol, Price, Type,
+# Status) so existing consumers (train_from_csv.py, lab.py, web state_manager
+# — all of which read by column name) keep working; every later column is
+# APPEND-ONLY at the tail.
 # "Price" keeps its legacy display semantics (best bid, falling back to
 # ask/last); "Last" is the true last-trade price. "Depth" holds a JSON
 # top-3 orderbook snapshot ({"yes": [[price, qty], ...], "no": [...]})
 # and is only populated on Type=DEPTH rows, which MARKET_DATA consumers
 # filter out by Type.
+#
+# StrikeType / FloorStrike / CapStrike (PRD FR-1.1) carry the market's
+# settlement semantics onto every harvested row so a recorded ladder can be
+# settled offline through ``src.core.bracket_payoff`` with no metadata
+# re-fetch — the post-hoc re-fetch is exactly how the old weather book ended
+# up with inverted B/T semantics. They are written EMPTY (never 0) when the
+# market has no such strike: a ``greater`` contract genuinely has no cap, and
+# 0.0 would read back as a 0F strike.
+#
+# BACKWARD COMPATIBILITY: rows written before these columns existed are
+# narrower and their files' header rows lack the three names. Every reader in
+# this repo goes through csv.DictReader or pandas-by-name, so an old file
+# simply yields no bracket keys; readers must use ``.get()`` and treat the
+# absence as "unusable for brackets" (fail loud), never as a default.
+BRACKET_CSV_COLUMNS = [
+    "StrikeType",
+    "FloorStrike",
+    "CapStrike",
+]
+
 DATA_CSV_HEADER = [
     "Timestamp",
     "Symbol",
@@ -32,7 +53,7 @@ DATA_CSV_HEADER = [
     "Last",
     "Volume",
     "Depth",
-]
+] + BRACKET_CSV_COLUMNS
 
 # Force UTF-8 output on Windows to support emoji/Unicode
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -158,6 +179,32 @@ class Dashboard:
         except Exception:
             pass  # Don't crash dashboard on log fail
 
+    @staticmethod
+    def _bracket_cols(kwargs) -> list:
+        """The FR-1.1 bracket columns for one row, in header order.
+
+        ``strike_type`` is normalised to a lowercase string; the two strikes
+        are written as numbers when present. Anything absent or None becomes
+        an EMPTY string — never ``0`` — because a ``greater`` market has no
+        cap and a ``less`` market has no floor, and a zero would replay as a
+        0F strike.
+        """
+        raw_type = kwargs.get("strike_type")
+        strike_type = "" if raw_type is None else str(raw_type).strip().lower()
+
+        def _strike(key):
+            val = kwargs.get(key)
+            if val is None or val == "":
+                return ""
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                # Unparseable metadata is recorded blank so the reader fails
+                # loud on replay rather than inheriting a bogus strike.
+                return ""
+
+        return [strike_type, _strike("floor_strike"), _strike("cap_strike")]
+
     def update_price(self, symbol: str, price: float, **kwargs):
         # Store Price + Timestamp + Metadata
         self.latest_prices[symbol] = {
@@ -166,10 +213,11 @@ class Dashboard:
             "extra": kwargs,
         }
 
-        # Record data for training / microstructure harvesting (FR-0.7).
-        # Quote fields come from the caller's kwargs (bid/ask/no_bid/no_ask/
-        # last/volume); absent fields are recorded as empty strings so
-        # non-market rows (temperatures, spot prices) stay valid.
+        # Record data for training / microstructure harvesting (FR-0.7) plus
+        # bracket semantics (FR-1.1). Quote fields come from the caller's
+        # kwargs (bid/ask/no_bid/no_ask/last/volume); absent fields are
+        # recorded as empty strings so non-market rows (temperatures, spot
+        # prices) stay valid.
         ts = datetime.now().isoformat()
 
         def _col(key):
@@ -191,9 +239,10 @@ class Dashboard:
                 _col("volume"),
                 "",
             ]
+            + self._bracket_cols(kwargs)
         )
 
-    def record_depth(self, symbol: str, levels: dict, last_price=None):
+    def record_depth(self, symbol: str, levels: dict, last_price=None, **kwargs):
         """Record an hourly top-3 orderbook snapshot row (FR-0.7).
 
         ``levels`` is ``{"yes": [(price, qty), ...], "no": [...]}`` — resting
@@ -201,6 +250,10 @@ class Dashboard:
         fetch_orderbook output). The row is tagged Type=DEPTH with the raw
         levels JSON-encoded in the Depth column; MARKET_DATA consumers filter
         on Type and never see these rows.
+
+        ``strike_type`` / ``floor_strike`` / ``cap_strike`` keyword arguments
+        are recorded in the same columns as a MARKET_DATA row (FR-1.1), so a
+        depth snapshot is settleable offline on its own terms.
         """
         yes = list(levels.get("yes") or [])[:3]
         no = list(levels.get("no") or [])[:3]
@@ -228,6 +281,7 @@ class Dashboard:
                 "",
                 depth_json,
             ]
+            + self._bracket_cols(kwargs)
         )
 
     def record_signal(self, signal, status="EXECUTED", strategy_name=None):
@@ -241,7 +295,9 @@ class Dashboard:
                 f"SIGNAL_{signal.side.upper()}",
                 status,
             ]
-            + [""] * 7
+            # Pad to the full header width so pandas never sees a ragged file.
+            # Derived from the header so appending a column cannot desync it.
+            + [""] * (len(DATA_CSV_HEADER) - 5)
         )
 
         # Track strategy performance

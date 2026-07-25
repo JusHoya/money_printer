@@ -140,7 +140,37 @@ KALSHI_KEY_ID=your-key-id-here
 KALSHI_PRIVATE_KEY_PATH=Kalshi_priv_key_1_readOnly.key
 
 NWS_USER_AGENT=(MoneyPrinter_Bot, your_email@example.com)
-NWS_STATION_ID=KJFK
+
+# OPTIONAL. Leave this OUT unless you deliberately want to observe a city
+# other than New York. It is validated against the settlement-station registry
+# (PRD FR-1.4) and only these four values are accepted:
+#   KNYC  -> KXHIGHNY   (New York, Central Park)
+#   KMDW  -> KXHIGHCHI  (Chicago Midway)
+#   KLAX  -> KXHIGHLAX
+#   KMIA  -> KXHIGHMIA
+# Anything else — in particular a nearby airport, which is NOT the station
+# Kalshi settles on — aborts the run instead of feeding a strategy the wrong
+# microclimate. Older versions of this document told you to set a
+# non-settlement airport here; if your VM's `.env` still carries that line,
+# delete it (see "Fixing an existing .env" below).
+# NWS_STATION_ID=KNYC
+```
+
+### Fixing an existing `.env` that sets a non-settlement station
+
+`.env` is gitignored, so a deploy will not correct it. Run this on the VM
+(idempotent — it removes the line entirely so the validated default applies):
+
+```bash
+gcloud compute ssh money-printer --zone=YOUR_ZONE --command \
+  "cd ~/money_printer && sed -i '/^NWS_STATION_ID=/d' .env && grep -c NWS_STATION_ID .env || echo 'removed'"
+```
+
+Then restart the runtime so the change is picked up. Verify with:
+
+```bash
+gcloud compute ssh money-printer --zone=YOUR_ZONE --command \
+  "cd ~/money_printer && grep -i NWS_STATION_ID .env || echo 'OK: no override, using settlement stations'"
 ```
 
 Then create the key file:

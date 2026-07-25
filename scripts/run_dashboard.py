@@ -14,6 +14,7 @@ from src.data.coinbase_provider import CoinbaseProvider
 from src.data.nws_provider import NWSProvider
 from src.data.kalshi_provider import KalshiProvider, is_test_symbol
 from src.core.risk_manager import RiskManager
+from src.core.bracket_payoff import is_weather_symbol
 from src.bots.registry import BotRegistry
 from src.utils.system_utils import prevent_sleep
 from src.utils.logger import logger, get_active_log_path, configure_root_logging
@@ -51,6 +52,10 @@ class OrchestratorEngine:
 
         # Wire the trade-close callback
         self.risk_manager.exchange.on_close = self._on_trade_close
+        # Operator-visible alerts from the exchange (e.g. a weather position
+        # whose bracket semantics cannot be established, or a refused FR-1.5
+        # lifecycle close). Re-wired after every cycle-boundary Dashboard swap.
+        self.risk_manager.exchange.on_alert = self.dashboard.alert
 
         # Initialize shared providers
         self.coinbase = CoinbaseProvider("BTC-USD")
@@ -566,6 +571,101 @@ class OrchestratorEngine:
             return "(no bots registered)"
         return ", ".join(f"{bot.name}={self._bot_status(bot)}" for bot in self.bots)
 
+    def _rollover_positions(self):
+        """Liquidate the book at a cycle boundary, holding weather positions.
+
+        PRD FR-1.5: weather positions are EXEMPT from cycle-reset liquidation.
+        They are binary daily-high contracts that settle against the NWS
+        Climatological Report at expiry (FR-1.2), so a cycle boundary — an
+        internal drawdown-management event with no market meaning — must not
+        crystallize them. Everything else is liquidated exactly as before.
+
+        Split out of ``_run_drawdown_cycle`` so the boundary behaviour can be
+        exercised directly (Phase 1 exit criterion 5) without standing up log
+        archiving, Discord and a new Dashboard.
+
+        PER-CYCLE ACCOUNTING OF A SURVIVOR (measured 2026-07-25, documented not
+        fixed — see the return value and the cycle record's
+        ``carried_weather_*`` keys)
+        ---------------------------------------------------------------------
+        ``_run_drawdown_cycle`` calls ``risk_manager.update_balance(new_bal)``
+        BEFORE this method, while the survivor is still open. That resets
+        ``starting_balance_day`` to the configured sim balance and zeroes
+        ``daily_pnl``/``exchange.realized_pnl``, so a survivor's economics
+        SPLIT across two cycle records:
+
+          * the opening cycle is charged the ENTRY FEE only (the entry cost
+            itself is never booked to PnL — it is held as ``exposure``, a live
+            view of currently-open collateral);
+          * the settling cycle is credited the FULL settlement PnL
+            ``(exit - entry) * qty - exit_fee``;
+          * the survivor's collateral is re-deducted from ``balance`` as
+            exposure against each new cycle's fresh ``starting_balance_day``,
+            which is correct — that capital really is still deployed — but it
+            means cycle N+1 starts with less headroom than its nominal base.
+
+        Measured on a $0.40x10 weather survivor settling YES: cycle N reports
+        -$0.05, cycle N+1 reports +$6.00, and the two sum to the cumulative
+        ledger's +$5.95 exactly. So nothing is double-charged or lost; the
+        artifact is ATTRIBUTION, not arithmetic.
+
+        Not fixed, deliberately: (1) the sum over cycles is exact, so no gate
+        that reads the cumulative ledger or the settled-trade journal is
+        affected — and the Phase 3 gate is specified to be settlement-true over
+        >=50 settled trades, which is attribution-independent; (2) a fix would
+        have to move ``starting_balance_day``/``update_balance`` semantics in
+        ``risk_manager.py``, changing the daily-drawdown baseline for every
+        strategy, to buy nothing the cumulative ledger does not already give.
+        The consequence an operator MUST know is that a survivor's whole
+        settlement outcome lands as one realized hit in the cycle it settles
+        (it cannot move the daily-drawdown breaker while unrealized), so the
+        carried exposure is logged here and stamped on the cycle record.
+        """
+        exchange = self.risk_manager.exchange
+        for p in list(exchange.positions):
+            if is_weather_symbol(p.get("symbol", "")):
+                continue
+            exchange._close_position(p, p["entry_price"], reason="CYCLE_RESET")
+        # A non-weather position whose close failed is still dropped from the
+        # open book, exactly as the legacy positions.clear() did; weather
+        # positions survive with their id, quantity and entry price intact.
+        survivors = [
+            p for p in exchange.positions if is_weather_symbol(p.get("symbol", ""))
+        ]
+        dropped = len(exchange.positions) - len(survivors)
+        if dropped:
+            logger.warning(
+                "[Cycle] Dropped %d non-weather position(s) that failed to close",
+                dropped,
+            )
+        exchange.positions[:] = survivors
+        # Ids must not be reissued while their owners are still open, so the
+        # counter restarts above the highest surviving id rather than at 1.
+        exchange._bump_next_id()
+        self.risk_manager.active_positions = len(survivors)
+        if survivors:
+            # Same formula as RiskManager.get_current_exposure (short YES locks
+            # (1-price)*qty), computed locally so the boundary code needs only
+            # the exchange.
+            carried = sum(
+                (1.0 - p["entry_price"]) * p["quantity"]
+                if p.get("side") == "sell" and p.get("contract_side", "YES") == "YES"
+                else p["entry_price"] * p["quantity"]
+                for p in survivors
+            )
+            logger.info(
+                "[Cycle] %d weather position(s) held across the boundary "
+                "(FR-1.5), carrying $%.2f of collateral and their unsettled "
+                "PnL into the next cycle: %s",
+                len(survivors),
+                carried,
+                ", ".join(f"id={p.get('id')} {p.get('symbol')}" for p in survivors),
+            )
+        # Persist immediately so a restart right after rollover restores the
+        # survivors rather than the pre-rollover book.
+        exchange._save_state()
+        return survivors
+
     def _run_drawdown_cycle(self):
         """Archive logs and reset state for next cycle (no retrain — FR-0.2)."""
         from datetime import datetime as _dt
@@ -626,13 +726,22 @@ class OrchestratorEngine:
         self.risk_manager.strategy_pnl = {}
         self.risk_manager.loss_cooldown = {}
         self.risk_manager.last_trade_time = _dt.min
-        for p in list(self.risk_manager.exchange.positions):
-            self.risk_manager.exchange._close_position(
-                p, p["entry_price"], reason="CYCLE_RESET"
-            )
-        self.risk_manager.exchange.positions.clear()
-        self.risk_manager.exchange._next_id = 1
-        self.risk_manager.active_positions = 0
+        survivors = self._rollover_positions()
+
+        # FR-1.5 accounting provenance (see _rollover_positions' docstring):
+        # this cycle's ``pnl`` above excludes the survivors entirely — their
+        # settlement PnL will be reported by whichever cycle they settle in.
+        # Record how much is in flight so a per-cycle PnL reader can see it.
+        cycle_record["carried_weather_positions"] = len(survivors)
+        cycle_record["carried_weather_exposure"] = round(
+            sum(
+                (1.0 - p["entry_price"]) * p["quantity"]
+                if p.get("side") == "sell" and p.get("contract_side", "YES") == "YES"
+                else p["entry_price"] * p["quantity"]
+                for p in survivors
+            ),
+            2,
+        )
 
         # FR-0.5: create the NEW session log files BEFORE archiving/removing
         # the old ones, so there is never a zero-session-log window at
@@ -646,6 +755,7 @@ class OrchestratorEngine:
         self.dashboard = Dashboard()
         self.dashboard.alerts = prev_alerts
         self.risk_manager.exchange.on_close = self._on_trade_close
+        self.risk_manager.exchange.on_alert = self.dashboard.alert
         self._cycle_start_time = time.time()
 
         # Archive + clean in a single pass, now that the new session files
