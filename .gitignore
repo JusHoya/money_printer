@@ -57,8 +57,22 @@ data/training_state.json
 data/trade_journal.jsonl
 *.bak
 
-# Review/audit artifacts (large pulled VM data dumps)
-review_2026_06_03/
+# Phase 1 (FR-1.3): rewritten by the reconcile_weather.py cron on every run
+# (scripts/reconcile_weather.py:839,1032). Tracking them makes the VM's next
+# `git pull` abort with "local changes would be overwritten". EC-3 closure
+# evidence is captured by committing a dated snapshot deliberately, not by
+# tracking the live path. The cli_daily_high_*.csv files beside these stay
+# tracked — those are the immutable FR-1.6 ground-truth record.
+data/weather_truth/settlement_cache.json
+data/weather_truth/reconcile/
+
+# Review/audit artifacts (large pulled VM data dumps). Globbed 2026-07-27:
+# review_2026_06_09/, _06_26/ and _07_24/ total ~430 MB locally and one of
+# them holds a 372 MiB file that GitHub would reject outright.
+review_2026_*/
+
+# Claude Code scheduler lock (machine-local)
+.claude/scheduled_tasks.lock
 
 
 
