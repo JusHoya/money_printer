@@ -1,0 +1,799 @@
+{
+ "_note": "Real decoded GEFS node values for cycle 2026072000 (geavg + gespr, TMAX 2 m), captured from data/ensemble/cache/records/ which scripts/backfill_ensemble_history.py produced from live NODD S3 ranged reads. Keys are \"<product>|<fhour>\". Values are the provider record blobs verbatim.",
+ "cycle": "2026072000",
+ "init_time_utc": "2026-07-20T00:00:00Z",
+ "records": {
+  "geavg|12": {
+   "_meta": {
+    "bytes": 414726,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 12,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 12,
+    "interval_start": 6,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=5163293-5578018",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 293.6,
+    "197,1144": 294.5,
+    "224,966": 295.9,
+    "257,1119": 302.5
+   }
+  },
+  "geavg|18": {
+   "_meta": {
+    "bytes": 415335,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 18,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 18,
+    "interval_start": 12,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=5120920-5536254",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 300.3,
+    "197,1144": 302.3,
+    "224,966": 298.5,
+    "257,1119": 305.0
+   }
+  },
+  "geavg|24": {
+   "_meta": {
+    "bytes": 410420,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 24,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 24,
+    "interval_start": 18,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=5005470-5415889",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 301.4,
+    "197,1144": 302.5,
+    "224,966": 300.1,
+    "257,1119": 305.1
+   }
+  },
+  "geavg|30": {
+   "_meta": {
+    "bytes": 407628,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:41Z",
+    "fhour": 30,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 30,
+    "interval_start": 24,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=4991128-5398755",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 299.7,
+    "197,1144": 297.9,
+    "224,966": 299.4,
+    "257,1119": 302.8
+   }
+  },
+  "geavg|33": {
+   "_meta": {
+    "bytes": 406884,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 33,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 33,
+    "interval_start": 30,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=4993688-5400571",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 298.2,
+    "197,1144": 296.0,
+    "224,966": 296.1,
+    "257,1119": 301.7
+   }
+  },
+  "geavg|36": {
+   "_meta": {
+    "bytes": 407391,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 36,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 36,
+    "interval_start": 30,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=5003062-5410452",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 298.2,
+    "197,1144": 296.6,
+    "224,966": 296.1,
+    "257,1119": 301.9
+   }
+  },
+  "geavg|42": {
+   "_meta": {
+    "bytes": 409736,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 42,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 42,
+    "interval_start": 36,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=5012007-5421742",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 302.0,
+    "197,1144": 300.2,
+    "224,966": 298.8,
+    "257,1119": 304.5
+   }
+  },
+  "geavg|48": {
+   "_meta": {
+    "bytes": 405773,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 48,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 48,
+    "interval_start": 42,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=4965816-5371588",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 302.3,
+    "197,1144": 301.5,
+    "224,966": 300.6,
+    "257,1119": 304.7
+   }
+  },
+  "geavg|54": {
+   "_meta": {
+    "bytes": 403091,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:42Z",
+    "fhour": 54,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 54,
+    "interval_start": 48,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=4982172-5385262",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 298.9,
+    "197,1144": 299.6,
+    "224,966": 299.8,
+    "257,1119": 302.9
+   }
+  },
+  "geavg|57": {
+   "_meta": {
+    "bytes": 407123,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 57,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 57,
+    "interval_start": 54,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=4995432-5402554",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 293.2,
+    "197,1144": 297.6,
+    "224,966": 296.1,
+    "257,1119": 301.8
+   }
+  },
+  "geavg|6": {
+   "_meta": {
+    "bytes": 427145,
+    "derived_forecast_type": 0,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:41Z",
+    "fhour": 6,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 6,
+    "interval_start": 0,
+    "level": "2 m above ground",
+    "member": "geavg",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=5283356-5710500",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 296.8,
+    "197,1144": 298.2,
+    "224,966": 299.9,
+    "257,1119": 303.5
+   }
+  },
+  "gespr|12": {
+   "_meta": {
+    "bytes": 291234,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 12,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 12,
+    "interval_start": 6,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3787227-4078460",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 0.2,
+    "197,1144": 0.2,
+    "224,966": 0.3,
+    "257,1119": 0.1
+   }
+  },
+  "gespr|18": {
+   "_meta": {
+    "bytes": 295338,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 18,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 18,
+    "interval_start": 12,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3842893-4138230",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 0.8,
+    "197,1144": 0.9,
+    "224,966": 0.5,
+    "257,1119": 0.4
+   }
+  },
+  "gespr|24": {
+   "_meta": {
+    "bytes": 293992,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 24,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 24,
+    "interval_start": 18,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3806718-4100709",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 0.7,
+    "197,1144": 1.0,
+    "224,966": 0.5,
+    "257,1119": 0.5
+   }
+  },
+  "gespr|30": {
+   "_meta": {
+    "bytes": 299211,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 30,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 30,
+    "interval_start": 24,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3821080-4120290",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 0.4,
+    "197,1144": 0.8,
+    "224,966": 0.6,
+    "257,1119": 0.3
+   }
+  },
+  "gespr|33": {
+   "_meta": {
+    "bytes": 303219,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 33,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 33,
+    "interval_start": 30,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3842171-4145389",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 1.0,
+    "197,1144": 0.4,
+    "224,966": 0.5,
+    "257,1119": 0.2
+   }
+  },
+  "gespr|36": {
+   "_meta": {
+    "bytes": 300184,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 36,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 36,
+    "interval_start": 30,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3855892-4156075",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 0.9,
+    "197,1144": 0.3,
+    "224,966": 0.5,
+    "257,1119": 0.2
+   }
+  },
+  "gespr|42": {
+   "_meta": {
+    "bytes": 301197,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:44Z",
+    "fhour": 42,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 42,
+    "interval_start": 36,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3893478-4194674",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 1.2,
+    "197,1144": 1.2,
+    "224,966": 0.6,
+    "257,1119": 0.4
+   }
+  },
+  "gespr|48": {
+   "_meta": {
+    "bytes": 299537,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:44Z",
+    "fhour": 48,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 48,
+    "interval_start": 42,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3902085-4201621",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 1.3,
+    "197,1144": 1.8,
+    "224,966": 0.8,
+    "257,1119": 0.4
+   }
+  },
+  "gespr|54": {
+   "_meta": {
+    "bytes": 301735,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:44Z",
+    "fhour": 54,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 54,
+    "interval_start": 48,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3918937-4220671",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 1.4,
+    "197,1144": 1.6,
+    "224,966": 0.6,
+    "257,1119": 0.4
+   }
+  },
+  "gespr|57": {
+   "_meta": {
+    "bytes": 305743,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:44Z",
+    "fhour": 57,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 57,
+    "interval_start": 54,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3938003-4243745",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 1.8,
+    "197,1144": 0.9,
+    "224,966": 0.7,
+    "257,1119": 0.3
+   }
+  },
+  "gespr|6": {
+   "_meta": {
+    "bytes": 275888,
+    "derived_forecast_type": 2,
+    "drs_template": 3,
+    "ensemble_size": 30,
+    "fetched_at": "2026-07-27T04:03:43Z",
+    "fhour": 6,
+    "field": "TMAX",
+    "grid": {
+     "dlat": 0.25,
+     "dlon": 0.25,
+     "lat1": 90.0,
+     "lon1": 0.0,
+     "ni": 1440,
+     "nj": 721,
+     "scan_mode": 0
+    },
+    "interval_end": 6,
+    "interval_start": 0,
+    "level": "2 m above ground",
+    "member": "gespr",
+    "pdt_number": 12,
+    "perturbation_number": null,
+    "range": "bytes=3704463-3980350",
+    "reference_time": "2026-07-20T00:00:00Z",
+    "s3_key": "gefs.20260720/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006",
+    "statistical_process": 2
+   },
+   "nodes_k": {
+    "193,1089": 0.2,
+    "197,1144": 0.3,
+    "224,966": 0.2,
+    "257,1119": 0.2
+   }
+  }
+ }
+}

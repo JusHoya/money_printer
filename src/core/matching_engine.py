@@ -813,7 +813,7 @@ class SimulatedExchange:
         strategy_name: str = None,
         contract_side: str = "YES",
         disable_profit_targets: bool = False,
-        is_maker: bool = True,
+        is_maker: Optional[bool] = None,
         strike: float = None,
         strike_type: str = None,
         floor_strike: float = None,
@@ -823,6 +823,20 @@ class SimulatedExchange:
 
         Sprint 4: deducts estimated fees from realized PnL and tracks
         maker/taker fill counts.
+
+        ``is_maker``
+            The fill type, when the caller knows it. ``None`` means *unknown*,
+            which is the state of the production paper-trading path today: no
+            order router runs in the live loop, so nothing between the strategy
+            and this method can say whether the order rested or crossed. An
+            unknown fill is booked as a **taker** — the expensive side.
+
+            This defaulted to ``True`` before PRD Phase 2 corrected the maker
+            multiplier to zero. That combination booked $0.00 of fees on every
+            simulated fill, which flatters exactly the ledger the FR-5 capital
+            gate reads. Booking the free side of an unknown fill understates
+            cost; booking the expensive side understates edge, and only the
+            second error is safe to make before risking capital.
 
         Task E: when ``realistic_fills`` is enabled a penny-floor resting order
         may fail to fill — in that case NO position is created, no fee is paid,
@@ -871,9 +885,30 @@ class SimulatedExchange:
                 expiry_dt = expiration_time
 
         # Sprint 4: compute and deduct fee
-        from src.core.fee_calculator import compute_fee
+        from src.core.fee_calculator import compute_fee, fee_type_for_symbol
 
-        fee_result = compute_fee(entry_price, quantity, is_maker=is_maker)
+        # Unknown fill type is booked as taker. ``fill_type`` keeps the
+        # distinction visible on the position record so a downstream reader can
+        # tell an assumed taker from an observed one instead of having to infer
+        # it from a silently defaulted boolean.
+        fill_type_known = is_maker is not None
+        effective_is_maker = bool(is_maker) if fill_type_known else False
+        if effective_is_maker:
+            fill_type = "maker"
+        elif fill_type_known:
+            fill_type = "taker"
+        else:
+            fill_type = "taker_assumed"
+
+        # The maker multiplier is a per-series property; derive it from the
+        # ticker rather than assuming the standard schedule, so a series that
+        # does bill resting liquidity (KXAAAGASM, PRD Phase 4) is charged.
+        fee_result = compute_fee(
+            entry_price,
+            quantity,
+            is_maker=effective_is_maker,
+            series_fee_type=fee_type_for_symbol(symbol),
+        )
         self.total_fees_paid += fee_result.fee
         self.realized_pnl -= fee_result.fee  # Fees reduce realized PnL
 
@@ -881,7 +916,7 @@ class SimulatedExchange:
         self.cumulative_fees_paid += fee_result.fee
         self.cumulative_entry_fees += fee_result.fee
 
-        if is_maker:
+        if effective_is_maker:
             self.maker_fills += 1
         else:
             self.taker_fills += 1
@@ -931,7 +966,10 @@ class SimulatedExchange:
                 {"move": 0.30, "exit_pct": 1.00, "hit": False},
             ],
             "entry_fee": fee_result.fee,
-            "is_maker": is_maker,
+            "is_maker": effective_is_maker,
+            # "maker" / "taker" (observed) or "taker_assumed" (fill type was
+            # not supplied and the expensive side was booked).
+            "fill_type": fill_type,
         }
         self.positions.append(position)
 
@@ -945,7 +983,8 @@ class SimulatedExchange:
                 "quantity": quantity,
                 "price": entry_price,
                 "fee": fee_result.fee,
-                "is_maker": is_maker,
+                "is_maker": effective_is_maker,
+                "fill_type": fill_type,
                 "strategy": strategy_name,
                 "timestamp": datetime.now().isoformat(),
             }
@@ -1368,11 +1407,17 @@ class SimulatedExchange:
                 else:
                     partial_pnl = (entry - current_price) * exit_qty
 
-                # Compute and deduct exit fee for partial close
-                from src.core.fee_calculator import compute_fee
+                # Compute and deduct exit fee for partial close. The entry's
+                # fill type carries to the exit; a position record that predates
+                # the field (restored state, hand-built fixture) is treated as a
+                # taker, matching open_position's unknown-fill rule.
+                from src.core.fee_calculator import compute_fee, fee_type_for_symbol
 
                 exit_fee_result = compute_fee(
-                    current_price, exit_qty, is_maker=pos.get("is_maker", True)
+                    current_price,
+                    exit_qty,
+                    is_maker=pos.get("is_maker", False),
+                    series_fee_type=fee_type_for_symbol(pos["symbol"]),
                 )
                 exit_fee = exit_fee_result.fee
                 self.total_fees_paid += exit_fee
@@ -1816,11 +1861,18 @@ class SimulatedExchange:
             else:
                 total_pnl = (pos["entry_price"] - exit_price) * pos["quantity"]
 
-            # Compute and deduct exit fee
-            from src.core.fee_calculator import compute_fee
+            # Compute and deduct exit fee. Same rule as the entry: a position
+            # whose fill type was never recorded is charged as a taker, never
+            # as the free maker side. (A settlement close prices at 0.00/1.00,
+            # where every fee formula is zero — Kalshi charges no settlement
+            # fee — so this term only bites on a traded-out exit.)
+            from src.core.fee_calculator import compute_fee, fee_type_for_symbol
 
             exit_fee_result = compute_fee(
-                exit_price, pos["quantity"], is_maker=pos.get("is_maker", True)
+                exit_price,
+                pos["quantity"],
+                is_maker=pos.get("is_maker", False),
+                series_fee_type=fee_type_for_symbol(pos["symbol"]),
             )
             exit_fee = exit_fee_result.fee
             self.total_fees_paid += exit_fee

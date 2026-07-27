@@ -295,20 +295,37 @@ class TestMLGating:
         assert SignalProcessorMixin._ml_ev_gate(sig) is False
 
     def test_break_even_plus_fees_rejected(self):
-        """Exactly break-even before fees → negative after fees."""
+        """Exactly break-even before fees is rejected *because of* fees.
+
+        confidence == limit_price, so the pre-fee EV is exactly 0.00 and the
+        only thing that can reject this signal is the fee term. The gate prices
+        a taker round trip: 2 x ceil(0.07 * 0.50 * 0.50) = 2 x $0.02, so
+        EV = 0.50 - 0.50 - 0.04 = -0.04.
+
+        The explicit EV assertion is the point of this test. Before the gate
+        was corrected to price the taker path, the fee term was $0.00, EV was
+        exactly 0.00, and this test passed only on ``trade_is_profitable``
+        using a strict ``>`` — a ``>`` to ``>=`` change would have flipped it
+        while the docstring still claimed a fee-driven rejection.
+        """
         from src.bots.mixins import SignalProcessorMixin
+        from src.core.fee_calculator import ev_after_fees
+
+        assert ev_after_fees(0.50, 0.50, 1, is_maker=False) == pytest.approx(-0.04)
 
         sig = TradeSignal(
             symbol="T", side="buy", quantity=1, limit_price=0.50, confidence=0.50
         )
-        # EV = 0.50 - 0.50 - 0.004375 < 0
         assert SignalProcessorMixin._ml_ev_gate(sig) is False
 
     def test_cheap_contract_low_fee(self):
-        """Cheap contract (low fee) with small positive EV passes."""
+        """Cheap contract (low fee) with small positive EV passes.
+
+        P=0.05, confidence=0.08. Taker fee = ceil(0.07 * 0.05 * 0.95) = $0.01
+        per leg, so EV = 0.08 - 0.05 - 2 x 0.01 = +0.01 > 0.
+        """
         from src.bots.mixins import SignalProcessorMixin
 
-        # P=0.05, confidence=0.08 → EV = 0.08-0.05 - 0.0175*0.05*0.95 ≈ 0.03 - 0.0008 > 0
         sig = TradeSignal(
             symbol="T", side="buy", quantity=1, limit_price=0.05, confidence=0.08
         )
@@ -328,8 +345,33 @@ class TestMLGating:
         sig = TradeSignal(
             symbol="T", side="buy", quantity=1, limit_price=0.90, confidence=0.95
         )
-        # EV = 0.95 - 0.90 - 0.0175*0.90*0.10 = 0.05 - 0.00158 > 0
+        # Taker fee = ceil(0.07 * 0.90 * 0.10) = $0.01 per leg.
+        # EV = 0.95 - 0.90 - 2 * 0.01 = +0.03 > 0
         assert SignalProcessorMixin._ml_ev_gate(sig) is True
+
+    def test_gate_prices_the_taker_fill_not_the_free_maker_one(self):
+        """The gate must not assume the cheapest possible fill.
+
+        Nothing at signal time knows the order will rest rather than cross.
+        Pricing the maker path on a standard-schedule series charges $0.00 and
+        collapses the gate to ``confidence > limit_price``, which admits an
+        edge of one hundredth of a cent. These two signals are the measured
+        cases that leaked through before the fix.
+        """
+        from src.bots.mixins import SignalProcessorMixin
+
+        for limit_price, confidence in ((0.50, 0.5001), (0.10, 0.11)):
+            sig = TradeSignal(
+                symbol="T",
+                side="buy",
+                quantity=1,
+                limit_price=limit_price,
+                confidence=confidence,
+            )
+            assert SignalProcessorMixin._ml_ev_gate(sig) is False, (
+                f"conf={confidence} at price={limit_price} must not clear the "
+                "gate: the edge is smaller than one taker fee"
+            )
 
 
 # ===========================================================================

@@ -108,7 +108,12 @@ def test_reset_stats_then_more_trades_keeps_reconciliation():
 
 
 def test_entry_fee_counted_once_not_per_partial_close():
-    """cumulative_entry_fees increments once at open, not per partial close."""
+    """cumulative_entry_fees increments once at open, not per partial close.
+
+    Opened as a taker: PRD Phase 2 corrected the standard-series maker
+    multiplier to zero, so a maker open books $0.00 and there would be no fee
+    to count once. The invariant under test is unchanged.
+    """
     ex = SimulatedExchange()
     # Open WITHOUT disabling profit targets so partial closes can occur.
     ex.open_position(
@@ -117,6 +122,7 @@ def test_entry_fee_counted_once_not_per_partial_close():
         0.40,
         10,
         strategy_name="X",
+        is_maker=False,
     )
     entry_after_open = ex.cumulative_entry_fees
     assert entry_after_open > 0.0

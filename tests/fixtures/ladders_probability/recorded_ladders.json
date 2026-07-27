@@ -1,0 +1,709 @@
+{
+ "captured_at_utc": "2026-07-27T03:42:10Z",
+ "fields_note": "strike_type/floor_strike/cap_strike are copied verbatim from the API. Direction is NEVER inferred from the ticker suffix; src.core.bracket_payoff is the only authority.",
+ "fixture_version": 1,
+ "ladders": [
+  {
+   "city": "CHI",
+   "event_ticker": "KXHIGHCHI-26JUL17",
+   "markets": [
+    {
+     "cap_strike": 90,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 89,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL17-B89.5",
+     "yes_sub_title": "89 to 90"
+    },
+    {
+     "cap_strike": 92,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 91,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL17-B91.5",
+     "yes_sub_title": "91 to 92"
+    },
+    {
+     "cap_strike": 94,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 93,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL17-B93.5",
+     "yes_sub_title": "93 to 94"
+    },
+    {
+     "cap_strike": 96,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 95,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL17-B95.5",
+     "yes_sub_title": "95 to 96"
+    },
+    {
+     "cap_strike": 89,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHCHI-26JUL17-T89",
+     "yes_sub_title": "88 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 96,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHCHI-26JUL17-T96",
+     "yes_sub_title": "97 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHCHI",
+   "settled_yes_ticker": "KXHIGHCHI-26JUL17-B93.5",
+   "station": "KMDW",
+   "target_date": "2026-07-17"
+  },
+  {
+   "city": "CHI",
+   "event_ticker": "KXHIGHCHI-26JUL20",
+   "markets": [
+    {
+     "cap_strike": 84,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 83,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL20-B83.5",
+     "yes_sub_title": "83 to 84"
+    },
+    {
+     "cap_strike": 86,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 85,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL20-B85.5",
+     "yes_sub_title": "85 to 86"
+    },
+    {
+     "cap_strike": 88,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 87,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL20-B87.5",
+     "yes_sub_title": "87 to 88"
+    },
+    {
+     "cap_strike": 90,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 89,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL20-B89.5",
+     "yes_sub_title": "89 to 90"
+    },
+    {
+     "cap_strike": 83,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": null,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHCHI-26JUL20-T83",
+     "yes_sub_title": "82 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 90,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHCHI-26JUL20-T90",
+     "yes_sub_title": "91 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHCHI",
+   "settled_yes_ticker": "KXHIGHCHI-26JUL20-T83",
+   "station": "KMDW",
+   "target_date": "2026-07-20"
+  },
+  {
+   "city": "CHI",
+   "event_ticker": "KXHIGHCHI-26JUL23",
+   "markets": [
+    {
+     "cap_strike": 77,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 76,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL23-B76.5",
+     "yes_sub_title": "76 to 77"
+    },
+    {
+     "cap_strike": 79,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 78,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL23-B78.5",
+     "yes_sub_title": "78 to 79"
+    },
+    {
+     "cap_strike": 81,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 80,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL23-B80.5",
+     "yes_sub_title": "80 to 81"
+    },
+    {
+     "cap_strike": 83,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 82,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHCHI-26JUL23-B82.5",
+     "yes_sub_title": "82 to 83"
+    },
+    {
+     "cap_strike": 76,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHCHI-26JUL23-T76",
+     "yes_sub_title": "75 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 83,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHCHI-26JUL23-T83",
+     "yes_sub_title": "84 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHCHI",
+   "settled_yes_ticker": "KXHIGHCHI-26JUL23-B76.5",
+   "station": "KMDW",
+   "target_date": "2026-07-23"
+  },
+  {
+   "city": "LAX",
+   "event_ticker": "KXHIGHLAX-26JUL18",
+   "markets": [
+    {
+     "cap_strike": 73,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 72,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL18-B72.5",
+     "yes_sub_title": "72 to 73"
+    },
+    {
+     "cap_strike": 75,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 74,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL18-B74.5",
+     "yes_sub_title": "74 to 75"
+    },
+    {
+     "cap_strike": 77,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 76,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL18-B76.5",
+     "yes_sub_title": "76 to 77"
+    },
+    {
+     "cap_strike": 79,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 78,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL18-B78.5",
+     "yes_sub_title": "78 to 79"
+    },
+    {
+     "cap_strike": 72,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHLAX-26JUL18-T72",
+     "yes_sub_title": "71 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 79,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHLAX-26JUL18-T79",
+     "yes_sub_title": "80 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHLAX",
+   "settled_yes_ticker": "KXHIGHLAX-26JUL18-B78.5",
+   "station": "KLAX",
+   "target_date": "2026-07-18"
+  },
+  {
+   "city": "LAX",
+   "event_ticker": "KXHIGHLAX-26JUL21",
+   "markets": [
+    {
+     "cap_strike": 74,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 73,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL21-B73.5",
+     "yes_sub_title": "73 to 74"
+    },
+    {
+     "cap_strike": 76,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 75,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL21-B75.5",
+     "yes_sub_title": "75 to 76"
+    },
+    {
+     "cap_strike": 78,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 77,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL21-B77.5",
+     "yes_sub_title": "77 to 78"
+    },
+    {
+     "cap_strike": 80,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 79,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHLAX-26JUL21-B79.5",
+     "yes_sub_title": "79 to 80"
+    },
+    {
+     "cap_strike": 73,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHLAX-26JUL21-T73",
+     "yes_sub_title": "72 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 80,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHLAX-26JUL21-T80",
+     "yes_sub_title": "81 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHLAX",
+   "settled_yes_ticker": "KXHIGHLAX-26JUL21-T80",
+   "station": "KLAX",
+   "target_date": "2026-07-21"
+  },
+  {
+   "city": "MIA",
+   "event_ticker": "KXHIGHMIA-26JUL18",
+   "markets": [
+    {
+     "cap_strike": 89,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 88,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL18-B88.5",
+     "yes_sub_title": "88 to 89"
+    },
+    {
+     "cap_strike": 91,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 90,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL18-B90.5",
+     "yes_sub_title": "90 to 91"
+    },
+    {
+     "cap_strike": 93,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 92,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL18-B92.5",
+     "yes_sub_title": "92 to 93"
+    },
+    {
+     "cap_strike": 95,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 94,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL18-B94.5",
+     "yes_sub_title": "94 to 95"
+    },
+    {
+     "cap_strike": 88,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHMIA-26JUL18-T88",
+     "yes_sub_title": "87 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-25T14:00:00Z",
+     "floor_strike": 95,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHMIA-26JUL18-T95",
+     "yes_sub_title": "96 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHMIA",
+   "settled_yes_ticker": "KXHIGHMIA-26JUL18-B90.5",
+   "station": "KMIA",
+   "target_date": "2026-07-18"
+  },
+  {
+   "city": "MIA",
+   "event_ticker": "KXHIGHMIA-26JUL21",
+   "markets": [
+    {
+     "cap_strike": 90,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 89,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL21-B89.5",
+     "yes_sub_title": "89 to 90"
+    },
+    {
+     "cap_strike": 92,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 91,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL21-B91.5",
+     "yes_sub_title": "91 to 92"
+    },
+    {
+     "cap_strike": 94,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 93,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL21-B93.5",
+     "yes_sub_title": "93 to 94"
+    },
+    {
+     "cap_strike": 96,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 95,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHMIA-26JUL21-B95.5",
+     "yes_sub_title": "95 to 96"
+    },
+    {
+     "cap_strike": 89,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHMIA-26JUL21-T89",
+     "yes_sub_title": "88 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-28T14:00:00Z",
+     "floor_strike": 96,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHMIA-26JUL21-T96",
+     "yes_sub_title": "97 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHMIA",
+   "settled_yes_ticker": "KXHIGHMIA-26JUL21-B91.5",
+   "station": "KMIA",
+   "target_date": "2026-07-21"
+  },
+  {
+   "city": "NY",
+   "event_ticker": "KXHIGHNY-26JUL17",
+   "markets": [
+    {
+     "cap_strike": 84,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 83,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL17-B83.5",
+     "yes_sub_title": "83 to 84"
+    },
+    {
+     "cap_strike": 86,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 85,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL17-B85.5",
+     "yes_sub_title": "85 to 86"
+    },
+    {
+     "cap_strike": 88,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 87,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL17-B87.5",
+     "yes_sub_title": "87 to 88"
+    },
+    {
+     "cap_strike": 90,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 89,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL17-B89.5",
+     "yes_sub_title": "89 to 90"
+    },
+    {
+     "cap_strike": 83,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHNY-26JUL17-T83",
+     "yes_sub_title": "82 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-24T14:00:00Z",
+     "floor_strike": 90,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHNY-26JUL17-T90",
+     "yes_sub_title": "91 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHNY",
+   "settled_yes_ticker": "KXHIGHNY-26JUL17-B85.5",
+   "station": "KNYC",
+   "target_date": "2026-07-17"
+  },
+  {
+   "city": "NY",
+   "event_ticker": "KXHIGHNY-26JUL20",
+   "markets": [
+    {
+     "cap_strike": 78,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 77,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL20-B77.5",
+     "yes_sub_title": "77 to 78"
+    },
+    {
+     "cap_strike": 80,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 79,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL20-B79.5",
+     "yes_sub_title": "79 to 80"
+    },
+    {
+     "cap_strike": 82,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 81,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL20-B81.5",
+     "yes_sub_title": "81 to 82"
+    },
+    {
+     "cap_strike": 84,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 83,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL20-B83.5",
+     "yes_sub_title": "83 to 84"
+    },
+    {
+     "cap_strike": 77,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHNY-26JUL20-T77",
+     "yes_sub_title": "76 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-27T14:00:00Z",
+     "floor_strike": 84,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHNY-26JUL20-T84",
+     "yes_sub_title": "85 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHNY",
+   "settled_yes_ticker": "KXHIGHNY-26JUL20-B81.5",
+   "station": "KNYC",
+   "target_date": "2026-07-20"
+  },
+  {
+   "city": "NY",
+   "event_ticker": "KXHIGHNY-26JUL23",
+   "markets": [
+    {
+     "cap_strike": 80,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 79,
+     "result": "yes",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL23-B79.5",
+     "yes_sub_title": "79 to 80"
+    },
+    {
+     "cap_strike": 82,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 81,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL23-B81.5",
+     "yes_sub_title": "81 to 82"
+    },
+    {
+     "cap_strike": 84,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 83,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL23-B83.5",
+     "yes_sub_title": "83 to 84"
+    },
+    {
+     "cap_strike": 86,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 85,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "between",
+     "ticker": "KXHIGHNY-26JUL23-B85.5",
+     "yes_sub_title": "85 to 86"
+    },
+    {
+     "cap_strike": 79,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": null,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "less",
+     "ticker": "KXHIGHNY-26JUL23-T79",
+     "yes_sub_title": "78 or below"
+    },
+    {
+     "cap_strike": null,
+     "expiration_time": "2026-07-30T14:00:00Z",
+     "floor_strike": 86,
+     "result": "no",
+     "status": "finalized",
+     "strike_type": "greater",
+     "ticker": "KXHIGHNY-26JUL23-T86",
+     "yes_sub_title": "87 or above"
+    }
+   ],
+   "series_ticker": "KXHIGHNY",
+   "settled_yes_ticker": "KXHIGHNY-26JUL23-B79.5",
+   "station": "KNYC",
+   "target_date": "2026-07-23"
+  }
+ ],
+ "purpose": "PRD Phase 2 exit criterion 4 - 10 recorded Kalshi daily-high ladders, captured read-only for offline-deterministic probability-engine tests.",
+ "source": "GET https://api.elections.kalshi.com/trade-api/v2/markets?event_ticker=<EVENT>&limit=200 (anonymous, production)"
+}

@@ -1,0 +1,31 @@
+{
+ "artifact": "NY_gefs_v1.json",
+ "artifact_content_hash": "sha256:446745edef198346e82193c9f4ac302d46efeb2ebe927d88cd6171ca2b028ddd",
+ "backfill_stats": null,
+ "determinism_check": {
+  "bytes": 11900,
+  "content_hash": "sha256:446745edef198346e82193c9f4ac302d46efeb2ebe927d88cd6171ca2b028ddd",
+  "identical": true
+ },
+ "forecast_series_csv": "data/forecast_archive/forecast_series_gefs.csv",
+ "geavg_to_member_mean_offset_f": 0.2514,
+ "generated_at_utc": "2026-07-27T04:28:04Z",
+ "live_statistic_for_contrast": "mean_m(max_t member TMAX)",
+ "manifest": "data/forecast_archive/gefs_manifest.json",
+ "note": "Run metadata only. The calibration artifact is deterministic; this sidecar is not, and is excluded from any byte-comparison.",
+ "offset_provenance": {
+  "effect_on_sigma": "none -- a constant per-city shift moves bias_f by exactly its own value and leaves sigma_f unchanged",
+  "measured_on": "reports/phase2/ec1_ensemble_members.json runs[].geavg_check",
+  "n_per_city": 5,
+  "quantity": "mean_m(max_t member TMAX) - max_t(mean_m TMAX)",
+  "sample": "5 consecutive 00Z cycles 2026-07-20..2026-07-24 x 4 cities, 31 members",
+  "units": "degF",
+  "why": "max and mean do not commute; the live path maximises each member then averages, the backfill averages then maximises"
+ },
+ "producer": "scripts/backfill_ensemble_history.py",
+ "resolution": "0p25 (pgrb2sp25); 0.5 deg measured and rejected",
+ "spread_rule": "gespr TMAX at the interval where geavg attains its daily maximum",
+ "statistic": "max_t(geavg TMAX) + per-city geavg-to-member-mean offset",
+ "statistic_warning": "This calibration was built on the daily maximum of the GEFS ensemble MEAN field plus a measured per-city offset, NOT on the mean of the per-member daily maxima that EnsembleProvider.fetch() returns live. The offset is a constant per city: it shifts bias_f by exactly its own value and leaves sigma_f unchanged.",
+ "workstream": "F"
+}

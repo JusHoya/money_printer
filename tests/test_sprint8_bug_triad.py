@@ -74,9 +74,13 @@ class TestEvAfterFeesChargesBothLegs(unittest.TestCase):
     """ev_after_fees must subtract 2*fee_per_contract (entry + exit)."""
 
     def test_ev_after_fees_charges_both_legs(self):
+        # Taker path: PRD Phase 2 corrected the standard-series maker
+        # multiplier to zero, so the maker fee is $0.00 and cannot exercise a
+        # "both legs are charged" assertion. The Sprint 8 invariant is
+        # unchanged — it just has to be measured where a fee exists.
         probability = 0.5
         price = 0.5
-        is_maker = True
+        is_maker = False
 
         fee_per = compute_fee(price, 1, is_maker).per_contract
         expected = probability - price - 2 * fee_per

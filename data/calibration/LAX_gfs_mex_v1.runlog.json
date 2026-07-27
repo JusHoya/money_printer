@@ -1,0 +1,16 @@
+{
+ "argv": [
+  "--check-deterministic",
+  "--report-date",
+  "2026-07-26",
+  "--log-level",
+  "WARNING"
+ ],
+ "artifact": "LAX_gfs_mex_v1.json",
+ "artifact_content_hash": "sha256:7245f22c36937951fb8f263b2fbda0690f5a3c999d4bafa9120248d2227d45a8",
+ "forecast_csv": "data\\forecast_archive\\forecast_series_gfs_mex.csv",
+ "generated_at_utc": "2026-07-27T03:32:37Z",
+ "note": "Run metadata only. The calibration artifact is deterministic; this sidecar is not, and is excluded from any byte-comparison.",
+ "paired_rows": 3135,
+ "truth_csv": "data/weather_truth/cli_daily_high_KLAX.csv"
+}

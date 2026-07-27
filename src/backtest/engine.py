@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from src.backtest import metrics as bmetrics
 from src.backtest.data_loader import BacktestDataLoader
 from src.core.circuit_breaker import CircuitBreaker
-from src.core.fee_calculator import compute_fee
+from src.core.fee_calculator import compute_fee, fee_type_for_symbol
 from src.core.interfaces import MarketData, Strategy, TradeSignal
 from src.core.risk_manager import RiskManager
 
@@ -34,15 +34,30 @@ class BacktestEngine:
     starting_balance : float
         Initial capital.
     fee_mode : str
-        ``"maker"`` (default) or ``"taker"``.
+        ``"taker"`` (default) or ``"maker"``.
+
+        The default is the expensive side deliberately. Since PRD Phase 2
+        corrected the maker multiplier to zero for standard-schedule series,
+        ``"maker"`` books literally no fees, so a backtest left on the old
+        default reported a fee-free equity curve — including the stress
+        scenario whose stated purpose is to bound loss by "entry costs +
+        fees". A backtest that does not know how its orders would have filled
+        must assume they crossed.
     """
+
+    #: Accepted ``fee_mode`` values.
+    FEE_MODES = ("taker", "maker")
 
     def __init__(
         self,
         strategies: Dict[str, Strategy],
         starting_balance: float = 300.0,
-        fee_mode: str = "maker",
+        fee_mode: str = "taker",
     ):
+        if fee_mode not in self.FEE_MODES:
+            raise ValueError(
+                f"fee_mode must be one of {self.FEE_MODES}, got {fee_mode!r}"
+            )
         self.strategies = strategies
         self.starting_balance = starting_balance
         self.fee_mode = fee_mode
@@ -195,7 +210,12 @@ class BacktestEngine:
             if conf <= 0:
                 conf = 0.55
             qty = self.risk_manager.calculate_kelly_size(
-                conf, signal.limit_price, strategy_name
+                conf,
+                signal.limit_price,
+                strategy_name,
+                # The symbol carries the series identity Kelly needs to price
+                # the maker fee; without it every series sizes as fee-free.
+                symbol=signal.symbol,
             )
             signal.quantity = qty
 
@@ -240,7 +260,12 @@ class BacktestEngine:
 
         # Execute and settle
         is_maker = self.fee_mode == "maker"
-        fee = compute_fee(signal.limit_price, signal.quantity, is_maker=is_maker).fee
+        fee = compute_fee(
+            signal.limit_price,
+            signal.quantity,
+            is_maker=is_maker,
+            series_fee_type=fee_type_for_symbol(signal.symbol),
+        ).fee
 
         # Determine payout
         result_str = outcome["result"]
@@ -265,6 +290,10 @@ class BacktestEngine:
             strike_type=getattr(signal, "strike_type", None),
             floor_strike=getattr(signal, "floor_strike", None),
             cap_strike=getattr(signal, "cap_strike", None),
+            # The replay's fee_mode IS the assumed fill type, so state it
+            # rather than letting the exchange fall back to its unknown-fill
+            # rule and book a different fee than the one recorded above.
+            is_maker=is_maker,
         )
         # Immediately close for settlement
         if self.risk_manager.exchange.positions:

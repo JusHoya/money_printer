@@ -7,6 +7,7 @@ and order lifecycle audit trail.
 
 from unittest.mock import MagicMock
 
+import pytest
 
 from src.core.interfaces import TradeSignal
 
@@ -17,12 +18,65 @@ from src.core.interfaces import TradeSignal
 
 
 class TestFeeCalculator:
-    def test_maker_fee_at_50c(self):
+    """Fee model, corrected in PRD Phase 2 against the published schedule.
+
+    Kalshi's maker multiplier defaults to **zero**; only the series listed in
+    the schedule's "Non-Standard Fees" table (live ``fee_type ==
+    "quadratic_with_maker_fees"``) bill resting liquidity. The weather series
+    this project trades are not among them, so their maker fee is $0.00 and
+    these tests assert that rather than the old unconditional 1.75%. See
+    ``reports/phase2/ws_c_fee_verification.md`` for the provenance.
+    """
+
+    def test_maker_fee_is_zero_on_standard_series(self):
         from src.core.fee_calculator import maker_fee
 
+        # KXHIGH* weather: fee_type "quadratic", maker multiplier M = 0.
+        assert maker_fee(0.50, 1) == 0.0
+        assert maker_fee(0.10, 100) == 0.0
+
+    def test_maker_fee_charged_on_maker_fee_series(self):
+        from src.core.fee_calculator import FEE_TYPE_WITH_MAKER_FEES, maker_fee
+
         # 0.0175 * 1 * 0.50 * 0.50 = 0.004375 -> ceil to $0.01
-        fee = maker_fee(0.50, 1)
-        assert fee == 0.01
+        assert maker_fee(0.50, 1, FEE_TYPE_WITH_MAKER_FEES) == 0.01
+        # 0.0175 * 10 * 0.50 * 0.50 = 0.04375 -> ceil to $0.05
+        assert maker_fee(0.50, 10, FEE_TYPE_WITH_MAKER_FEES) == 0.05
+
+    def test_fee_type_for_series(self):
+        from src.core.fee_calculator import (
+            FEE_TYPE_STANDARD,
+            FEE_TYPE_WITH_MAKER_FEES,
+            fee_type_for_series,
+        )
+
+        assert fee_type_for_series("KXHIGHNY") == FEE_TYPE_STANDARD
+        assert fee_type_for_series("KXHIGHCHI") == FEE_TYPE_STANDARD
+        assert fee_type_for_series("KXAAAGASM") == FEE_TYPE_WITH_MAKER_FEES
+
+    def test_fee_type_for_symbol(self):
+        """Runtime call sites hold a market ticker, not a series ticker.
+
+        Series identity has to be recoverable from the symbol, or the fee model
+        cannot be threaded anywhere in ``src/`` and every maker order silently
+        prices on the standard schedule.
+        """
+        from src.core.fee_calculator import (
+            FEE_TYPE_STANDARD,
+            FEE_TYPE_WITH_MAKER_FEES,
+            fee_type_for_symbol,
+            series_ticker_from_symbol,
+        )
+
+        assert series_ticker_from_symbol("KXHIGHNY-26JUL27-B82.5") == "KXHIGHNY"
+        assert series_ticker_from_symbol("kxaaagasm-26aug-b3.25") == "KXAAAGASM"
+        assert series_ticker_from_symbol("") == ""
+
+        assert fee_type_for_symbol("KXHIGHNY-26JUL27-B82.5") == FEE_TYPE_STANDARD
+        assert fee_type_for_symbol("KXAAAGASM-26AUG-B3.25") == FEE_TYPE_WITH_MAKER_FEES
+        # Unknown / absent symbol falls to the schedule's documented default.
+        assert fee_type_for_symbol("") == FEE_TYPE_STANDARD
+        assert fee_type_for_symbol(None) == FEE_TYPE_STANDARD
 
     def test_taker_fee_at_50c(self):
         from src.core.fee_calculator import taker_fee
@@ -31,35 +85,49 @@ class TestFeeCalculator:
         fee = taker_fee(0.50, 1)
         assert fee == 0.02
 
-    def test_maker_fee_multiple_contracts(self):
-        from src.core.fee_calculator import maker_fee
+    def test_taker_fee_matches_published_table_on_whole_cents(self):
+        """A bare ``ceil(raw*100)`` overcharges when the exact fee is a whole cent.
 
-        # 0.0175 * 10 * 0.50 * 0.50 = 0.04375 -> ceil to $0.05
-        fee = maker_fee(0.50, 10)
-        assert fee == 0.05
+        ``0.07 * 100 * 0.10 * 0.90`` evaluates to 0.6300000000000002 in binary
+        float, so the old implementation returned $0.64 where Kalshi's own
+        published table says $0.63.
+        """
+        from src.core.fee_calculator import taker_fee
+
+        assert taker_fee(0.10, 100) == 0.63
+        assert taker_fee(0.50, 100) == 1.75
+        assert taker_fee(0.20, 100) == 1.12
 
     def test_fee_at_extreme_prices(self):
-        from src.core.fee_calculator import maker_fee
+        from src.core.fee_calculator import FEE_TYPE_WITH_MAKER_FEES, maker_fee
 
         # At price=0.01: 0.0175 * 0.01 * 0.99 = 0.00017325 -> ceil to $0.01
-        assert maker_fee(0.01, 1) == 0.01
+        assert maker_fee(0.01, 1, FEE_TYPE_WITH_MAKER_FEES) == 0.01
         # At price=0.99: same by symmetry
-        assert maker_fee(0.99, 1) == 0.01
+        assert maker_fee(0.99, 1, FEE_TYPE_WITH_MAKER_FEES) == 0.01
 
     def test_fee_zero_for_invalid_price(self):
-        from src.core.fee_calculator import maker_fee, taker_fee
+        from src.core.fee_calculator import (
+            FEE_TYPE_WITH_MAKER_FEES,
+            maker_fee,
+            taker_fee,
+        )
 
-        assert maker_fee(0.0, 1) == 0.0
-        assert maker_fee(1.0, 1) == 0.0
+        assert maker_fee(0.0, 1, FEE_TYPE_WITH_MAKER_FEES) == 0.0
+        assert maker_fee(1.0, 1, FEE_TYPE_WITH_MAKER_FEES) == 0.0
         assert taker_fee(-0.5, 1) == 0.0
 
     def test_compute_fee_breakdown(self):
         from src.core.fee_calculator import compute_fee
 
-        result = compute_fee(0.50, 5, is_maker=True)
-        assert result.rate_used == "maker"
+        result = compute_fee(0.50, 5, is_maker=False)
+        assert result.rate_used == "taker"
         assert result.fee > 0
         assert result.per_contract > 0
+
+        maker = compute_fee(0.50, 5, is_maker=True)
+        assert maker.rate_used == "maker"
+        assert maker.fee == 0.0  # standard series
 
     def test_ev_after_fees_positive(self):
         from src.core.fee_calculator import ev_after_fees
@@ -71,22 +139,47 @@ class TestFeeCalculator:
     def test_ev_after_fees_negative(self):
         from src.core.fee_calculator import ev_after_fees
 
-        # prob=0.505, price=0.50 -> EV = 0.005 - 0.01 fee < 0
-        ev = ev_after_fees(0.505, 0.50)
+        # Taker at 50c costs $0.02/contract per leg, so a 0.5pt edge is
+        # swamped: EV = 0.005 - 2 * 0.02 < 0.
+        ev = ev_after_fees(0.505, 0.50, is_maker=False)
         assert ev < 0
+
+    def test_settlement_exit_charges_one_leg(self):
+        """PRD FR-1.5 holds weather to expiry, and settlement is free."""
+        from src.core.fee_calculator import (
+            EXIT_SETTLEMENT,
+            EXIT_TRADE_OUT,
+            ev_after_fees,
+            taker_fee,
+        )
+
+        fee = taker_fee(0.50, 1)
+        round_trip = ev_after_fees(0.70, 0.50, is_maker=False, exit_mode=EXIT_TRADE_OUT)
+        held = ev_after_fees(0.70, 0.50, is_maker=False, exit_mode=EXIT_SETTLEMENT)
+        assert held - round_trip == pytest.approx(fee)
+
+    def test_invalid_exit_mode_rejected(self):
+        from src.core.fee_calculator import ev_after_fees
+
+        with pytest.raises(ValueError):
+            ev_after_fees(0.70, 0.50, exit_mode="hold_forever")
 
     def test_trade_is_profitable(self):
         from src.core.fee_calculator import trade_is_profitable
 
         assert trade_is_profitable(0.70, 0.50) is True
-        assert trade_is_profitable(0.505, 0.50) is False
+        assert trade_is_profitable(0.505, 0.50, is_maker=False) is False
 
     def test_taker_fee_4x_maker(self):
-        """Taker rate is 4x maker rate."""
-        from src.core.fee_calculator import maker_fee, taker_fee
+        """Taker rate is 4x maker rate on a series that bills makers."""
+        from src.core.fee_calculator import (
+            FEE_TYPE_WITH_MAKER_FEES,
+            maker_fee,
+            taker_fee,
+        )
 
         # For 100 contracts at 0.30 where rounding doesn't dominate
-        m = maker_fee(0.30, 100)
+        m = maker_fee(0.30, 100, FEE_TYPE_WITH_MAKER_FEES)
         t = taker_fee(0.30, 100)
         ratio = t / m if m > 0 else 0
         assert 3.5 < ratio < 4.5  # ~4x
@@ -156,6 +249,39 @@ class TestOrderRouter:
             recommended_price=0.54,
         )
         assert decision.limit_price == 0.54
+
+    def test_maker_leg_is_priced_per_series(self):
+        """The maker leg must not be unconditionally free.
+
+        Pricing every maker order on the standard schedule makes maker beat
+        taker on EV in every equal-price comparison, whatever the series. On
+        KXAAAGASM the maker fee is real and both the fee estimate and the EV
+        have to show it.
+        """
+        router = self._make_router()
+
+        weather = router.route(
+            side="buy",
+            probability=0.70,
+            bid=0.50,
+            ask=0.60,
+            contracts=10,
+            symbol="KXHIGHNY-26JUL27-B82.5",
+        )
+        gas = router.route(
+            side="buy",
+            probability=0.70,
+            bid=0.50,
+            ask=0.60,
+            contracts=10,
+            symbol="KXAAAGASM-26AUG-B3.25",
+        )
+
+        assert weather.is_maker is True and gas.is_maker is True
+        assert weather.limit_price == gas.limit_price
+        assert weather.fee_estimate == 0.0
+        assert gas.fee_estimate > 0.0
+        assert gas.ev_per_contract < weather.ev_per_contract
 
 
 # ===========================================================================
@@ -393,8 +519,12 @@ class TestExchangeEnhancements:
         return ex, closed
 
     def test_fee_deducted_on_open(self):
+        # Taker: a standard-series maker order is fee-free, so the fee-plumbing
+        # assertion has to ride the path that actually incurs a charge.
         ex, _ = self._make_exchange()
-        ex.open_position("TEST-T50000", "buy", 0.50, 10, strategy_name="S")
+        ex.open_position(
+            "TEST-T50000", "buy", 0.50, 10, strategy_name="S", is_maker=False
+        )
         assert ex.total_fees_paid > 0
         assert ex.realized_pnl < 0  # Fees reduce PnL
 
@@ -425,18 +555,187 @@ class TestExchangeEnhancements:
 
     def test_fee_in_stats(self):
         ex, _ = self._make_exchange()
-        ex.open_position("TEST", "buy", 0.50, 10)
+        ex.open_position("TEST", "buy", 0.50, 10, is_maker=False)
         stats = ex.get_stats()
         assert "total_fees" in stats
         assert stats["total_fees"] > 0
 
     def test_position_has_fee_info(self):
         ex, _ = self._make_exchange()
-        ex.open_position("TEST", "buy", 0.50, 10, is_maker=True)
+        ex.open_position("TEST", "buy", 0.50, 10, is_maker=False)
         pos = ex.positions[0]
         assert "entry_fee" in pos
         assert pos["entry_fee"] > 0
+        assert pos["is_maker"] is False
+
+    def test_maker_open_is_fee_free_but_still_recorded(self):
+        """A $0 fee must still be booked as a field, not omitted.
+
+        Standard-series maker orders cost nothing; the position record has to
+        say so explicitly so a downstream reader can tell "no fee" from
+        "fee unknown".
+        """
+        ex, _ = self._make_exchange()
+        ex.open_position("TEST", "buy", 0.50, 10, is_maker=True)
+        pos = ex.positions[0]
+        assert "entry_fee" in pos
+        assert pos["entry_fee"] == 0.0
         assert pos["is_maker"] is True
+        assert pos["fill_type"] == "maker"
+
+    def test_unknown_fill_type_is_booked_as_taker(self):
+        """A fill whose type the caller could not state costs the taker fee.
+
+        This is the production paper-trading path: nothing between a strategy
+        and the exchange knows whether the order rested or crossed. Booking it
+        as a maker charged $0.00 once the maker multiplier was corrected to
+        zero, so every simulated fill in the ledger the FR-5 capital gate reads
+        was free. Assume the expensive side instead.
+        """
+        ex, _ = self._make_exchange()
+        ex.open_position("TEST-T50000", "buy", 0.50, 10, strategy_name="S")
+
+        pos = ex.positions[0]
+        # ceil(0.07 * 10 * 0.50 * 0.50) = $0.18
+        assert pos["entry_fee"] == pytest.approx(0.18)
+        assert ex.total_fees_paid == pytest.approx(0.18)
+        assert ex.cumulative_entry_fees == pytest.approx(0.18)
+        assert ex.realized_pnl == pytest.approx(-0.18)
+        assert ex.get_stats()["taker_fills"] == 1
+        assert ex.get_stats()["maker_fills"] == 0
+
+    def test_unknown_fill_type_is_loud_on_the_position_record(self):
+        """The record must distinguish an assumed taker from an observed one.
+
+        Otherwise a downstream reader cannot tell a measured taker fill from a
+        default, which is how the maker default hid for a whole sprint.
+        """
+        ex, _ = self._make_exchange()
+        ex.open_position("TEST-A", "buy", 0.50, 10)  # fill type not supplied
+        ex.open_position("TEST-B", "buy", 0.50, 10, is_maker=False)
+        ex.open_position("TEST-C", "buy", 0.50, 10, is_maker=True)
+
+        assert [p["fill_type"] for p in ex.positions] == [
+            "taker_assumed",
+            "taker",
+            "maker",
+        ]
+        # The audit trail carries the same distinction.
+        opens = [a for a in ex.order_audit if a["event"] == "OPEN"]
+        assert [a["fill_type"] for a in opens] == ["taker_assumed", "taker", "maker"]
+
+    def test_exit_fee_on_a_record_without_a_fill_type_is_taker(self):
+        """A position restored from disk without ``is_maker`` exits as a taker.
+
+        Same rule as the entry: the unknown case must not be the free one.
+        """
+        ex, _ = self._make_exchange()
+        ex.open_position("TEST-T50000", "buy", 0.50, 10, is_maker=False)
+        pos = ex.positions[0]
+        pos.pop("is_maker")
+        pos.pop("fill_type")
+
+        ex._close_position(pos, 0.60, reason="TAKE_PROFIT")
+
+        closed = ex.closed_trades[-1]
+        # ceil(0.07 * 10 * 0.60 * 0.40) = $0.17, not the $0.00 maker fee.
+        assert closed["exit_fee"] == pytest.approx(0.17)
+
+    def test_maker_fee_series_is_charged_on_the_maker_path(self):
+        """The series' fee type reaches the exchange's fee model.
+
+        KXAAAGASM (PRD Phase 4 gas) is on the schedule's "Non-Standard Fees"
+        table and bills resting liquidity. Pricing every maker order on the
+        standard schedule books $0.00 for it.
+        """
+        ex, _ = self._make_exchange()
+        ex.open_position("KXAAAGASM-26AUG-B3.25", "buy", 0.50, 10, is_maker=True)
+        # ceil(0.0175 * 10 * 0.50 * 0.50) = $0.05
+        assert ex.positions[0]["entry_fee"] == pytest.approx(0.05)
+
+        ex2, _ = self._make_exchange()
+        ex2.open_position("KXHIGHNY-26JUL27-B82.5", "buy", 0.50, 10, is_maker=True)
+        assert ex2.positions[0]["entry_fee"] == 0.0
+
+    def test_signal_path_threads_symbol_and_fill_type(self):
+        """The live path must hand the fee model everything it needs.
+
+        Two threads have to survive ``_process_signals``:
+
+        * ``symbol`` into ``calculate_kelly_size`` — it carries the series
+          identity the maker fee depends on. Without it a KXAAAGASM order sizes
+          as if resting liquidity were free.
+        * ``is_maker`` into ``record_execution`` — so the exchange books the
+          caller's fill type instead of falling back to a default.
+        """
+        from types import SimpleNamespace
+
+        from src.bots.mixins import SignalProcessorMixin
+
+        class _Host(SignalProcessorMixin):
+            pass
+
+        class _Dash:
+            def log(self, msg):
+                pass
+
+            def record_signal(self, sig, status="", strategy_name=""):
+                pass
+
+        class _Risk:
+            def __init__(self):
+                self.last_trade_time = None
+                self.loss_cooldown = {}
+                self.exchange = SimpleNamespace(positions=[])
+                self.kelly_calls = []
+                self.exec_kwargs = []
+
+            def calculate_kelly_size(
+                self, confidence, price, strategy_name="", symbol=""
+            ):
+                self.kelly_calls.append(symbol)
+                return 5
+
+            def check_order(self, cost, **kwargs):
+                return True
+
+            def record_execution(self, *args, **kwargs):
+                self.exec_kwargs.append(kwargs)
+                self.exchange.positions.append({})
+
+        risk = _Risk()
+        sig = TradeSignal(
+            symbol="KXAAAGASM-26AUG-B3.25",
+            side="buy",
+            quantity=1,
+            limit_price=0.40,
+            confidence=0.90,
+        )
+        assert _Host()._process_signals([sig], "S", risk, _Dash()) is True
+
+        assert risk.kelly_calls == ["KXAAAGASM-26AUG-B3.25"]
+        assert "is_maker" in risk.exec_kwargs[0]
+        # No component in the live loop can state a fill type today, so the
+        # signal carries None and the exchange assumes the taker side.
+        assert risk.exec_kwargs[0]["is_maker"] is None
+
+    def test_record_execution_threads_the_fill_type(self):
+        """RiskManager.record_execution must not swallow the fill type.
+
+        It previously passed nothing, so every live fill silently inherited the
+        exchange's default rather than the caller's intent.
+        """
+        from src.core.risk_manager import RiskManager
+
+        rm_unknown = RiskManager(starting_balance=100.0)
+        rm_unknown.record_execution(5.0, "TEST-T50000", "buy", 10, 0.50)
+        assert rm_unknown.exchange.positions[0]["fill_type"] == "taker_assumed"
+        assert rm_unknown.exchange.total_fees_paid == pytest.approx(0.18)
+
+        rm_maker = RiskManager(starting_balance=100.0)
+        rm_maker.record_execution(5.0, "TEST-T50000", "buy", 10, 0.50, is_maker=True)
+        assert rm_maker.exchange.positions[0]["fill_type"] == "maker"
+        assert rm_maker.exchange.total_fees_paid == 0.0
 
 
 # ===========================================================================
@@ -462,9 +761,39 @@ class TestMLGatingWithFeeCalculator:
         assert SignalProcessorMixin._ml_ev_gate(sig) is False
 
     def test_break_even_rejected(self):
+        """Break-even before fees is rejected by the fee term, not by a tie-break.
+
+        The gate prices a taker round trip, so at confidence == price == 0.50
+        the EV is 0.50 - 0.50 - 2 x $0.02 = -0.04. Asserting the EV explicitly
+        keeps this from degenerating into a test of ``>`` versus ``>=``, which
+        is what it had become once the maker fee was corrected to zero.
+        """
         from src.bots.mixins import SignalProcessorMixin
+        from src.core.fee_calculator import ev_after_fees
+
+        assert ev_after_fees(0.50, 0.50, 1, is_maker=False) == pytest.approx(-0.04)
 
         sig = TradeSignal(
             symbol="T", side="buy", quantity=1, limit_price=0.50, confidence=0.50
         )
         assert SignalProcessorMixin._ml_ev_gate(sig) is False
+
+    def test_gate_charges_taker_fees(self):
+        """The gate charges the taker fee, not the (free) standard-series maker fee.
+
+        A maker-priced gate subtracts $0.00 on every KXHIGH* series, so it
+        degenerates to ``confidence > limit_price`` and passes an arbitrarily
+        thin edge. The margin the gate carries must be at least one taker fee.
+        """
+        from src.bots.mixins import SignalProcessorMixin
+
+        thin = TradeSignal(
+            symbol="T", side="buy", quantity=1, limit_price=0.50, confidence=0.5001
+        )
+        assert SignalProcessorMixin._ml_ev_gate(thin) is False
+
+        # Same price, edge now larger than the round-trip taker cost.
+        fat = TradeSignal(
+            symbol="T", side="buy", quantity=1, limit_price=0.50, confidence=0.55
+        )
+        assert SignalProcessorMixin._ml_ev_gate(fat) is True

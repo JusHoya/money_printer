@@ -87,7 +87,16 @@ def _open_weather(
     return exchange.positions[-1]
 
 
-def _expected_pnl(entry, exit_price, qty, side="buy", is_maker=True):
+def _expected_pnl(entry, exit_price, qty, side="buy", is_maker=False):
+    """Gross PnL less the exit fee the exchange would book.
+
+    ``is_maker`` defaults to False because these positions are opened without
+    stating a fill type, and an unknown fill is booked as a taker (see
+    ``SimulatedExchange.open_position``). It makes no difference to the golden
+    settlement cases — they exit at 0.00 or 1.00, where every fee formula is
+    zero, which is Kalshi charging no settlement fee — and it matters only on
+    the degenerate flat close.
+    """
     gross = (exit_price - entry) * qty if side == "buy" else (entry - exit_price) * qty
     return gross - compute_fee(exit_price, qty, is_maker=is_maker).fee
 
@@ -206,7 +215,15 @@ def test_position_without_bracket_spec_closes_unresolved(exchange, logs):
     trade = exchange.closed_trades[-1]
     assert trade["reason"] == "SETTLEMENT_UNRESOLVED"
     assert trade["exit_price"] == pytest.approx(0.42)
-    # Zero PnL before fees: the close books no gain or loss from a guess.
+    # The invariant: the close books no gain or loss from a guess. State it as
+    # gross PnL first, so the assertion cannot be satisfied by a fee change.
+    gross = trade["pnl"] + trade["exit_fee"]
+    assert gross == pytest.approx(0.0)
+    # The only movement is the exit fee. This close prices at 0.42, inside the
+    # 0-1 range, so unlike a real settlement (which prices at 0.00/1.00 and is
+    # free) it is charged like a trade-out — at the taker rate, because the
+    # position never stated a fill type.
+    assert trade["exit_fee"] == pytest.approx(0.18)
     assert trade["pnl"] == pytest.approx(_expected_pnl(0.42, 0.42, 10))
     assert "settlement_outcome" not in trade
 

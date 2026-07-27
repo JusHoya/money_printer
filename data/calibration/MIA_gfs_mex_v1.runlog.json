@@ -1,0 +1,16 @@
+{
+ "argv": [
+  "--check-deterministic",
+  "--report-date",
+  "2026-07-26",
+  "--log-level",
+  "WARNING"
+ ],
+ "artifact": "MIA_gfs_mex_v1.json",
+ "artifact_content_hash": "sha256:cfd2dc3bbe87783c4ef741e6edce297ff6f9bd148055563dc95f9bf543a20cc5",
+ "forecast_csv": "data\\forecast_archive\\forecast_series_gfs_mex.csv",
+ "generated_at_utc": "2026-07-27T03:32:37Z",
+ "note": "Run metadata only. The calibration artifact is deterministic; this sidecar is not, and is excluded from any byte-comparison.",
+ "paired_rows": 3120,
+ "truth_csv": "data/weather_truth/cli_daily_high_KMIA.csv"
+}

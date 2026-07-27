@@ -16,6 +16,30 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: [--maxkb=500]
+        # The 500 KB ceiling stays in force for everything except the four
+        # PRD Phase 2 evidence artifacts named below. They are listed
+        # individually, not waved through by raising the limit, so the
+        # exemption stays countable and anything new still trips the gate.
+        #
+        #   forecast_series_gfs_mex.csv (2.3 MB) and forecast_series_gefs.csv
+        #     (887 KB) are the paired forecast records the calibration is fit
+        #     on. Phase 2 exit criterion 2 requires the calibration to
+        #     recompute byte-identically from its inputs, and the artifacts
+        #     hash these files by content -- so they are the evidence, not a
+        #     convenience copy.
+        #   gefs_manifest.json (1.8 MB) records all 8,820 ranged S3 reads of
+        #     the GEFS backfill with their byte offsets. It is the provenance
+        #     that makes the backfill checkable rather than merely asserted.
+        #   *.grib2.b64 (570 KB) is one real GRIB2 message, base64-encoded so
+        #     the in-house decoder's tests run offline and deterministically.
+        #     Stored as text on purpose: .gitattributes normalizes line
+        #     endings under tests/fixtures/, which would corrupt raw binary.
+        exclude: |
+          (?x)^(
+            data/forecast_archive/forecast_series_(gfs_mex|gefs)\.csv|
+            data/forecast_archive/gefs_manifest\.json|
+            tests/fixtures/ensemble/.*\.grib2\.b64
+          )$
       - id: check-merge-conflict
 
   # mypy disabled in pre-commit — 67 pre-existing type errors in legacy code.
