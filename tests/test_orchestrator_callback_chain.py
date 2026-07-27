@@ -154,11 +154,15 @@ def test_win_rate_recorded_and_persisted_through_orchestrator_callback(
     hermetic_risk_manager,
 ):
     """A close routed through the orchestrator callback must populate AND
-    persist strategy_win_rates — the regression that Sprint 9 shipped broken."""
+    persist the win-rate window (strategy_win_rates.json) — the regression
+    that Sprint 9 shipped broken."""
     rmgr, win_rates_path = hermetic_risk_manager
     captured = _wire_orchestrator_callback(rmgr)
 
-    assert rmgr.strategy_win_rates == {}, "precondition: no win rates yet"
+    # FR-0.6: win-rate storage is now a recency window per strategy
+    # (strategy_win_records: name -> deque of 1/0), not cumulative
+    # (wins, total) counters. Same callback chain under test, new schema.
+    assert rmgr.strategy_win_records == {}, "precondition: no win records yet"
     assert not os.path.exists(win_rates_path), "precondition: no persisted file"
 
     # Winning close (exit 1.00 on a YES bought at 0.50).
@@ -167,17 +171,18 @@ def test_win_rate_recorded_and_persisted_through_orchestrator_callback(
     # The orchestrator callback actually ran (proves we tested the real path).
     assert captured["orchestrator_ran"] == ["KXBTC-26JUN0312-T1"]
 
-    # (a1) In-memory win rates are now non-empty and recorded the win.
-    assert rmgr.strategy_win_rates, "strategy_win_rates must not be empty"
-    wins, total = rmgr.strategy_win_rates["BTC 15m"]
-    assert total == 1
-    assert wins == 1
+    # (a1) In-memory win records are now non-empty and recorded the win.
+    assert rmgr.strategy_win_records, "strategy_win_records must not be empty"
+    assert list(rmgr.strategy_win_records["BTC 15m"]) == [1]
 
-    # (a2) Win rates were persisted to the temp file (gated on persist_state).
+    # (a2) Win records were persisted to the temp file (gated on
+    # persist_state) in the FR-0.6 shape:
+    # {"strategy": {"window": [...], "updated": iso}}.
     assert os.path.exists(win_rates_path), "win rates must be persisted to disk"
     with open(win_rates_path, encoding="utf-8") as f:
         persisted = json.load(f)
-    assert persisted.get("BTC 15m") == [1, 1]
+    assert persisted.get("BTC 15m", {}).get("window") == [1]
+    assert persisted["BTC 15m"].get("updated"), "persisted entry lacks timestamp"
 
 
 def test_losing_close_arms_loss_cooldown_through_orchestrator_callback(
@@ -197,7 +202,5 @@ def test_losing_close_arms_loss_cooldown_through_orchestrator_callback(
     # (b) Loss cooldown is now armed for this exact ticker.
     assert symbol in rmgr.loss_cooldown, "losing close must arm loss_cooldown"
 
-    # And the loss was recorded in win rates (1 trade, 0 wins).
-    wins, total = rmgr.strategy_win_rates["ETH 15m"]
-    assert total == 1
-    assert wins == 0
+    # And the loss was recorded in the FR-0.6 win window (one outcome: a loss).
+    assert list(rmgr.strategy_win_records["ETH 15m"]) == [0]

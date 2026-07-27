@@ -9,7 +9,8 @@ The 2026-06-10 settlement bug booked fictional YES settlements (the 15m-crypto
 minute-label suffix was parsed as a price strike, forcing near-100% auto-YES).
 That fiction poisoned three persisted artifacts the live system trusts:
 
-  * data/strategy_win_rates.json  — wins/total per strategy that drive
+  * data/strategy_win_rates.json  — per-strategy win history (now FR-0.6
+    recency windows; wins/total at the time of the bug) that drives
     calibrated-Kelly sizing. Contaminated win rates inflate position sizes.
   * data/exchange_state.json      — closed_trades PnL + cumulative aggregates.
     Fictional +PnL makes the capital-transition gate (72h positive) pass on a
@@ -67,7 +68,17 @@ import settlement_reconcile as sr  # noqa: E402  (sibling script, see sys.path a
 
 # Win-rate counting must match RiskManager._on_trade_close exactly: a "win" is
 # pnl > -FEE_TOLERANCE (fees-tolerant break-even counts as a win).
-FEE_TOLERANCE = 0.05
+# Keep in sync with src/core/risk_manager.py FEE_TOLERANCE (0.02; this script
+# previously said 0.05, which contradicted its own "match exactly" contract).
+FEE_TOLERANCE = 0.02
+
+# FR-0.6: win-rate history is a recency window of the last WIN_RATE_WINDOW
+# closed-trade outcomes per strategy, persisted as
+#     {"Strategy": {"window": [1, 0, ...], "updated": iso}}
+# Keep in sync with src/core/risk_manager.py WIN_RATE_WINDOW. The RiskManager
+# IGNORES legacy [wins, total] entries on load, so writing the old cumulative
+# shape here would be a silent no-op.
+WIN_RATE_WINDOW = 50
 
 DATA_DIR = sr.DATA_DIR
 BACKUP_DIR = os.path.join(DATA_DIR, "backups")
@@ -153,13 +164,19 @@ def _true_pnl_from_settlement(trade: dict, actual: str) -> float | None:
 # 1. strategy_win_rates.json
 # ---------------------------------------------------------------------------
 def rebuild_win_rates(trades: list[dict], cache: dict) -> dict:
-    """Recompute per-strategy (wins, total) from settlement truth.
+    """Recompute per-strategy win WINDOWS from settlement truth (FR-0.6).
 
     For each settled trade we can verify against the cache, re-derive the
     holder's win from the ACTUAL result; trades with no cached truth fall back
     to the recorded pnl sign (so non-15m-crypto strategies keep their history).
+
+    Outcomes are accumulated in journal order and only the LAST
+    WIN_RATE_WINDOW per strategy are kept, matching the recency-window
+    semantics the RiskManager now persists and loads:
+
+        {"Strategy": {"window": [1, 0, ...], "updated": <rebuild-time iso>}}
     """
-    counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # name -> [wins, total]
+    outcomes: dict[str, list[int]] = defaultdict(list)  # name -> [1/0, ...]
 
     for t in trades:
         sim = sr.sim_recorded_result(t)
@@ -184,11 +201,29 @@ def rebuild_win_rates(trades: list[dict], cache: dict) -> dict:
                 pnl = 0.0
             won = pnl > -FEE_TOLERANCE
 
-        counts[name][1] += 1
-        if won:
-            counts[name][0] += 1
+        outcomes[name].append(1 if won else 0)
 
-    return {k: [v[0], v[1]] for k, v in counts.items()}
+    stamp = datetime.now(timezone.utc).isoformat()
+    return {
+        name: {"window": outs[-WIN_RATE_WINDOW:], "updated": stamp}
+        for name, outs in outcomes.items()
+    }
+
+
+def _summarize_wr(value) -> str:
+    """One-line summary of a win-rate entry, tolerating both the FR-0.6
+    window shape and the legacy [wins, total] shape (before/after logging)."""
+    if value is None:
+        return "-"
+    if isinstance(value, dict) and isinstance(value.get("window"), list):
+        window = value["window"]
+        n = len(window)
+        wins = sum(1 for x in window if x)
+        wr = f"{wins / n:.0%}" if n else "n/a"
+        return f"window n={n} wins={wins} ({wr})"
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return f"legacy {value[0]}/{value[1]}"
+    return repr(value)
 
 
 # ---------------------------------------------------------------------------
@@ -394,10 +429,10 @@ def main(argv: list[str] | None = None) -> int:
         journal = sr.load_journal_trades()
         new_wr = rebuild_win_rates(journal, cache)
         old_wr = _load_json(WIN_RATES_PATH)
-        log("[win_rates] rebuilt from settlement truth:")
+        log("[win_rates] rebuilt from settlement truth (FR-0.6 windows):")
         for name in sorted(set(new_wr) | set(old_wr or {})):
-            old = (old_wr or {}).get(name)
-            new = new_wr.get(name)
+            old = _summarize_wr((old_wr or {}).get(name))
+            new = _summarize_wr(new_wr.get(name))
             log(f"  {name[:30]:30s}  {old}  ->  {new}")
         if apply:
             bk = backup_file(WIN_RATES_PATH)

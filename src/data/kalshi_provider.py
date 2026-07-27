@@ -292,7 +292,7 @@ class KalshiProvider(DataProvider):
         try:
             resp = self.session.get(url, headers=headers, params=params, timeout=10)
             if resp.status_code != 200:
-                return []
+                return [], None
             data = resp.json()
             markets = data.get("markets", [])
             filtered, dropped = [], 0
@@ -349,6 +349,173 @@ class KalshiProvider(DataProvider):
         except Exception as e:
             logger.error(f"[KalshiProvider] Fetch Error for {symbol}: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Phase 0 harvester (FR-0.7): full-ladder quotes + orderbook depth
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_orderbook_levels(payload: dict, depth: int = 3) -> dict:
+        """Parse a Kalshi orderbook response into float (price, qty) levels.
+
+        Handles the CURRENT V2 shape where the response key is
+        ``orderbook_fp`` with ``yes_dollars`` / ``no_dollars`` arrays of
+        [price, qty] STRING pairs — verified live 2026-07-24:
+        ``GET /markets/KXHIGHCHI-26JUL24-B78.5/orderbook`` →
+        ``orderbook_fp.yes_dollars = [['0.2400', '31.00'], ...]`` — plus the
+        legacy shapes: an ``orderbook`` wrapper containing either the
+        ``*_dollars`` string arrays or ``yes`` / ``no`` integer-cent arrays.
+
+        Returns ``{"yes": [(price, qty), ...], "no": [...]}`` with float
+        dollars, sorted best-bid-first (highest price first), truncated to
+        top-``depth`` levels per side. Each side lists resting BIDS for that
+        side (a NO bid at q implies a YES ask at 1-q).
+        """
+        if not payload:
+            return {"yes": [], "no": []}
+
+        book = payload.get("orderbook_fp")
+        if not isinstance(book, dict):
+            book = payload.get("orderbook")
+        if not isinstance(book, dict):
+            # Payload may already be the inner book object
+            if any(k in payload for k in ("yes_dollars", "no_dollars", "yes", "no")):
+                book = payload
+            else:
+                book = {}
+
+        def _side(dollars_key: str, cents_key: str) -> list:
+            raw = book.get(dollars_key)
+            price_scale = 1.0
+            if raw is None:
+                raw = book.get(cents_key)
+                price_scale = 100.0  # legacy integer cents
+            levels = []
+            for lvl in raw or []:
+                try:
+                    price = float(lvl[0]) / price_scale
+                    qty = float(lvl[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                levels.append((price, qty))
+            levels.sort(key=lambda t: t[0], reverse=True)
+            return levels[:depth]
+
+        return {
+            "yes": _side("yes_dollars", "yes"),
+            "no": _side("no_dollars", "no"),
+        }
+
+    def fetch_orderbook(self, symbol: str, depth: int = 3) -> Optional[dict]:
+        """Fetch top-``depth`` orderbook levels for a market (both sides).
+
+        Tries the configured API first; if the book comes back empty on a
+        non-public API (the demo sandbox returns empty orderbooks) it falls
+        back to the public production endpoint for the read.
+
+        HOURLY-SNAPSHOT PATH ONLY — never call this on the per-tick path.
+        """
+        path = f"/markets/{symbol}/orderbook"
+        params = {"depth": depth}
+
+        def _get(api_url: str) -> dict:
+            url = f"{api_url}{path}"
+            headers = {"Content-Type": "application/json"}
+            if not self.anonymous and api_url == self.api_url:
+                headers = self._get_authenticated_headers("GET", path)
+            resp = self.session.get(url, headers=headers, params=params, timeout=10)
+            resp.raise_for_status()
+            return self._parse_orderbook_levels(resp.json(), depth=depth)
+
+        try:
+            book = _get(self.api_url)
+            if (
+                not book["yes"]
+                and not book["no"]
+                and self.api_url != self.PUBLIC_API_URL
+            ):
+                try:
+                    pub = _get(self.PUBLIC_API_URL)
+                    if pub["yes"] or pub["no"]:
+                        return pub
+                except Exception:
+                    pass
+            return book
+        except Exception as e:
+            logger.error(f"[KalshiProvider] Orderbook fetch error for {symbol}: {e}")
+            return None
+
+    def _fetch_markets_page(self, api_url: str, params: dict) -> tuple:
+        """Fetch one page of /markets from ``api_url``; returns (markets, cursor)."""
+        path = "/markets"
+        url = f"{api_url}{path}"
+        headers = {"Content-Type": "application/json"}
+        if not self.anonymous and api_url == self.api_url:
+            headers = self._get_authenticated_headers("GET", path)
+        resp = self.session.get(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("markets", []), data.get("cursor")
+
+    def fetch_market_ladder(
+        self,
+        series_ticker: str,
+        statuses=("active", "initialized"),
+        max_pages: int = 3,
+    ) -> List[MarketData]:
+        """Fetch the full quote ladder for a series in ONE list call per page.
+
+        Returns one MarketData per market with parsed float quotes —
+        yes bid/ask (``bid``/``ask``), last price (``price``), volume, and
+        no_bid/no_ask/strike/status/close_time in ``extra`` — i.e. everything
+        the per-tick harvester records, with NO per-market API calls.
+        Quotes are parsed via ``_parse_price`` so both V2 ``*_dollars``
+        strings and legacy integer cents are handled.
+        """
+
+        def _collect(api_url: str) -> List[MarketData]:
+            raw: List[dict] = []
+            cursor = None
+            for _ in range(max_pages):
+                params = {"series_ticker": series_ticker, "limit": 200}
+                if cursor:
+                    params["cursor"] = cursor
+                page, cursor = self._fetch_markets_page(api_url, params)
+                if not page:
+                    break
+                raw.extend(page)
+                if not cursor:
+                    break
+            out: List[MarketData] = []
+            for m in raw:
+                ticker = m.get("ticker", "")
+                if is_test_symbol(ticker):
+                    continue
+                if statuses and m.get("status") not in statuses:
+                    continue
+                out.append(self._parse_market_data(ticker, m, "ladder"))
+            return out
+
+        try:
+            markets = _collect(self.api_url)
+            # Demo API serves empty books — fall back to production for reads
+            if (
+                markets
+                and self.api_url != self.PUBLIC_API_URL
+                and all(m.bid == 0 and m.ask == 0 and m.price == 0 for m in markets)
+            ):
+                try:
+                    pub = _collect(self.PUBLIC_API_URL)
+                    if pub and any(m.bid > 0 or m.ask > 0 or m.price > 0 for m in pub):
+                        return pub
+                except Exception:
+                    pass
+            return markets
+        except Exception as e:
+            logger.error(
+                f"[KalshiProvider] Ladder fetch error for {series_ticker}: {e}"
+            )
+            return []
 
     def fetch_btc_hourly_markets(self) -> List[MarketData]:
         """

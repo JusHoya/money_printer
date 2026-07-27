@@ -11,10 +11,11 @@ Covers:
 import os
 import sys
 import unittest
+from collections import deque
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.core.risk_manager import RiskManager
+from src.core.risk_manager import RiskManager, WIN_RATE_WINDOW
 
 
 class TestShortYesExposure(unittest.TestCase):
@@ -103,8 +104,13 @@ class TestKellyFeeDeduction(unittest.TestCase):
 
     def _mk_risk(self, balance=3000.0):
         rm = RiskManager(starting_balance=balance, persist_state=False)
-        # Seed a win rate so the historical-WR blend is deterministic
-        rm.strategy_win_rates = {"test_strat": (70, 100)}  # 70% WR, n>=20
+        # Seed a win rate so the historical-WR blend is deterministic.
+        # FR-0.6: history is a recency window (deque of 1/0 outcomes,
+        # maxlen=WIN_RATE_WINDOW); a full 50-window clears the >=20-sample
+        # gate. 35 wins / 50 = the same 70% WR the old (70, 100) tuple gave.
+        rm.strategy_win_records = {
+            "test_strat": deque([1] * 35 + [0] * 15, maxlen=WIN_RATE_WINDOW)
+        }
         return rm
 
     def test_kelly_returns_zero_when_fees_exceed_payoff(self):
@@ -132,7 +138,7 @@ class TestKellyFeeDeduction(unittest.TestCase):
         trade_pct = 0.05  # Growth stage
         kelly_frac = 0.30
         b_buggy = (1.0 - 0.50) / 0.50  # = 1.0
-        historical_wr = 70.0 / 100.0  # 0.70
+        historical_wr = 35.0 / 50.0  # 0.70 (windowed: 35 wins of 50)
         p = 0.6 * historical_wr + 0.4 * 0.55  # 0.42 + 0.22 = 0.64
         q = 1.0 - p  # 0.36
         f_buggy = p - (q / b_buggy)  # 0.64 - 0.36 = 0.28
@@ -157,8 +163,10 @@ class TestKellyFeeDeduction(unittest.TestCase):
     def test_kelly_cap_raised_to_75(self):
         """Hard cap is 75 (raised from 50 for PR#1 scaling)."""
         rm = self._mk_risk(balance=50_000.0)
-        # Huge edge + huge balance = cap-bound
-        rm.strategy_win_rates = {"test_strat": (95, 100)}
+        # Huge edge + huge balance = cap-bound (94% WR over a full window)
+        rm.strategy_win_records = {
+            "test_strat": deque([1] * 47 + [0] * 3, maxlen=WIN_RATE_WINDOW)
+        }
         qty = rm.calculate_kelly_size(
             confidence=0.95, price=0.20, strategy_name="test_strat"
         )
@@ -166,47 +174,9 @@ class TestKellyFeeDeduction(unittest.TestCase):
         self.assertEqual(qty, 75, "On huge edge + balance, cap should bind at 75")
 
 
-class TestDisabledStrategiesNotRegistered(unittest.TestCase):
-    """The Tier-1 disabled strategies must not appear in their parent bots."""
-
-    def test_longshot_fader_v2_not_in_btc_15m_bot(self):
-        from src.bots.btc_15m_bot import BTC15mBot
-
-        bot = BTC15mBot()
-        self.assertNotIn(
-            "longshot_v2",
-            bot.strategies,
-            "LongshotFaderV2 must be disabled in BTC15mBot",
-        )
-        # And the import is gone — confirm by reading module attributes.
-        import src.bots.btc_15m_bot as mod
-
-        self.assertFalse(
-            hasattr(mod, "LongshotFaderV2"), "LongshotFaderV2 import must be removed"
-        )
-
-    def test_crypto_hourly_v3_not_in_btc_hourly_bot(self):
-        from src.bots.btc_hourly_bot import BTCHourlyBot
-
-        bot = BTCHourlyBot()
-        self.assertNotIn(
-            "crypto_hr",
-            bot.strategies,
-            "CryptoHourlyStrategyV3 must be disabled in BTCHourlyBot",
-        )
-        import src.bots.btc_hourly_bot as mod
-
-        self.assertFalse(
-            hasattr(mod, "CryptoHourlyStrategyV3"),
-            "CryptoHourlyStrategyV3 import must be removed",
-        )
-
-    def test_ml_btc_15m_cooldown_reduced_to_60s(self):
-        """MLBtc15mStrategy default cooldown dropped from 120s to 60s."""
-        from src.strategies.ml_btc_15m import MLBtc15mStrategy
-
-        strat = MLBtc15mStrategy()
-        self.assertEqual(strat.cooldown_seconds, 60)
+# Phase 0 teardown (2026-07-24): TestDisabledStrategiesNotRegistered was
+# removed — the crypto bots and strategies it guarded (BTC15mBot,
+# BTCHourlyBot, MLBtc15mStrategy) were deleted outright per PRD FR-0.1.
 
 
 if __name__ == "__main__":

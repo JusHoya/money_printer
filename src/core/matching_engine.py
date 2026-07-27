@@ -448,10 +448,16 @@ class SimulatedExchange:
             self.maker_fills = int(data.get("maker_fills", 0))
             self.taker_fills = int(data.get("taker_fills", 0))
 
-            # Restore open positions (deserialize datetime strings)
-            self.positions = [
+            # Restore open positions (deserialize datetime strings). Drop
+            # qty<=0 shells at load so the no-ghost invariant holds even for
+            # state files written before the FR-0.6 partial-close fix.
+            loaded_positions = [
                 _deserialize_position(p) for p in data.get("positions", [])
             ]
+            self.positions = [
+                pos for pos in loaded_positions if pos.get("quantity", 0) > 0
+            ]
+            n_shells_dropped = len(loaded_positions) - len(self.positions)
 
             # Restore closed trades (deserialize datetime strings)
             self.closed_trades = [
@@ -479,6 +485,13 @@ class SimulatedExchange:
                 f"{len(self.closed_trades)} closed, realized=${self.realized_pnl:+.2f}, "
                 f"cumulative_net=${self.get_cumulative_net_pnl():+.2f}"
             )
+
+            if n_shells_dropped:
+                logger.info(
+                    f"[OMS] STATE HYGIENE: dropped {n_shells_dropped} qty<=0 "
+                    f"shell position(s) at load; persisting cleaned state"
+                )
+                self._save_state()
 
         except Exception as exc:
             ts = datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -828,6 +841,25 @@ class SimulatedExchange:
         # Timestamp for expiration comparisons (unused directly but keeps code intent clear)
 
         for pos in self.positions[:]:
+            # --- FR-0.6 STATE HYGIENE: drop qty<=0 shells ---
+            # A position emptied by partial profit-target closes carries no
+            # economic exposure; all its PnL was booked (and on_close fired)
+            # at each partial close. Legacy code could persist such a shell
+            # as "open" (the stuck id-1582 from 2026-07-06), so the sweep
+            # drops any it encounters — before the expiration check, so an
+            # expired shell never produces a bogus settlement row.
+            if pos.get("quantity", 0) <= 0:
+                self.positions.remove(pos)
+                logger.info(
+                    "[OMS] STATE HYGIENE: removed qty<=0 shell position "
+                    "id=%s symbol=%s (original_qty=%s) from open list",
+                    pos.get("id"),
+                    pos.get("symbol"),
+                    pos.get("original_quantity"),
+                )
+                self._save_state()
+                continue
+
             # --- EXPIRATION CHECK ---
             if pos.get("expiration_time"):
                 exp = pos["expiration_time"]
@@ -1134,18 +1166,34 @@ class SimulatedExchange:
                 if self.on_close:
                     self.on_close(partial_trade)
 
-                # Sprint 8: persist after each partial-close event
-                self._save_state()
-
+                # FR-0.6: the final partial close IS the close. Remove the
+                # emptied position from the open list BEFORE persisting —
+                # the legacy order (save first, remove after, in memory
+                # only) wrote a qty-0 "open" shell to exchange_state.json
+                # that a restart then resurrected (the stuck id-1582 bug).
+                # on_close has already fired above, exactly as for any
+                # partial close, so RiskManager win-rate/journal semantics
+                # are unchanged.
                 if fully_closed or pos["quantity"] <= 0:
                     if pos in self.positions:
                         self.positions.remove(pos)
+                    self._save_state()
                     return True
+
+                # Sprint 8: persist after each partial-close event
+                self._save_state()
 
         # Clean up ghost positions with qty reduced to 0 by rounding
         if pos["quantity"] <= 0:
             if pos in self.positions:
                 self.positions.remove(pos)
+                logger.info(
+                    "[OMS] STATE HYGIENE: removed rounding-ghost qty<=0 "
+                    "position id=%s symbol=%s from open list",
+                    pos.get("id"),
+                    pos.get("symbol"),
+                )
+                self._save_state()
             return True
 
         return False

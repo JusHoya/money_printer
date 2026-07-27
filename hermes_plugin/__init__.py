@@ -123,8 +123,81 @@ def get_training_state(params):
 
 
 def get_win_rates(params):
-    """Per-strategy historical win rates."""
-    return _read_json_file(WIN_RATES_PATH)
+    """Per-strategy historical win rates.
+
+    Since the Phase 0 pivot (PRD FR-0.6) strategy_win_rates.json stores a
+    recency WINDOW per strategy:
+
+        {"Strategy": {"window": [1, 0, ...], "updated": iso}}
+
+    Old files may still contain legacy ``[wins, total]`` cumulative entries;
+    the RiskManager ignores those on load, so they are surfaced here with
+    format="legacy" for visibility only. Each strategy is normalized to:
+
+        {"win_rate": float|None, "wins": int, "n": int,
+         "format": "window"|"legacy"|"unknown", "updated": iso|None}
+    """
+    try:
+        with open(WIN_RATES_PATH) as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": f"File not found: {os.path.basename(WIN_RATES_PATH)}",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)})
+
+    if not isinstance(raw, dict):
+        return json.dumps({"ok": False, "error": "win-rates file is not a JSON object"})
+
+    out = {}
+    for name, value in raw.items():
+        try:
+            if isinstance(value, dict) and isinstance(value.get("window"), list):
+                window = [1 if x else 0 for x in value["window"]]
+                n = len(window)
+                wins = sum(window)
+                out[name] = {
+                    "win_rate": round(wins / n, 4) if n else None,
+                    "wins": wins,
+                    "n": n,
+                    "format": "window",
+                    "updated": value.get("updated"),
+                }
+            elif (
+                isinstance(value, (list, tuple))
+                and len(value) == 2
+                and all(isinstance(x, (int, float)) for x in value)
+            ):
+                wins, total = int(value[0]), int(value[1])
+                out[name] = {
+                    "win_rate": round(wins / total, 4) if total else None,
+                    "wins": wins,
+                    "n": total,
+                    # Ignored by the RiskManager since FR-0.6 (pivot reset).
+                    "format": "legacy",
+                    "updated": None,
+                }
+            else:
+                out[name] = {
+                    "win_rate": None,
+                    "wins": 0,
+                    "n": 0,
+                    "format": "unknown",
+                    "updated": None,
+                }
+        except Exception:
+            out[name] = {
+                "win_rate": None,
+                "wins": 0,
+                "n": 0,
+                "format": "unknown",
+                "updated": None,
+            }
+    return json.dumps({"ok": True, "data": out})
 
 
 def read_trade_journal(params):
@@ -522,7 +595,7 @@ TOOLS = {
     "mp_win_rates": {
         "schema": {
             "name": "mp_win_rates",
-            "description": "Get per-strategy historical win rates (wins/total counts, persisted across cycle resets).",
+            "description": "Get per-strategy historical win rates from the recency window (last 50 closed trades per strategy: win_rate, wins, sample count n, last-updated). Legacy cumulative entries appear as format=legacy and are ignored by the risk manager.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         "handler": get_win_rates,

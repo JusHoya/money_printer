@@ -3,8 +3,7 @@ Money Printer — Web Dashboard entry point.
 
 Usage:
     python scripts/run_web_dashboard.py
-    python scripts/run_web_dashboard.py --bot btc_15m
-    python scripts/run_web_dashboard.py --bot btc_15m --bot weather
+    python scripts/run_web_dashboard.py --bot weather
     python scripts/run_web_dashboard.py --port 8050
 """
 
@@ -26,7 +25,7 @@ load_dotenv(override=True)
 
 from src.bots.registry import BotRegistry  # noqa: E402
 from src.utils.system_utils import prevent_sleep  # noqa: E402
-from src.utils.logger import logger  # noqa: E402
+from src.utils.logger import logger, configure_root_logging  # noqa: E402
 
 # Import bots so they register themselves
 import src.bots  # noqa: F401, E402
@@ -48,6 +47,12 @@ def _run_market_loop(engine: OrchestratorEngine):
 
 
 def main():
+    # FR-0.3: route module-level loggers (strategies, bots, mixins,
+    # providers) into the shared money_printer_*.log via the root logger.
+    # Their INFO output was previously dropped in this entrypoint — only the
+    # named "MoneyPrinter" logger had a handler. Console stays WARNING+.
+    configure_root_logging()
+
     parser = argparse.ArgumentParser(description="Money Printer Web Dashboard")
     parser.add_argument(
         "--bot",
@@ -83,7 +88,7 @@ def main():
     parser.add_argument(
         "--auto-cycle",
         action="store_true",
-        help="Auto-archive, retrain, and restart on drawdown kill switch",
+        help="Auto-archive and restart on drawdown kill switch (no retrain — FR-0.2)",
     )
     args = parser.parse_args()
 

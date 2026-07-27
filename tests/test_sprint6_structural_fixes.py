@@ -7,14 +7,27 @@ Covers:
 - 1D: Raised edge thresholds
 """
 
+import json
 import sys
 import os
+from collections import deque
 from datetime import datetime, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.core.matching_engine import SimulatedExchange
-from src.core.risk_manager import RiskManager
+from src.core.risk_manager import (
+    MIN_WIN_SAMPLES,
+    WIN_RATE_WINDOW,
+    RiskManager,
+)
+
+
+def _seed_window(rm, name, wins, total):
+    """Fill a strategy's FR-0.6 recency window with `wins` wins of `total`."""
+    rm.strategy_win_records[name] = deque(
+        [1] * wins + [0] * (total - wins), maxlen=WIN_RATE_WINDOW
+    )
 
 
 # =============================================================================
@@ -212,24 +225,8 @@ class TestDailyTradeCap:
 # =============================================================================
 
 
-class TestEdgeThresholds:
-    """Verify raised edge thresholds across strategies."""
-
-    def test_crypto_v3_obi_threshold(self):
-        from src.strategies.crypto_strategy import Crypto15mTrendStrategyV3
-
-        strategy = Crypto15mTrendStrategyV3()
-        assert (
-            strategy.obi_threshold >= 0.60
-        ), f"OBI threshold should be >=0.60, got {strategy.obi_threshold}"
-
-    def test_hourly_v3_obi_threshold(self):
-        from src.strategies.crypto_strategy import CryptoHourlyStrategyV3
-
-        strategy = CryptoHourlyStrategyV3()
-        assert (
-            strategy.obi_threshold >= 0.60
-        ), f"OBI threshold should be >=0.60, got {strategy.obi_threshold}"
+# Phase 0 teardown (2026-07-24): TestEdgeThresholds (Crypto V3 / Hourly V3
+# OBI thresholds) was removed with the deleted crypto strategies.
 
 
 # =============================================================================
@@ -263,7 +260,12 @@ class TestEntryPriceFilter:
 
 
 class TestCalibratedKelly:
-    """Kelly sizing uses historical win rate, not raw model confidence."""
+    """Kelly sizing uses historical win rate, not raw model confidence.
+
+    FR-0.6: the historical WR comes from a recency window
+    (strategy_win_records, last WIN_RATE_WINDOW closed trades); with fewer
+    than MIN_WIN_SAMPLES outcomes the neutral 0.5 prior is used.
+    """
 
     def test_blended_probability(self):
         """With 50% historical WR and 0.90 confidence, blended p < 0.90."""
@@ -276,20 +278,29 @@ class TestCalibratedKelly:
         assert qty_blended <= 75, "Hard cap should be 75 (PR#1 raised from 50)"
 
     def test_historical_wr_used_after_20_trades(self):
-        """After 20+ trades, historical WR should influence sizing."""
-        rm = RiskManager(starting_balance=3000.0)
-
-        # Simulate 30 trades: 12 wins, 18 losses (40% WR)
-        rm.strategy_win_rates["BadStrat"] = (12, 30)
-
-        # Both may hit the 50-contract cap at $3000 balance. Use smaller balance.
-        rm2 = RiskManager(starting_balance=500.0)
-        rm2.strategy_win_rates["BadStrat"] = (12, 30)
-        assert rm2.calculate_kelly_size(
+        """With >= MIN_WIN_SAMPLES outcomes in the window, historical WR
+        influences sizing: a bad-WR strategy sizes smaller than a fresh one."""
+        # Both may hit the contract cap at $3000 balance; use a smaller one.
+        rm = RiskManager(starting_balance=500.0)
+        # 30 windowed outcomes: 12 wins, 18 losses (40% WR), n >= 20
+        _seed_window(rm, "BadStrat", wins=12, total=30)
+        assert rm.calculate_kelly_size(
             0.80, 0.50, "BadStrat"
-        ) < rm2.calculate_kelly_size(
+        ) < rm.calculate_kelly_size(
             0.80, 0.50, "NewStrat"
         ), "Bad WR strategy should size smaller"
+
+    def test_neutral_prior_under_min_samples(self):
+        """Under MIN_WIN_SAMPLES the window is IGNORED: even an all-loss thin
+        history sizes exactly like an unknown strategy (FR-0.6 pivot-reset
+        semantics — a reset strategy must not inherit a poisoned prior)."""
+        rm = RiskManager(starting_balance=500.0)
+        _seed_window(rm, "ThinStrat", wins=0, total=MIN_WIN_SAMPLES - 1)
+        assert rm.calculate_kelly_size(
+            0.80, 0.50, "ThinStrat"
+        ) == rm.calculate_kelly_size(
+            0.80, 0.50, "NewStrat"
+        ), "Sub-threshold window must fall back to the neutral 0.5 prior"
 
     def test_hard_cap_75_contracts(self):
         """No trade should exceed 75 contracts (PR#1 raised from 50)."""
@@ -351,24 +362,43 @@ class TestEscalatingCooldown:
 
 
 class TestWinRateTracking:
-    """Win rates are tracked per strategy."""
+    """Closed-trade outcomes are tracked per strategy in an FR-0.6 recency
+    window (deque of 1/0, maxlen=WIN_RATE_WINDOW), newest last.
+
+    The Sprint 6 cumulative-forever (wins, total) assertions were replaced,
+    not just renamed: PRD FR-0.6 removed cumulative counting so a poisoned
+    era can no longer drag sizing down forever (see eviction test below).
+    """
 
     def test_win_tracked(self):
         rm = RiskManager(starting_balance=3000.0)
         rm._on_trade_close({"symbol": "T1", "pnl": 5.0, "strategy_name": "S"})
-        assert rm.strategy_win_rates["S"] == (1, 1)
+        assert list(rm.strategy_win_records["S"]) == [1]
 
     def test_loss_tracked(self):
         rm = RiskManager(starting_balance=3000.0)
         rm._on_trade_close({"symbol": "T1", "pnl": -5.0, "strategy_name": "S"})
-        assert rm.strategy_win_rates["S"] == (0, 1)
+        assert list(rm.strategy_win_records["S"]) == [0]
 
     def test_mixed_results(self):
         rm = RiskManager(starting_balance=3000.0)
         rm._on_trade_close({"symbol": "T1", "pnl": 5.0, "strategy_name": "S"})
         rm._on_trade_close({"symbol": "T2", "pnl": -5.0, "strategy_name": "S"})
         rm._on_trade_close({"symbol": "T3", "pnl": 10.0, "strategy_name": "S"})
-        assert rm.strategy_win_rates["S"] == (2, 3)
+        assert list(rm.strategy_win_records["S"]) == [1, 0, 1]
+
+    def test_window_evicts_oldest_outcome(self):
+        """FR-0.6: only the last WIN_RATE_WINDOW outcomes are retained — a
+        full window of losses ages out one loss when a new win arrives."""
+        rm = RiskManager(starting_balance=3000.0)
+        for i in range(WIN_RATE_WINDOW):
+            rm._on_trade_close({"symbol": f"L{i}", "pnl": -5.0, "strategy_name": "S"})
+        assert list(rm.strategy_win_records["S"]) == [0] * WIN_RATE_WINDOW
+
+        rm._on_trade_close({"symbol": "W", "pnl": 5.0, "strategy_name": "S"})
+        record = rm.strategy_win_records["S"]
+        assert len(record) == WIN_RATE_WINDOW, "window must stay capped"
+        assert list(record) == [0] * (WIN_RATE_WINDOW - 1) + [1]
 
 
 # =============================================================================
@@ -384,8 +414,7 @@ class TestFeeTolerance:
         rm = RiskManager(starting_balance=3000.0)
         pos = {"pnl": -0.01, "strategy_name": "TestStrat", "symbol": "KXTEST-1"}
         rm._on_trade_close(pos)
-        wins, total = rm.strategy_win_rates["TestStrat"]
-        assert wins == 1 and total == 1
+        assert list(rm.strategy_win_records["TestStrat"]) == [1]
 
     def test_fee_only_loss_no_symbol_cooldown(self):
         """A -$0.01 PnL should NOT trigger symbol loss cooldown."""
@@ -406,8 +435,7 @@ class TestFeeTolerance:
         rm = RiskManager(starting_balance=3000.0)
         pos = {"pnl": -0.05, "strategy_name": "TestStrat", "symbol": "KXTEST-1"}
         rm._on_trade_close(pos)
-        wins, total = rm.strategy_win_rates["TestStrat"]
-        assert wins == 0 and total == 1
+        assert list(rm.strategy_win_records["TestStrat"]) == [0]
         assert "KXTEST-1" in rm.loss_cooldown
         assert rm.consecutive_losses["TestStrat"] == 1
 
@@ -418,28 +446,64 @@ class TestFeeTolerance:
 
 
 class TestWinRatePersistence:
-    """Win rates should survive process restarts."""
+    """Win-rate windows should survive process restarts (FR-0.6 format:
+    {"Strategy": {"window": [1, 0, ...], "updated": iso}})."""
 
     def test_save_and_load_round_trip(self, tmp_path, monkeypatch):
-        """Saved win rates should be loadable by a fresh RiskManager."""
+        """Saved win windows should be loadable by a fresh RiskManager."""
         import src.core.risk_manager as rm_mod
 
         test_path = str(tmp_path / "strategy_win_rates.json")
         monkeypatch.setattr(rm_mod, "WIN_RATES_PATH", test_path)
 
         rm1 = rm_mod.RiskManager(starting_balance=1000.0)
-        rm1.strategy_win_rates = {"StratA": (10, 20), "StratB": (5, 8)}
+        rm1.strategy_win_records = {
+            "StratA": deque([1] * 10 + [0] * 10, maxlen=WIN_RATE_WINDOW),
+            "StratB": deque([1, 0, 1, 1, 0], maxlen=WIN_RATE_WINDOW),
+        }
         rm1._save_win_rates()
 
         rm2 = rm_mod.RiskManager(starting_balance=1000.0)
-        assert rm2.strategy_win_rates == {"StratA": (10, 20), "StratB": (5, 8)}
+        assert list(rm2.strategy_win_records["StratA"]) == [1] * 10 + [0] * 10
+        assert list(rm2.strategy_win_records["StratB"]) == [1, 0, 1, 1, 0]
+        # The reloaded window must keep the recency cap.
+        assert rm2.strategy_win_records["StratA"].maxlen == WIN_RATE_WINDOW
 
     def test_missing_file_gracefully_handled(self, tmp_path, monkeypatch):
-        """If no file exists, win rates start empty."""
+        """If no file exists, win records start empty."""
         import src.core.risk_manager as rm_mod
 
         test_path = str(tmp_path / "nonexistent.json")
         monkeypatch.setattr(rm_mod, "WIN_RATES_PATH", test_path)
 
         rm = rm_mod.RiskManager(starting_balance=1000.0)
-        assert rm.strategy_win_rates == {}
+        assert rm.strategy_win_records == {}
+
+    def test_legacy_cumulative_entries_ignored_on_load(self, tmp_path, monkeypatch):
+        """Legacy [wins, total] entries are deliberately DROPPED on load.
+
+        This replaces the old cumulative-forever round-trip assertion, which
+        PRD FR-0.6 removed: the pivot resets win-rate history rather than
+        migrating potentially poisoned cumulative counters (the
+        "ML BTC 15m": [30, 1048] deadlock). A mixed file loads only the
+        windowed entries and never crashes.
+        """
+        import src.core.risk_manager as rm_mod
+
+        test_path = str(tmp_path / "strategy_win_rates.json")
+        monkeypatch.setattr(rm_mod, "WIN_RATES_PATH", test_path)
+        with open(test_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "OldStrat": [30, 1048],  # legacy cumulative — must be ignored
+                    "NewStrat": {
+                        "window": [1, 0, 1],
+                        "updated": "2026-07-24T00:00:00+00:00",
+                    },
+                },
+                f,
+            )
+
+        rm = rm_mod.RiskManager(starting_balance=1000.0)
+        assert "OldStrat" not in rm.strategy_win_records
+        assert list(rm.strategy_win_records["NewStrat"]) == [1, 0, 1]

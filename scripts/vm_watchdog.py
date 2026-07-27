@@ -30,7 +30,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -86,42 +86,171 @@ CLAUDE_TIMEOUT_S = 300
 # Inspect dashboard via HTTP /api/status every N monitoring cycles
 HTTP_INSPECT_INTERVAL = 15
 
-# Grace period after watchdog/dashboard start — skip deep inspections while
-# the dashboard does its startup retrain (build_features takes ~10-12 min
-# with 14K+ samples).  The watchdog killed a healthy dashboard during
-# retrain on 2026-03-30 because it saw "No bots active" during this phase.
-STARTUP_GRACE_PERIOD_S = 900  # 15 minutes
+# Grace period after watchdog/dashboard start — skip deep HTTP inspections
+# while the dashboard boots (web server + provider connects). Phase 0
+# removed the runtime ML retrains (FR-0.2), so the old 15-min allowance for
+# the startup retrain (build_features took ~10-12 min) is gone; 5 minutes
+# covers a clean startup while keeping a genuinely broken start detectable
+# well inside the 10-minute real-failure bound.
+STARTUP_GRACE_PERIOD_S = 300  # 5 minutes
+
+
+# ---------------------------------------------------------------------------
+# Host-watchdog decision core (Phase 0, FR-0.5)
+#
+# Pure, dependency-free reference implementation of the alert logic that
+# scripts/host_watchdog.sh implements in bash. tests/test_watchdog_phase0.py
+# exercises this core directly AND integration-tests the bash script against
+# the same scenarios — keep the two in sync.
+#
+# Post-Phase-0 timing model: session-log heartbeats land every ~65-80 s and a
+# cycle transition (no runtime retrain any more, FR-0.2 — the old
+# logs/.orchestrator_state "retraining" marker is no longer produced and is
+# ignored) quiets the log for a few minutes at most. 15 min is therefore a
+# generous staleness margin. The 10-minute real-failure bound is met by the
+# process-liveness condition, which fails immediately on the first check that
+# finds no process (cron cadence 5 min => alert within one cycle).
+# ---------------------------------------------------------------------------
+STALE_MAX_AGE_S = 900  # newest session log older than this => log_stale
+MISSING_LOG_GRACE_S = 600  # zero session logs must persist this long => logs_missing
+REALERT_INTERVAL_S = 3600  # per-condition re-alert backoff
+
+COND_PROCESS_DEAD = "process_dead"
+COND_LOG_STALE = "log_stale"
+COND_LOGS_MISSING = "logs_missing"
+
+
+@dataclass
+class HostHealthState:
+    """State carried between checks (mirrors host_watchdog.sh's .ts files).
+
+    missing_logs_since: unix ts of the first consecutive check that found zero
+        session logs (None while logs exist) — the cycle-rollover grace timer.
+    last_alert_ts: condition name -> unix ts of its last delivered alert.
+    """
+
+    missing_logs_since: Optional[float] = None
+    last_alert_ts: dict = field(default_factory=dict)
+
+
+@dataclass
+class HostHealthDecision:
+    failing: list  # conditions failing now (post-grace)
+    pending: list  # conditions observed but still within grace (never alert)
+    alerts_due: list  # subset of failing that triggers a Discord message now
+    state: HostHealthState  # updated state to persist if the alert is delivered
+
+
+def evaluate_host_health(
+    process_alive: bool,
+    newest_log_mtime: Optional[float],
+    now: float,
+    state: Optional[HostHealthState] = None,
+    *,
+    stale_max_age: float = STALE_MAX_AGE_S,
+    missing_log_grace: float = MISSING_LOG_GRACE_S,
+    realert_interval: float = REALERT_INTERVAL_S,
+) -> HostHealthDecision:
+    """Decide which watchdog conditions fail and which are due an alert.
+
+    newest_log_mtime is the mtime of the newest logs/session_*.log, or None
+    when no session log exists (the cycle-rollover window).
+
+    Rules (identical to host_watchdog.sh):
+    - process_dead: fails immediately — no grace, no margin.
+    - log_stale: fails when the newest session log is older than
+      stale_max_age (15 min; heartbeats are ~65-80 s, cycle transitions a few
+      minutes — the retrain freeze no longer exists).
+    - logs_missing: a zero-log window only fails after it persists for
+      missing_log_grace (10 min, i.e. two consecutive 5-min checks); the
+      first observation arms the grace timer and stays silent.
+    - De-duplication: a condition is due an alert when it is new or its last
+      alert is >= realert_interval old. When any alert goes out, the single
+      message covers every currently-failing condition, so all of them get
+      their backoff timestamp refreshed. Recovery clears a condition's
+      timestamp so its next occurrence alerts immediately.
+
+    Callers should persist decision.state only if delivery succeeds, so a
+    failed Discord POST is retried on the next check.
+    """
+    if state is None:
+        state = HostHealthState()
+    failing: list = []
+    pending: list = []
+    new_state = HostHealthState(
+        missing_logs_since=state.missing_logs_since,
+        last_alert_ts=dict(state.last_alert_ts),
+    )
+
+    # 1. Process liveness — the fast real-failure path.
+    if process_alive:
+        new_state.last_alert_ts.pop(COND_PROCESS_DEAD, None)
+    else:
+        failing.append(COND_PROCESS_DEAD)
+
+    # 2. Session logs.
+    if newest_log_mtime is None:
+        new_state.last_alert_ts.pop(COND_LOG_STALE, None)
+        if new_state.missing_logs_since is None:
+            new_state.missing_logs_since = now
+            pending.append(COND_LOGS_MISSING)
+        elif now - new_state.missing_logs_since >= missing_log_grace:
+            failing.append(COND_LOGS_MISSING)
+        else:
+            pending.append(COND_LOGS_MISSING)
+    else:
+        new_state.missing_logs_since = None
+        new_state.last_alert_ts.pop(COND_LOGS_MISSING, None)
+        if now - newest_log_mtime > stale_max_age:
+            failing.append(COND_LOG_STALE)
+        else:
+            new_state.last_alert_ts.pop(COND_LOG_STALE, None)
+
+    # 3. Per-condition alert backoff.
+    alerts_due = [
+        c
+        for c in failing
+        if now - new_state.last_alert_ts.get(c, float("-inf")) >= realert_interval
+    ]
+    if alerts_due:
+        for c in failing:
+            new_state.last_alert_ts[c] = now
+
+    return HostHealthDecision(
+        failing=failing, pending=pending, alerts_due=alerts_due, state=new_state
+    )
 
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 def setup_watchdog_logger() -> logging.Logger:
-    log_dir = os.path.join(REPO_PATH, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-
     wdlog = logging.getLogger("vm_watchdog")
     wdlog.setLevel(logging.DEBUG)
     if wdlog.handlers:
         return wdlog
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fh = logging.FileHandler(
-        os.path.join(log_dir, f"watchdog_{ts}.log"), encoding="utf-8"
-    )
-    fh.setLevel(logging.DEBUG)
-
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-
     fmt = logging.Formatter(
         "%(asctime)s | %(levelname)-7s | [Watchdog] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    fh.setFormatter(fmt)
-    ch.setFormatter(fmt)
 
-    wdlog.addHandler(fh)
+    # Tests import this module for the decision core; let them skip the
+    # file-handler side effect (creating logs/watchdog_*.log on import).
+    if not os.environ.get("VM_WATCHDOG_NO_FILELOG"):
+        log_dir = os.path.join(REPO_PATH, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fh = logging.FileHandler(
+            os.path.join(log_dir, f"watchdog_{ts}.log"), encoding="utf-8"
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        wdlog.addHandler(fh)
+
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
     wdlog.addHandler(ch)
     return wdlog
 
@@ -399,7 +528,9 @@ def inspect_dashboard() -> dict:
     if equity <= 0:
         errors.append(f"zero_equity: {equity}")
 
-    # Check for error alerts (skip startup retrain alerts)
+    # Check for error alerts. Runtime retrains were removed in Phase 0
+    # (FR-0.2); the RETRAIN filter is retained only so replayed/archived
+    # legacy alerts cannot trip a false error.
     alerts = status.get("alerts", [])
     error_alerts = [
         a for a in alerts if "ERROR" in a.upper() and "RETRAIN" not in a.upper()
@@ -904,7 +1035,7 @@ def main_loop(args):
             if not error.actionable:
                 log.info("Non-actionable error — restarting dashboard...")
                 restart_dashboard(branch)
-                start_time = time.time()  # reset grace period for startup retrain
+                start_time = time.time()  # reset startup grace period
                 time.sleep(args.cooldown)
                 continue
 
@@ -971,7 +1102,7 @@ def main_loop(args):
                 tracker.record_attempt(error.fingerprint, False, error.summary)
                 time.sleep(COOLDOWN_AFTER_FAILURE_S)
                 continue
-            start_time = time.time()  # reset grace period for startup retrain
+            start_time = time.time()  # reset startup grace period
 
             # === PHASE 10: VERIFY FIX ===
             fix_worked = verify_fix(

@@ -4,7 +4,14 @@ from datetime import datetime, timedelta
 from typing import Dict
 from src.core.interfaces import TradeSignal
 from src.core.fee_calculator import trade_is_profitable
+from src.core.risk_manager import RejectReason, log_rejection
 from src.utils.logger import logger
+
+# FR-0.4: mixins-local rejection reason codes — skips decided inside
+# _process_signals itself (not by the RiskManager). Logged through the shared
+# risk_manager.log_rejection() so the format and vocabulary stay uniform.
+REASON_WEATHER_SLOT_FULL = "WEATHER_SLOT_FULL"
+REASON_MISSING_LIMIT_PRICE = "MISSING_LIMIT_PRICE"
 
 
 class TickerResolverMixin:
@@ -336,7 +343,19 @@ class SignalProcessorMixin:
         return count >= 1
 
     def _process_signals(self, signals, strategy_name, risk_manager, dashboard):
-        """Process signals through risk management and execute if safe."""
+        """Process signals through risk management and execute if safe.
+
+        FR-0.4 logging contract: every emitted signal logs one INFO line
+        ([Signal] EMIT ...), and then either EXECUTES (logged at INFO) or
+        produces EXACTLY ONE INFO rejection line with a stable reason code:
+
+        - mixins-local skips log here via log_rejection()
+          (WEATHER_SLOT_FULL, MISSING_LIMIT_PRICE, EV_GATE);
+        - Kelly zero-sizing logs KELLY_ZERO inside
+          RiskManager.calculate_kelly_size — NOT re-logged here;
+        - risk rejections log their reason inside RiskManager.check_order —
+          NOT re-logged here.
+        """
         if not signals:
             return False
         if not isinstance(signals, list):
@@ -344,6 +363,21 @@ class SignalProcessorMixin:
         traded = False
 
         for sig in signals:
+            conf = getattr(sig, "confidence", 0.0)
+
+            # FR-0.4: every signal a strategy emits is visible at INFO.
+            logger.info(
+                "[Signal] EMIT strategy=%s symbol=%s side=%s contract=%s "
+                "price=%s qty=%s confidence=%.3f",
+                strategy_name,
+                sig.symbol,
+                sig.side,
+                getattr(sig, "contract_side", "YES"),
+                sig.limit_price,
+                sig.quantity,
+                conf,
+            )
+
             category = "general"
             if "BTC" in sig.symbol or "ETH" in sig.symbol:
                 category = "crypto"
@@ -352,27 +386,52 @@ class SignalProcessorMixin:
 
             if category == "weather":
                 if self._is_weather_slot_full(sig.symbol, risk_manager):
+                    log_rejection(
+                        REASON_WEATHER_SLOT_FULL,
+                        strategy_name,
+                        sig.symbol,
+                        side=sig.side,
+                        price=sig.limit_price,
+                        quantity=sig.quantity,
+                    )
                     continue
 
-            # Dynamic sizing (Fractional Kelly)
-            if sig.limit_price > 0:
-                conf = getattr(sig, "confidence", 0.55)
-                if conf <= 0:
-                    conf = 0.55
-                kelly_qty = risk_manager.calculate_kelly_size(
-                    conf, sig.limit_price, strategy_name
+            # Missing-field abort (FR-0.4): without a usable limit price the
+            # signal can be neither sized nor EV-checked — reject explicitly
+            # instead of falling through (abort-on-missing-critical-input).
+            if sig.limit_price is None or sig.limit_price <= 0:
+                log_rejection(
+                    REASON_MISSING_LIMIT_PRICE,
+                    strategy_name,
+                    sig.symbol,
+                    side=sig.side,
+                    price=sig.limit_price,
+                    quantity=sig.quantity,
                 )
-                sig.quantity = kelly_qty
+                continue
+
+            # Dynamic sizing (Fractional Kelly)
+            conf_for_sizing = conf if conf > 0 else 0.55
+            kelly_qty = risk_manager.calculate_kelly_size(
+                conf_for_sizing, sig.limit_price, strategy_name, symbol=sig.symbol
+            )
+            sig.quantity = kelly_qty
 
             if sig.quantity < 1:
-                logger.debug(f"[Process] Skipping qty=0 signal for {sig.symbol}")
+                # KELLY_ZERO was already logged at INFO inside
+                # calculate_kelly_size — do not emit a second rejection line.
                 continue
 
             # ML EV gating: reject signals with negative EV after fees
             if not self._ml_ev_gate(sig):
-                logger.debug(
-                    f"[ML Gate] REJECT {sig.symbol}: conf={getattr(sig, 'confidence', 0):.3f} "
-                    f"price={sig.limit_price:.3f} → negative EV after fees"
+                log_rejection(
+                    RejectReason.EV_GATE,
+                    strategy_name,
+                    sig.symbol,
+                    side=sig.side,
+                    price=sig.limit_price,
+                    quantity=sig.quantity,
+                    confidence=conf,
                 )
                 continue
 
@@ -392,12 +451,17 @@ class SignalProcessorMixin:
                 risk_manager.last_trade_time = datetime.min
                 risk_manager.loss_cooldown.clear()
 
+            # A False return logs exactly one INFO rejection line (with its
+            # reason code and this signal context) inside check_order.
             is_safe = risk_manager.check_order(
                 est_cost,
                 category=category,
                 strategy_name=strategy_name,
                 expiration_time=ex,
                 symbol=sig.symbol,
+                side=sig.side,
+                price=sig.limit_price,
+                quantity=sig.quantity,
             )
 
             if is_counter:
@@ -406,6 +470,18 @@ class SignalProcessorMixin:
 
             if is_safe:
                 cs_label = getattr(sig, "contract_side", "YES")
+                logger.info(
+                    "[Signal] EXECUTED strategy=%s symbol=%s side=%s contract=%s "
+                    "price=%s qty=%s cost=%.2f confidence=%.3f",
+                    strategy_name,
+                    sig.symbol,
+                    sig.side,
+                    cs_label,
+                    sig.limit_price,
+                    sig.quantity,
+                    est_cost,
+                    conf,
+                )
                 dashboard.log(
                     f"EXEC: {sig.side.upper()} {cs_label} {sig.quantity}x {sig.symbol} @ {sig.limit_price} | Debit: ${est_cost:.2f}"
                 )
@@ -448,6 +524,8 @@ class SignalProcessorMixin:
                     }
                 traded = True
             else:
+                # The INFO rejection line (with reason code) was already
+                # emitted inside check_order — only dashboard bookkeeping here.
                 dashboard.log(f"⚠️ HARVEST: {sig.symbol} (Risky but Recorded)")
                 dashboard.record_signal(
                     sig, status="HARVEST_ONLY", strategy_name=strategy_name

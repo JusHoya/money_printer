@@ -140,7 +140,10 @@ class TestWinRatesPersistEveryClose(unittest.TestCase):
         )
         with open(self.path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        self.assertEqual(data, {"StratA": [1, 1]})
+        # FR-0.6 windowed schema: {"strategy": {"window": [...], "updated": iso}}
+        self.assertIn("StratA", data)
+        self.assertEqual(data["StratA"]["window"], [1])
+        self.assertIn("updated", data["StratA"])
 
     def test_file_updates_on_every_close(self):
         """Every close updates the file — not buffered to every 10th."""
@@ -151,9 +154,9 @@ class TestWinRatesPersistEveryClose(unittest.TestCase):
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.assertEqual(
-                data["S"],
-                [i, i],
-                f"After close #{i} the file must reflect ({i}, {i})",
+                data["S"]["window"],
+                [1] * i,
+                f"After close #{i} the window must hold {i} wins",
             )
 
     def test_persist_state_false_does_not_auto_write(self):
