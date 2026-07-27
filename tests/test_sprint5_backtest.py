@@ -307,16 +307,100 @@ class TestBacktestEngine:
         assert results["total_pnl"] < 0
 
     def test_fees_deducted(self):
+        """Taker mode books a fee.
+
+        PRD Phase 2 corrected the maker multiplier to zero for standard series
+        (see reports/phase2/ws_c_fee_verification.md), so the fee-plumbing
+        assertion has to ride the taker path, which is the one that actually
+        costs money.
+        """
+        from src.backtest.engine import BacktestEngine
+
+        engine = BacktestEngine(
+            {"test": _FixedConfidenceStrategy(0.70)},
+            starting_balance=300.0,
+            fee_mode="taker",
+        )
+        seq = _make_sequence(10, yes_pct=0.5)
+        results = engine.run(seq)
+
+        assert results["total_fees"] > 0
+
+    def test_default_fee_mode_is_taker_and_books_fees(self):
+        """A backtest that does not state a fee mode must charge the taker fee.
+
+        The default was ``"maker"``, which after the Phase 2 maker-multiplier
+        correction books literally $0.00 — so every default backtest, including
+        the stress scenario that claims to bound loss by "entry costs + fees",
+        reported a fee-free equity curve. A replay does not know how its orders
+        would have filled and must assume they crossed.
+        """
         from src.backtest.engine import BacktestEngine
 
         engine = BacktestEngine(
             {"test": _FixedConfidenceStrategy(0.70)},
             starting_balance=300.0,
         )
+        assert engine.fee_mode == "taker"
+
+        results = engine.run(_make_sequence(10, yes_pct=0.5))
+        assert results["total_trades"] > 0
+        assert results["total_fees"] > 0
+
+    def test_invalid_fee_mode_rejected(self):
+        """A typo must not silently fall through to a fee-free replay."""
+        import pytest as _pytest
+
+        from src.backtest.engine import BacktestEngine
+
+        with _pytest.raises(ValueError):
+            BacktestEngine({"test": _FixedConfidenceStrategy(0.70)}, fee_mode="MAKER")
+
+    def test_stress_scenarios_state_their_fee_mode(self):
+        """Stress scenarios must not inherit whichever default is in force.
+
+        Scenario (d)'s stated purpose is to bound total loss by entry costs
+        *plus fees*; that claim is vacuous under a fee-free mode.
+        """
+        from src.backtest.stress import StressTestSuite
+
+        suite = StressTestSuite(starting_balance=300.0)
+        constructed = []
+
+        import src.backtest.stress as stress_mod
+
+        real_engine = stress_mod.BacktestEngine
+
+        def _spy(*args, **kwargs):
+            constructed.append(kwargs.get("fee_mode"))
+            return real_engine(*args, **kwargs)
+
+        stress_mod.BacktestEngine = _spy
+        try:
+            suite.run_all()
+        finally:
+            stress_mod.BacktestEngine = real_engine
+
+        assert constructed == ["taker", "taker", "taker"]
+
+    def test_maker_mode_is_fee_free_on_standard_series(self):
+        """Resting liquidity on a standard-series market costs nothing.
+
+        This is not a rounding artifact: charging the old 1.75% put ~$0.01 per
+        contract of phantom cost on the maker-first path PRD FR-3.3 makes the
+        flagship, which is a tenth of the premium on a 10-cent contract.
+        """
+        from src.backtest.engine import BacktestEngine
+
+        engine = BacktestEngine(
+            {"test": _FixedConfidenceStrategy(0.70)},
+            starting_balance=300.0,
+            fee_mode="maker",
+        )
         seq = _make_sequence(10, yes_pct=0.5)
         results = engine.run(seq)
 
-        assert results["total_fees"] > 0
+        assert results["total_fees"] == 0.0
 
     def test_equity_curve_starts_at_balance(self):
         from src.backtest.engine import BacktestEngine

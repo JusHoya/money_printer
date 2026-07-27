@@ -6,7 +6,11 @@ from typing import Optional
 from datetime import datetime, date, timedelta, timezone
 
 from src.core.matching_engine import SimulatedExchange, _DEFAULT_STATE_FILE
-from src.core.fee_calculator import ev_after_fees, compute_fee  # noqa: F401
+from src.core.fee_calculator import (  # noqa: F401
+    compute_fee,
+    ev_after_fees,
+    fee_type_for_symbol,
+)
 from src.utils.logger import logger
 
 
@@ -390,6 +394,12 @@ class RiskManager:
 
         FR-0.4: every zero return is logged at INFO with reason=KELLY_ZERO —
         this was the silent kill-switch (skips were DEBUG-only downstream).
+
+        ``symbol`` is load-bearing beyond logging: the series it names decides
+        whether the maker fee deducted from the effective odds is zero (the
+        standard schedule, every KXHIGH* weather market) or non-zero (the
+        "Non-Standard Fees" series, KXAAAGASM). Omitting it prices the trade on
+        the standard schedule.
         """
         if price <= 0 or price >= 1.0:
             log_rejection(
@@ -405,10 +415,22 @@ class RiskManager:
         # Bankroll stage determines Kelly fraction and trade cap
         trade_pct, max_positions, kelly_frac, stage = _get_bankroll_stage(self.balance)
 
-        # 1. Fee-adjusted odds — Kalshi charges maker fees on both entry and
-        # settlement, so effective payoff shrinks and effective loss grows.
-        # Using raw b = (1-price)/price systematically oversizes thin edges.
-        fee_per = compute_fee(price, 1, is_maker=True).per_contract
+        # 1. Fee-adjusted odds. Kalshi bills the entry order and, if the
+        # position is traded out rather than held, the exit order; settlement
+        # itself is free. Sizing charges both legs, the conservative end of
+        # that range. Using raw b = (1-price)/price systematically oversizes
+        # thin edges.
+        #
+        # The maker multiplier is a per-series property — zero on the standard
+        # schedule, non-zero only for the series in the schedule's
+        # "Non-Standard Fees" table — so the fee type is derived from the
+        # symbol rather than assumed. Hardcoding the standard default sized
+        # KXAAAGASM gas (PRD Phase 4) as if resting liquidity were free, which
+        # it is not. A caller that cannot supply a symbol still gets the
+        # documented standard default; every production caller supplies one.
+        fee_per = compute_fee(
+            price, 1, is_maker=True, series_fee_type=fee_type_for_symbol(symbol)
+        ).per_contract
         net_win = (1.0 - price) - 2.0 * fee_per
         net_loss = price + 2.0 * fee_per
         if net_win <= 0:
@@ -806,8 +828,18 @@ class RiskManager:
         strike_type: str = None,
         floor_strike: float = None,
         cap_strike: float = None,
+        is_maker: Optional[bool] = None,
     ):
-        """Call this AFTER a trade is executed."""
+        """Call this AFTER a trade is executed.
+
+        ``is_maker`` carries the observed fill type through to the exchange's
+        fee booking. ``None`` means the caller could not determine it, and the
+        exchange books the fill as a taker — see
+        ``SimulatedExchange.open_position``. This method previously passed
+        nothing at all, so every simulated fill inherited the exchange's
+        maker default and, after the Phase 2 maker-multiplier correction, paid
+        $0.00.
+        """
         # Hard position size cap: never record more than 50 contracts per entry
         MAX_CONTRACTS = 50
         if quantity > MAX_CONTRACTS:
@@ -837,6 +869,7 @@ class RiskManager:
             strike_type=strike_type,
             floor_strike=floor_strike,
             cap_strike=cap_strike,
+            is_maker=is_maker,
         )
 
         self._sync_balance()

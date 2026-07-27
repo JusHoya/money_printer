@@ -1,17 +1,27 @@
 """Maker-first order routing.
 
-All orders default to limit (maker) to capture the 2.24% maker-taker
-spread advantage.  Only routes as market (taker) when an urgency flag
-is set (e.g., latency arbitrage with fast-decaying edge).
+All orders default to limit (maker) to capture the maker-taker fee advantage.
+Only routes as market (taker) when an urgency flag is set (e.g., latency
+arbitrage with fast-decaying edge).
 
-Sprint 4, Task 4.1 of Money Printer V2.
+Sprint 4, Task 4.1 of Money Printer V2. Revised in PRD Phase 2: the maker
+multiplier is a per-series property, zero on the standard schedule and
+non-zero only for the series in the fee schedule's "Non-Standard Fees" table.
+The router therefore takes the market ``symbol`` and derives the series fee
+type from it, instead of pricing every maker order as free — which made maker
+beat taker on EV in every equal-price comparison regardless of series. On a
+standard series the advantage is the whole 7% taker fee, not the 5.25-point
+maker/taker spread this module was written against.
+
+This module has no production caller today. It is kept correct so that the
+first caller inherits a threaded fee model rather than a silent assumption.
 """
 
 import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from src.core.fee_calculator import compute_fee, ev_after_fees
+from src.core.fee_calculator import compute_fee, ev_after_fees, fee_type_for_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +85,7 @@ class OrderRouter:
         contracts: int = 1,
         urgent: bool = False,
         recommended_price: Optional[float] = None,
+        symbol: str = "",
     ) -> RoutingDecision:
         """Decide order type and price.
 
@@ -94,7 +105,13 @@ class OrderRouter:
             Force taker routing (e.g., latency arb).
         recommended_price : float, optional
             ML-recommended limit price (from time-optimizer).
+        symbol : str
+            Full market ticker. Supplies the series identity the maker fee
+            depends on. Omitting it prices the maker leg on the standard
+            schedule (no maker fee), which is correct for the weather series
+            and wrong for KXAAAGASM.
         """
+        series_fee_type = fee_type_for_symbol(symbol)
         # Default: maker (limit order)
         if side == "buy":
             # Place limit at bid + buffer (penny the bid)
@@ -112,7 +129,13 @@ class OrderRouter:
             limit_price = max(bid, min(0.99, limit_price))
 
         # Check if taker is needed
-        maker_ev = ev_after_fees(probability, limit_price, contracts, is_maker=True)
+        maker_ev = ev_after_fees(
+            probability,
+            limit_price,
+            contracts,
+            is_maker=True,
+            series_fee_type=series_fee_type,
+        )
         taker_ev = ev_after_fees(
             probability, ask if side == "buy" else bid, contracts, is_maker=False
         )
@@ -142,7 +165,9 @@ class OrderRouter:
             )
 
         # Maker path
-        fee_est = compute_fee(limit_price, contracts, is_maker=True).fee
+        fee_est = compute_fee(
+            limit_price, contracts, is_maker=True, series_fee_type=series_fee_type
+        ).fee
         self.stats.maker_count += 1
         return RoutingDecision(
             order_type="limit",

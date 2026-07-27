@@ -1,0 +1,30 @@
+{
+ "series": {
+  "additional_prohibitions": [
+   "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+   "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+  ],
+  "category": "Economics",
+  "contract_terms_url": "https://assets.kalshi.com/contract_terms/AAAGAS.pdf",
+  "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/AAAGAS.pdf",
+  "fee_multiplier": 1,
+  "fee_type": "quadratic_with_maker_fees",
+  "frequency": "monthly",
+  "last_updated_ts": "2026-07-16T14:18:37.664879Z",
+  "product_metadata": {
+   "scope": "Gasoline"
+  },
+  "settlement_sources": [
+   {
+    "name": "AAA",
+    "url": "https://gasprices.aaa.com/"
+   }
+  ],
+  "tags": [
+   "Oil & Gas",
+   "Oil and energy"
+  ],
+  "ticker": "KXAAAGASM",
+  "title": "US gas price"
+ }
+}

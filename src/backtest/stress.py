@@ -79,6 +79,9 @@ class StressTestSuite:
         engine = BacktestEngine(
             {"always_buy": _AlwaysBuyStrategy()},
             starting_balance=self.starting_balance,
+            # Stated explicitly: a stress scenario must not inherit whichever
+            # fee mode happens to be the engine default.
+            fee_mode="taker",
         )
 
         # All markets settle as "no" (crash)
@@ -120,6 +123,7 @@ class StressTestSuite:
             {"always_buy": _AlwaysBuyStrategy()},
             starting_balance=self.starting_balance
             * 10,  # Larger balance to avoid capital limits
+            fee_mode="taker",
         )
         # Use different symbols to avoid BTC correlation limit
         sequence = [
@@ -162,6 +166,9 @@ class StressTestSuite:
         engine = BacktestEngine(
             {"always_buy": _AlwaysBuyStrategy()},
             starting_balance=self.starting_balance,
+            # This scenario's whole claim is that loss is bounded by entry
+            # costs PLUS fees; with a fee-free mode the fee term is vacuous.
+            fee_mode="taker",
         )
 
         sequence = [

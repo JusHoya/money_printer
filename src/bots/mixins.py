@@ -282,22 +282,40 @@ class SignalProcessorMixin:
     """Shared signal processing logic for the orchestrator.
 
     Sprint 3 addition: ML gating layer rejects signals whose
-    expected value is negative after estimated maker fees.
+    expected value is negative after estimated fees. The gate prices the
+    taker path — see :meth:`_ml_ev_gate` for why assuming a maker fill
+    silently disarmed it once the maker multiplier was corrected to zero.
     """
 
     @staticmethod
     def _ml_ev_gate(sig: TradeSignal) -> bool:
         """Return True if the signal has positive expected value after fees.
 
-        Uses the signal's own ``confidence`` as P(win) and the
-        ``limit_price`` as the cost.  Delegates to the fee calculator
-        (Sprint 4) for accurate Kalshi maker fee computation.
+        Uses the signal's own ``confidence`` as P(win) and the ``limit_price``
+        as the cost, and prices the fee **pessimistically** on both axes:
+
+        - **Taker, not maker.** A pre-trade gate does not know how the order
+          will fill; a resting order can be crossed before it rests. Pricing
+          the maker path is doubly wrong since PRD Phase 2 corrected the maker
+          multiplier to zero on the standard schedule: the fee term vanished
+          and this gate collapsed to ``confidence > limit_price``, admitting a
+          sub-basis-point edge (``conf=0.5001`` at ``lp=0.50``). The taker
+          formula is uniform across every series, so charging it also makes the
+          gate independent of series identity — it cannot under-charge a
+          ``KXAAAGASM`` order the way a series-blind maker price would.
+        - **Round trip, not settlement.** The gate is symbol-agnostic and has
+          no evidence the position will be held to expiry, so it charges both
+          legs. A position that *is* held to settlement pays one leg (Kalshi
+          levies no settlement fee) and therefore beats this estimate.
+
+        Both choices err toward rejecting a marginal trade rather than booking
+        one whose modelled edge is smaller than its true cost.
         """
         conf = getattr(sig, "confidence", 0.0)
         lp = sig.limit_price
         if lp is None or lp <= 0:
             return False
-        return trade_is_profitable(conf, lp, contracts=1, is_maker=True)
+        return trade_is_profitable(conf, lp, contracts=1, is_maker=False)
 
     def _is_weather_slot_full(self, symbol, risk_manager):
         """Check if we already have an active trade for this City + Type."""
@@ -516,6 +534,11 @@ class SignalProcessorMixin:
                     strike_type=getattr(sig, "strike_type", None),
                     floor_strike=getattr(sig, "floor_strike", None),
                     cap_strike=getattr(sig, "cap_strike", None),
+                    # Fill type, when a strategy or router can state it. No
+                    # component in the live loop can today, so this is None and
+                    # the exchange books the fill as a taker rather than as the
+                    # free maker side.
+                    is_maker=getattr(sig, "is_maker", None),
                 )
                 # Store ML context in position for trade journal
                 positions = risk_manager.exchange.positions

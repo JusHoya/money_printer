@@ -1,0 +1,708 @@
+{
+ "data": [
+  {
+   "cld": "PC",
+   "dpt": 59,
+   "ftime": "2026-06-02 00:00",
+   "index": 0,
+   "model": "MEX",
+   "n_x": 70,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 67
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-02 12:00",
+   "index": 1,
+   "model": "MEX",
+   "n_x": 60,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 61
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-03 00:00",
+   "index": 2,
+   "model": "MEX",
+   "n_x": 69,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 66
+  },
+  {
+   "cld": "OV",
+   "dpt": 55,
+   "ftime": "2026-06-03 12:00",
+   "index": 3,
+   "model": "MEX",
+   "n_x": 59,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 60
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-04 00:00",
+   "index": 4,
+   "model": "MEX",
+   "n_x": 68,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 65
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-04 12:00",
+   "index": 5,
+   "model": "MEX",
+   "n_x": 60,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 61
+  },
+  {
+   "cld": "OV",
+   "dpt": 58,
+   "ftime": "2026-06-05 00:00",
+   "index": 6,
+   "model": "MEX",
+   "n_x": 72,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 68
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-05 12:00",
+   "index": 7,
+   "model": "MEX",
+   "n_x": 62,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 63
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-06 00:00",
+   "index": 8,
+   "model": "MEX",
+   "n_x": 73,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 68
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-06 12:00",
+   "index": 9,
+   "model": "MEX",
+   "n_x": 63,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 64
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-07 00:00",
+   "index": 10,
+   "model": "MEX",
+   "n_x": 70,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 67
+  },
+  {
+   "cld": "OV",
+   "dpt": 55,
+   "ftime": "2026-06-07 12:00",
+   "index": 11,
+   "model": "MEX",
+   "n_x": 61,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 62
+  },
+  {
+   "cld": "OV",
+   "dpt": 55,
+   "ftime": "2026-06-08 00:00",
+   "index": 12,
+   "model": "MEX",
+   "n_x": 70,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 67
+  },
+  {
+   "cld": "OV",
+   "dpt": 54,
+   "ftime": "2026-06-08 12:00",
+   "index": 13,
+   "model": "MEX",
+   "n_x": 61,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 62
+  },
+  {
+   "cld": "OV",
+   "dpt": 55,
+   "ftime": "2026-06-09 00:00",
+   "index": 14,
+   "model": "MEX",
+   "n_x": 70,
+   "runtime": "2026-06-01 00:00",
+   "station": "KLAX",
+   "tmp": 67
+  },
+  {
+   "cld": "PC",
+   "dpt": 42,
+   "ftime": "2026-06-02 00:00",
+   "index": 15,
+   "model": "MEX",
+   "n_x": 78,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 70
+  },
+  {
+   "cld": "CL",
+   "dpt": 45,
+   "ftime": "2026-06-02 12:00",
+   "index": 16,
+   "model": "MEX",
+   "n_x": 57,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 61
+  },
+  {
+   "cld": "CL",
+   "dpt": 40,
+   "ftime": "2026-06-03 00:00",
+   "index": 17,
+   "model": "MEX",
+   "n_x": 77,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 71
+  },
+  {
+   "cld": "CL",
+   "dpt": 46,
+   "ftime": "2026-06-03 12:00",
+   "index": 18,
+   "model": "MEX",
+   "n_x": 58,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 62
+  },
+  {
+   "cld": "CL",
+   "dpt": 40,
+   "ftime": "2026-06-04 00:00",
+   "index": 19,
+   "model": "MEX",
+   "n_x": 81,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 76
+  },
+  {
+   "cld": "CL",
+   "dpt": 50,
+   "ftime": "2026-06-04 12:00",
+   "index": 20,
+   "model": "MEX",
+   "n_x": 61,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 65
+  },
+  {
+   "cld": "PC",
+   "dpt": 52,
+   "ftime": "2026-06-05 00:00",
+   "index": 21,
+   "model": "MEX",
+   "n_x": 86,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 81
+  },
+  {
+   "cld": "PC",
+   "dpt": 57,
+   "ftime": "2026-06-05 12:00",
+   "index": 22,
+   "model": "MEX",
+   "n_x": 65,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 68
+  },
+  {
+   "cld": "OV",
+   "dpt": 58,
+   "ftime": "2026-06-06 00:00",
+   "index": 23,
+   "model": "MEX",
+   "n_x": 83,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 76
+  },
+  {
+   "cld": "OV",
+   "dpt": 63,
+   "ftime": "2026-06-06 12:00",
+   "index": 24,
+   "model": "MEX",
+   "n_x": 67,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 69
+  },
+  {
+   "cld": "OV",
+   "dpt": 61,
+   "ftime": "2026-06-07 00:00",
+   "index": 25,
+   "model": "MEX",
+   "n_x": 81,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 75
+  },
+  {
+   "cld": "OV",
+   "dpt": 60,
+   "ftime": "2026-06-07 12:00",
+   "index": 26,
+   "model": "MEX",
+   "n_x": 66,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 68
+  },
+  {
+   "cld": "OV",
+   "dpt": 59,
+   "ftime": "2026-06-08 00:00",
+   "index": 27,
+   "model": "MEX",
+   "n_x": 78,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 71
+  },
+  {
+   "cld": "PC",
+   "dpt": 59,
+   "ftime": "2026-06-08 12:00",
+   "index": 28,
+   "model": "MEX",
+   "n_x": 63,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 66
+  },
+  {
+   "cld": "PC",
+   "dpt": 58,
+   "ftime": "2026-06-09 00:00",
+   "index": 29,
+   "model": "MEX",
+   "n_x": 84,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMDW",
+   "tmp": 78
+  },
+  {
+   "cld": "OV",
+   "dpt": 74,
+   "ftime": "2026-06-02 00:00",
+   "index": 30,
+   "model": "MEX",
+   "n_x": 92,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 81
+  },
+  {
+   "cld": "OV",
+   "dpt": 77,
+   "ftime": "2026-06-02 12:00",
+   "index": 31,
+   "model": "MEX",
+   "n_x": 78,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 82
+  },
+  {
+   "cld": "OV",
+   "dpt": 72,
+   "ftime": "2026-06-03 00:00",
+   "index": 32,
+   "model": "MEX",
+   "n_x": 94,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 83
+  },
+  {
+   "cld": "OV",
+   "dpt": 73,
+   "ftime": "2026-06-03 12:00",
+   "index": 33,
+   "model": "MEX",
+   "n_x": 75,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 79
+  },
+  {
+   "cld": "OV",
+   "dpt": 71,
+   "ftime": "2026-06-04 00:00",
+   "index": 34,
+   "model": "MEX",
+   "n_x": 89,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 80
+  },
+  {
+   "cld": "OV",
+   "dpt": 71,
+   "ftime": "2026-06-04 12:00",
+   "index": 35,
+   "model": "MEX",
+   "n_x": 76,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 79
+  },
+  {
+   "cld": "OV",
+   "dpt": 70,
+   "ftime": "2026-06-05 00:00",
+   "index": 36,
+   "model": "MEX",
+   "n_x": 86,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 79
+  },
+  {
+   "cld": "OV",
+   "dpt": 70,
+   "ftime": "2026-06-05 12:00",
+   "index": 37,
+   "model": "MEX",
+   "n_x": 75,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 78
+  },
+  {
+   "cld": "PC",
+   "dpt": 68,
+   "ftime": "2026-06-06 00:00",
+   "index": 38,
+   "model": "MEX",
+   "n_x": 86,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 79
+  },
+  {
+   "cld": "CL",
+   "dpt": 69,
+   "ftime": "2026-06-06 12:00",
+   "index": 39,
+   "model": "MEX",
+   "n_x": 75,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 79
+  },
+  {
+   "cld": "PC",
+   "dpt": 69,
+   "ftime": "2026-06-07 00:00",
+   "index": 40,
+   "model": "MEX",
+   "n_x": 87,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 80
+  },
+  {
+   "cld": "PC",
+   "dpt": 71,
+   "ftime": "2026-06-07 12:00",
+   "index": 41,
+   "model": "MEX",
+   "n_x": 76,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 80
+  },
+  {
+   "cld": "PC",
+   "dpt": 71,
+   "ftime": "2026-06-08 00:00",
+   "index": 42,
+   "model": "MEX",
+   "n_x": 88,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 81
+  },
+  {
+   "cld": "OV",
+   "dpt": 73,
+   "ftime": "2026-06-08 12:00",
+   "index": 43,
+   "model": "MEX",
+   "n_x": 77,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 81
+  },
+  {
+   "cld": "OV",
+   "dpt": 71,
+   "ftime": "2026-06-09 00:00",
+   "index": 44,
+   "model": "MEX",
+   "n_x": 90,
+   "runtime": "2026-06-01 00:00",
+   "station": "KMIA",
+   "tmp": 84
+  },
+  {
+   "cld": "PC",
+   "dpt": 42,
+   "ftime": "2026-06-02 00:00",
+   "index": 45,
+   "model": "MEX",
+   "n_x": 73,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 64
+  },
+  {
+   "cld": "CL",
+   "dpt": 44,
+   "ftime": "2026-06-02 12:00",
+   "index": 46,
+   "model": "MEX",
+   "n_x": 54,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 57
+  },
+  {
+   "cld": "CL",
+   "dpt": 41,
+   "ftime": "2026-06-03 00:00",
+   "index": 47,
+   "model": "MEX",
+   "n_x": 76,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 70
+  },
+  {
+   "cld": "CL",
+   "dpt": 45,
+   "ftime": "2026-06-03 12:00",
+   "index": 48,
+   "model": "MEX",
+   "n_x": 60,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 64
+  },
+  {
+   "cld": "CL",
+   "dpt": 42,
+   "ftime": "2026-06-04 00:00",
+   "index": 49,
+   "model": "MEX",
+   "n_x": 78,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 70
+  },
+  {
+   "cld": "CL",
+   "dpt": 50,
+   "ftime": "2026-06-04 12:00",
+   "index": 50,
+   "model": "MEX",
+   "n_x": 63,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 66
+  },
+  {
+   "cld": "CL",
+   "dpt": 51,
+   "ftime": "2026-06-05 00:00",
+   "index": 51,
+   "model": "MEX",
+   "n_x": 81,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 74
+  },
+  {
+   "cld": "CL",
+   "dpt": 55,
+   "ftime": "2026-06-05 12:00",
+   "index": 52,
+   "model": "MEX",
+   "n_x": 66,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 69
+  },
+  {
+   "cld": "CL",
+   "dpt": 56,
+   "ftime": "2026-06-06 00:00",
+   "index": 53,
+   "model": "MEX",
+   "n_x": 85,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 78
+  },
+  {
+   "cld": "CL",
+   "dpt": 61,
+   "ftime": "2026-06-06 12:00",
+   "index": 54,
+   "model": "MEX",
+   "n_x": 70,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 72
+  },
+  {
+   "cld": "PC",
+   "dpt": 61,
+   "ftime": "2026-06-07 00:00",
+   "index": 55,
+   "model": "MEX",
+   "n_x": 84,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 77
+  },
+  {
+   "cld": "OV",
+   "dpt": 57,
+   "ftime": "2026-06-07 12:00",
+   "index": 56,
+   "model": "MEX",
+   "n_x": 64,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 66
+  },
+  {
+   "cld": "OV",
+   "dpt": 52,
+   "ftime": "2026-06-08 00:00",
+   "index": 57,
+   "model": "MEX",
+   "n_x": 74,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 67
+  },
+  {
+   "cld": "OV",
+   "dpt": 54,
+   "ftime": "2026-06-08 12:00",
+   "index": 58,
+   "model": "MEX",
+   "n_x": 58,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 61
+  },
+  {
+   "cld": "OV",
+   "dpt": 53,
+   "ftime": "2026-06-09 00:00",
+   "index": 59,
+   "model": "MEX",
+   "n_x": 71,
+   "runtime": "2026-06-01 00:00",
+   "station": "KNYC",
+   "tmp": 65
+  }
+ ],
+ "schema": {
+  "fields": [
+   {
+    "name": "index",
+    "type": "string"
+   },
+   {
+    "name": "model",
+    "type": "string"
+   },
+   {
+    "name": "runtime",
+    "type": "string"
+   },
+   {
+    "name": "ftime",
+    "type": "string"
+   },
+   {
+    "name": "n_x",
+    "type": "string"
+   },
+   {
+    "name": "tmp",
+    "type": "string"
+   },
+   {
+    "name": "dpt",
+    "type": "string"
+   },
+   {
+    "name": "cld",
+    "type": "string"
+   },
+   {
+    "name": "station",
+    "type": "string"
+   }
+  ],
+  "pandas_version": "1.4.0",
+  "primaryKey": [
+   "index"
+  ]
+ }
+}

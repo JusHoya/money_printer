@@ -479,13 +479,29 @@ def _straddling_observations():
         hour=10
     )
 
-    hot = _metar_obs(hot_local, 35.0)  # 95.0 F -- yesterday local, today UTC
+    hot = _metar_obs(hot_local, 35.0)  # 95.0 F -- yesterday local, same UTC day
     cool = _metar_obs(cool_local, 20.0)  # 68.0 F -- today local
-    # Sanity: the fixture only discriminates if both land on today's UTC date.
-    utc_today = datetime.now(timezone.utc).date()
-    assert (
-        datetime.fromtimestamp(hot["obsTime"], tz=timezone.utc).date() == utc_today
-    ), "fixture precondition: the hot observation must share today's UTC date"
+
+    # Sanity: the fixture only discriminates if the two observations share a
+    # UTC date, because that is what makes a UTC-day filter wrongly swallow the
+    # previous local evening.
+    #
+    # This used to compare `hot` against `datetime.now(timezone.utc).date()`,
+    # which is a different claim and a false one for roughly seven hours a day.
+    # Both observations are anchored to the station's LOCAL date; between
+    # 00:00 and 07:00 UTC the UTC date has already rolled over while Los
+    # Angeles is still on the previous day, so the wall-clock UTC "today" runs
+    # one day ahead of the date the fixture is built around and the assertion
+    # failed on a fixture that was perfectly well formed. The bug reddened two
+    # tests every night on a UTC host and was repeatedly mistaken for a
+    # settlement-date regression in `src/`.
+    hot_utc_date = datetime.fromtimestamp(hot["obsTime"], tz=timezone.utc).date()
+    cool_utc_date = datetime.fromtimestamp(cool["obsTime"], tz=timezone.utc).date()
+    assert hot_utc_date == cool_utc_date, (
+        "fixture precondition: both observations must share one UTC date, or a "
+        "UTC-day filter would not wrongly include the previous local evening "
+        f"(hot={hot_utc_date}, cool={cool_utc_date})"
+    )
     return [cool, hot]
 
 

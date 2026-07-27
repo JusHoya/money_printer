@@ -83,3 +83,10 @@ test-results/
 # per-fetch timestamps; the derived daily-high CSVs beside it ARE the committed
 # ground-truth record and stay tracked.
 data/weather_truth/cache/
+
+# Phase 2 (FR-2.2): re-fetchable IEM MOS run cache (434 files / 30 MB). The
+# normalized forecast_series_*.csv beside it is the committed artifact.
+data/forecast_archive/cache/
+
+# Phase 2 (FR-2.1): decoded GEFS member cache — regenerable from NOAA NODD.
+data/ensemble/cache/

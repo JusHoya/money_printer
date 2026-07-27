@@ -1,0 +1,38 @@
+# Line-ending pins for byte-compared artifacts.
+#
+# This repository is developed on Windows with `core.autocrlf=true`, so a text
+# file committed as LF is checked out as CRLF. Any test that re-derives an
+# artifact and byte-compares it against the committed copy therefore goes red on
+# a fresh clone for a file nobody changed: the rebuild writes LF, the checkout
+# holds CRLF.
+#
+# PRD Phase 2 exit criterion 2 requires calibration recomputation to be
+# "byte-identical on re-run", and the Phase 1 ground-truth CSVs are the hashed
+# inputs that feed it. Both are pinned to LF so the comparison measures the
+# pipeline rather than the checkout.
+
+# Phase 2 (FR-2.2): deterministic calibration artifacts and their inputs.
+data/calibration/*.json          text eol=lf
+data/forecast_archive/*.csv      text eol=lf
+
+# Phase 1 (FR-1.6): immutable CLI ground-truth record.
+data/weather_truth/*.csv         text eol=lf
+
+# Phase 2 (FR-2.4): recorded ladder history replayed by the go/no-go report.
+data/ladders/**                  text eol=lf
+
+# Recorded fixtures that tests hash or byte-compare.
+tests/fixtures/**                text eol=lf
+
+# ...but binary fixtures must never be EOL-normalized. `text eol=lf` above
+# would strip CRLF byte pairs out of a GRIB2/Parquet/archive payload on
+# check-in and hand the decoder a corrupt file. Workstream A hit exactly this
+# during Phase 2 (9 byte pairs deleted from a 431,982-byte GRIB2 message) and
+# base64-encoded its fixture to dodge it. Anything genuinely binary goes here.
+tests/fixtures/**/*.grib2        -text
+tests/fixtures/**/*.grb2         -text
+tests/fixtures/**/*.parquet      -text
+tests/fixtures/**/*.gz           -text
+tests/fixtures/**/*.zip          -text
+tests/fixtures/**/*.tgz          -text
+tests/fixtures/**/*.png          -text
