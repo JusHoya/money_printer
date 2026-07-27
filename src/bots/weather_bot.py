@@ -1,6 +1,8 @@
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List
+from types import MappingProxyType
+from typing import Dict, List, Tuple
 
 from src.bots.base import Bot
 from src.bots.registry import BotRegistry
@@ -18,37 +20,101 @@ import os
 # and Meteorologist V2 (-$75 net, ~14% of fees) are net-negative fee bleeders.
 # Both weather strategies are disabled from live trading. Flip this flag back
 # to True to re-enable the weather waterfall. Data/price feeds still run.
+# PRD Phase 1 is feed-only by design; trading is re-enabled in Phase 3.
 WEATHER_TRADING_ENABLED = False
+
+
+@dataclass(frozen=True)
+class WeatherCity:
+    """One tracked city: market, settlement station, local clock.
+
+    This is the single authoritative per-city record (PRD FR-1.4). It replaced
+    four overlapping maps (``STATION_MAP``, ``METAR_STATIONS``,
+    ``METAR_TO_KALSHI``, ``METAR_TO_NWS``) whose disagreement is exactly how
+    the bot ended up observing the non-settlement airports KJFK/KORD while
+    Kalshi settled on KNYC/KMDW.
+    """
+
+    key: str  # short city key used in logs and dashboard rows
+    kalshi_series: str  # Kalshi series ticker, e.g. "KXHIGHNY"
+    settlement_station: str  # the station Kalshi settles the market on
+    timezone: str  # IANA tz of the settlement station (PRD FR-3.2)
+    station_name: str  # human name, as published by api.weather.gov
+
+
+# PRD FR-1.4. Settlement stations, NOT nearby airports. The non-settlement
+# airports named below are documentation of the defect being fixed; they are
+# not station identifiers anywhere in this process:
+#   KXHIGHNY  settles on KNYC (Central Park), not the non-settlement KJFK
+#   KXHIGHCHI settles on KMDW (Midway),       not the non-settlement KORD
+# Measured 2026-07-12..07-25 from the IEM archive, the settlement station and
+# its old airport proxy differ by up to 3F (NY) and 2F (CHI) on a daily high —
+# enough to flip a 2F-wide Kalshi bracket on roughly half of all days.
+# Timezones are the ``timeZone`` field of https://api.weather.gov/stations/<id>
+# (probed 2026-07-25) and are consumed by the local-calendar-day running max
+# now, and by the Phase 3 local-time trade windows (FR-3.2) later.
+WEATHER_CITIES: Tuple[WeatherCity, ...] = (
+    WeatherCity(
+        key="NY",
+        kalshi_series="KXHIGHNY",
+        settlement_station="KNYC",
+        timezone="America/New_York",
+        station_name="New York City, Central Park",
+    ),
+    WeatherCity(
+        key="CHI",
+        kalshi_series="KXHIGHCHI",
+        settlement_station="KMDW",
+        timezone="America/Chicago",
+        station_name="Chicago, Chicago Midway Airport",
+    ),
+    WeatherCity(
+        key="LAX",
+        kalshi_series="KXHIGHLAX",
+        settlement_station="KLAX",
+        timezone="America/Los_Angeles",
+        station_name="Los Angeles, Los Angeles International Airport",
+    ),
+    WeatherCity(
+        key="MIA",
+        kalshi_series="KXHIGHMIA",
+        settlement_station="KMIA",
+        timezone="America/New_York",
+        station_name="Miami, Miami International Airport",
+    ),
+)
+
+CITY_CONFIG: Dict[str, WeatherCity] = MappingProxyType(
+    {c.key: c for c in WEATHER_CITIES}
+)
+SETTLEMENT_STATIONS: Tuple[str, ...] = tuple(
+    c.settlement_station for c in WEATHER_CITIES
+)
+STATION_TIMEZONES: Dict[str, str] = MappingProxyType(
+    {c.settlement_station: c.timezone for c in WEATHER_CITIES}
+)
+SERIES_BY_STATION: Dict[str, str] = MappingProxyType(
+    {c.settlement_station: c.kalshi_series for c in WEATHER_CITIES}
+)
+
+# Bracket-semantics fields the FR-1.1 KalshiProvider puts on every market's
+# ``extra``. They are forwarded onto the fused observation so strategies can
+# call ``parse_bracket_spec(symbol, data.extra)`` without a second fetch.
+BRACKET_FIELDS: Tuple[str, ...] = (
+    "floor_strike",
+    "cap_strike",
+    "strike_type",
+    "yes_sub_title",
+)
 
 
 @BotRegistry.register("weather")
 class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
-    # Legacy NWS station mapping (kept for backwards compatibility / forecasts)
-    STATION_MAP = {
-        "KNYC": "KXHIGHNY",
-        "KLAX": "KXHIGHLAX",
-        "KMDW": "KXHIGHCHI",
-        "KMIA": "KXHIGHMIA",
-    }
+    """Feed-only weather bot reading Kalshi's settlement stations (FR-1.4)."""
 
-    # Airport ASOS stations for METAR data (faster, higher precision)
-    METAR_STATIONS = ["KJFK", "KLAX", "KORD", "KMIA"]
-
-    # Map METAR stations to Kalshi tickers
-    METAR_TO_KALSHI = {
-        "KJFK": "KXHIGHNY",
-        "KLAX": "KXHIGHLAX",
-        "KORD": "KXHIGHCHI",
-        "KMIA": "KXHIGHMIA",
-    }
-
-    # Map METAR stations back to NWS stations (for forecasts)
-    METAR_TO_NWS = {
-        "KJFK": "KNYC",
-        "KLAX": "KLAX",
-        "KORD": "KMDW",
-        "KMIA": "KMIA",
-    }
+    # The authoritative city list. Instance-overridable so tests can run a
+    # single city; there is no second station map to fall out of sync with.
+    CITIES: Tuple[WeatherCity, ...] = WEATHER_CITIES
 
     # FR-0.7 harvester cadence: orderbook depth snapshots are HOURLY only —
     # the per-tick path must never issue per-market orderbook calls.
@@ -62,7 +128,6 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.kalshi = None
         self.nws = None
         self.metar = None
-        self.nws_stations = ["KNYC", "KLAX", "KMDW", "KMIA"]
         # Epoch of last hourly orderbook-depth snapshot (0 = snapshot on
         # first tick so a fresh session records a baseline immediately).
         self._last_depth_snapshot = 0.0
@@ -73,17 +138,38 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             "weather": WeatherArbitrageStrategyV2(),
         }
 
+    # ── Config accessors ────────────────────────────────────────────
+
+    @property
+    def settlement_stations(self) -> List[str]:
+        """Observation stations for the configured cities (FR-1.4)."""
+        return [c.settlement_station for c in self.CITIES]
+
+    @property
+    def station_timezones(self) -> Dict[str, str]:
+        return {c.settlement_station: c.timezone for c in self.CITIES}
+
+    # Back-compat alias: the orchestrator and older call sites referred to
+    # ``nws_stations``. It now resolves to the settlement stations.
+    @property
+    def nws_stations(self) -> List[str]:
+        return self.settlement_stations
+
     def setup(self, kalshi, coinbase=None, nws=None, **kwargs):
         self.kalshi = kalshi
         if nws:
             self.nws = nws
         else:
             nws_ua = os.getenv("NWS_USER_AGENT", "(MoneyPrinter, test@example.com)")
-            self.nws = NWSProvider(nws_ua, self.nws_stations)
+            self.nws = NWSProvider(nws_ua, self.settlement_stations)
             self.nws.connect()
 
-        # Initialize METAR provider for faster temperature observations
-        self.metar = METARProvider(self.METAR_STATIONS)
+        # METAR is the primary observation source: probed 2026-07-25, the
+        # Aviation Weather Center serves all four settlement stations —
+        # including the non-airport KNYC — hourly with T-group (0.1C) precision.
+        self.metar = METARProvider(
+            self.settlement_stations, station_timezones=self.station_timezones
+        )
         self.metar.connect()
 
     def tick(self, risk_manager, dashboard) -> List[TradeSignal]:
@@ -97,16 +183,19 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             time.time() - self._last_depth_snapshot
         ) >= self.DEPTH_SNAPSHOT_INTERVAL_S
 
-        for metar_station in self.METAR_STATIONS:
-            kalshi_ticker = self.METAR_TO_KALSHI.get(metar_station)
-            nws_station = self.METAR_TO_NWS.get(metar_station)
+        for city in self.CITIES:
+            # PRD FR-1.4: ONE station per city — the one Kalshi settles on.
+            # Observations, the running daily max, and the forecast all come
+            # from it. There is no airport proxy anywhere in this path.
+            station = city.settlement_station
+            kalshi_ticker = city.kalshi_series
             active_ticker = None
 
             # --- Fetch observation data (METAR primary, NWS fallback) ---
             obs_data = None
             if self.metar:
                 try:
-                    metar_data = self.metar.fetch_latest(metar_station)
+                    metar_data = self.metar.fetch_latest(station)
                     if metar_data:
                         age = (
                             time.time() - metar_data.timestamp.timestamp()
@@ -114,19 +203,22 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                             else 0
                         )
                         logger.info(
-                            f"[Weather] Using METAR data for {metar_station} (age: {age:.0f}s)"
+                            f"[Weather] Using METAR data for settlement station "
+                            f"{station} ({city.key}, age: {age:.0f}s)"
                         )
                         obs_data = metar_data
                 except Exception as e:
-                    logger.warning(
-                        f"[Weather] METAR fetch failed for {metar_station}: {e}"
-                    )
+                    logger.warning(f"[Weather] METAR fetch failed for {station}: {e}")
 
-            # Fallback to NWS if METAR unavailable
-            if obs_data is None and nws_station:
-                nws_data = self.nws.fetch_latest(nws_station)
+            # Fallback to NWS observations at the SAME settlement station
+            nws_data = None
+            if obs_data is None:
+                nws_data = self.nws.fetch_latest(station)
                 if nws_data:
-                    logger.info(f"[Weather] Falling back to NWS data for {nws_station}")
+                    logger.info(
+                        f"[Weather] Falling back to NWS observations for "
+                        f"settlement station {station} ({city.key})"
+                    )
                     obs_data = nws_data
 
             if not obs_data:
@@ -134,19 +226,28 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
             # --- Merge NWS forecast into METAR observation ---
             # Strategies expect extra["forecast"] for 7-day forecast data.
-            # METAR gives better temps; NWS gives forecasts.
-            if obs_data is not None and nws_station:
-                nws_forecast_data = self.nws.fetch_latest(nws_station)
-                if nws_forecast_data and nws_forecast_data.extra:
-                    forecast = nws_forecast_data.extra.get("forecast")
-                    if forecast and (
-                        not obs_data.extra or not obs_data.extra.get("forecast")
-                    ):
-                        if obs_data.extra is None:
-                            obs_data.extra = {}
-                        obs_data.extra["forecast"] = forecast
+            # METAR gives better temps; NWS gives forecasts. Both are keyed to
+            # the settlement station.
+            if nws_data is None:
+                nws_data = self.nws.fetch_latest(station)
+            if nws_data and nws_data.extra:
+                forecast = nws_data.extra.get("forecast")
+                if forecast and (
+                    not obs_data.extra or not obs_data.extra.get("forecast")
+                ):
+                    if obs_data.extra is None:
+                        obs_data.extra = {}
+                    obs_data.extra["forecast"] = forecast
 
-            temp = obs_data.extra.get("temperature_f") if obs_data.extra else None
+            # City provenance travels with the observation (FR-1.4 / FR-3.2).
+            if obs_data.extra is None:
+                obs_data.extra = {}
+            obs_data.extra["city_key"] = city.key
+            obs_data.extra["settlement_station"] = station
+            obs_data.extra["station_timezone"] = city.timezone
+            obs_data.extra["kalshi_series"] = kalshi_ticker
+
+            temp = obs_data.extra.get("temperature_f")
 
             # --- FR-0.7 harvester: record the FULL ladder, fuse the active ---
             # One /markets list call per city per tick supplies bid/ask/no-side/
@@ -154,11 +255,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             k_data = None
             if self.kalshi and kalshi_ticker:
                 try:
-                    max_t = (
-                        obs_data.extra.get("max_temp_today_f")
-                        if obs_data.extra
-                        else None
-                    )
+                    max_t = obs_data.extra.get("max_temp_today_f")
                     ladder = self._ladder_for_city(kalshi_ticker)
 
                     if ladder:
@@ -182,6 +279,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                                 last=m.price,
                                 volume=m.volume,
                             )
+                            # FR-1.1 bracket semantics ride along with the row.
+                            # dashboard.update_price(**kwargs) stashes unknown
+                            # keys in latest_prices[...]["extra"] and writes
+                            # only its fixed columns, so this is additive.
+                            for field in BRACKET_FIELDS:
+                                kwargs[field] = m_extra.get(field)
                             if m.symbol == active_ticker and max_t is not None:
                                 kwargs["max_temp"] = max_t
                             dashboard.update_price(
@@ -228,6 +331,18 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         obs_data.ask = k_data.ask
                         obs_data.price = k_data.price
                         obs_data.symbol = active_ticker
+
+                        # PRD FR-1.1: carry the active market's bracket
+                        # semantics so strategies can call
+                        # parse_bracket_spec(symbol, data.extra) directly.
+                        # Fields are written even when absent (as None) so a
+                        # stale bracket can never survive onto a new market —
+                        # parse_bracket_spec then raises BracketSpecError
+                        # rather than letting anything infer direction from
+                        # the ticker string. All pre-existing keys are kept.
+                        k_extra = k_data.extra or {}
+                        for field in BRACKET_FIELDS:
+                            obs_data.extra[field] = k_extra.get(field)
                 except Exception as e:
                     logger.error(f"[Weather] Market Fetch Fail ({kalshi_ticker}): {e}")
 
@@ -239,7 +354,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 kalshi_market_price = obs_data.price
 
             if temp:
-                dashboard.update_price(f"{kalshi_ticker or metar_station} (F)", temp)
+                dashboard.update_price(f"{kalshi_ticker or station} (F)", temp)
                 if active_ticker and kalshi_market_price and kalshi_market_price > 0:
                     risk_manager.update_market_data(active_ticker, kalshi_market_price)
                     risk_manager.exchange.update_market_price(
@@ -248,10 +363,10 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 elif active_ticker:
                     risk_manager.update_market_data(active_ticker, temp)
                 else:
-                    risk_manager.update_market_data(f"TEMP_{metar_station}", temp)
+                    risk_manager.update_market_data(f"TEMP_{station}", temp)
 
             # Extract PoP for Precip
-            forecasts = (obs_data.extra.get("forecast") or []) if obs_data.extra else []
+            forecasts = obs_data.extra.get("forecast") or []
             pop_prob = 0.0
             for period in forecasts:
                 if period.get("isDaytime"):
@@ -264,7 +379,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 if active_ticker:
                     risk_manager.update_market_data(f"{active_ticker}_PRECIP", pop_prob)
                 else:
-                    risk_manager.update_market_data(f"PRECIP_{metar_station}", pop_prob)
+                    risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
 
             # Waterfall: ML Weather → V2 rule-based fallback
             # 2026-06-03 review: weather trading disabled (fee bleed). Price/data
@@ -322,10 +437,21 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             try:
                 book = self.kalshi.fetch_orderbook(m.symbol, depth=3)
                 if book and (book.get("yes") or book.get("no")):
-                    dashboard.record_depth(m.symbol, book, last_price=m.price)
+                    m_extra = m.extra or {}
+                    # FR-1.1: a depth row carries the same bracket semantics
+                    # as its quote rows, so the hourly book is settleable
+                    # offline without joining back to a MARKET_DATA row.
+                    dashboard.record_depth(
+                        m.symbol,
+                        book,
+                        last_price=m.price,
+                        strike_type=m_extra.get("strike_type"),
+                        floor_strike=m_extra.get("floor_strike"),
+                        cap_strike=m_extra.get("cap_strike"),
+                    )
             except Exception as e:
                 logger.warning(f"[Weather] Depth snapshot failed for {m.symbol}: {e}")
             time.sleep(0.15)
 
     def get_symbols(self) -> List[str]:
-        return list(self.STATION_MAP.values())
+        return [c.kalshi_series for c in self.CITIES]

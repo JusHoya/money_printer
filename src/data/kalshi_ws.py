@@ -6,6 +6,41 @@ state, exposing updates via the standard DataProvider interface as well as
 optional callbacks.
 
 Sprint 1 / Task 1.2 — Money Printer V2
+
+FR-1.1 bracket semantics over the WebSocket
+-------------------------------------------
+Investigated against Kalshi's published AsyncAPI specification
+(https://docs.kalshi.com/asyncapi.yaml, retrieved 2026-07-25). Finding:
+
+* The quote/print channels this provider consumes — ``orderbook_delta``,
+  ``orderbook_snapshot``, ``ticker`` and ``trade`` — carry **no** market
+  metadata at all. Their payloads are ``market_ticker`` plus price/quantity
+  levels; ``strike_type``, ``floor_strike``, ``cap_strike`` and
+  ``yes_sub_title`` appear nowhere in them.
+* Those fields DO travel on the separate ``market_lifecycle_v2`` channel:
+  inside ``msg.additional_metadata`` on an ``event_type=created`` message, and
+  as top-level ``msg`` fields on ``event_type=metadata_updated``.
+
+So the feed can be made FR-1.1 compliant, but only by subscribing to a second
+channel — and even then a market that was created *before* this process
+connected emits no lifecycle message, so its semantics can never arrive over
+the socket alone. That gap is closed by :meth:`seed_bracket_metadata`, which
+lets the REST ``KalshiProvider`` (the FR-1.1 authority) prime the cache for
+markets already open.
+
+Consequently this module does BOTH:
+
+1. subscribes to ``market_lifecycle_v2`` and caches every bracket field it
+   sees, merging it into ``MarketData.extra`` on ``fetch_latest``; and
+2. when a market's bracket semantics are still unknown, logs loudly (ERROR,
+   once per ticker) and emits the bracket keys as ``None`` — which makes
+   ``src.core.bracket_payoff.parse_bracket_spec`` raise ``BracketSpecError``
+   downstream. It never emits a silently bracket-blind ``MarketData``, and it
+   never infers direction from the ticker string.
+
+This provider is currently unwired from the runtime (PRD §4 A2 mothballed the
+latency-arb strategy that used it); websocket feeds are a named revival
+precondition, so it is kept FR-1.1 compliant rather than left to rot.
 """
 
 import base64
@@ -26,6 +61,15 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from src.core.interfaces import DataProvider, MarketData
 
 logger = logging.getLogger("kalshi_ws")
+
+# PRD FR-1.1. The only fields any code may use to establish contract
+# direction. Mirrors src.bots.weather_bot.BRACKET_FIELDS.
+BRACKET_FIELDS = ("strike_type", "floor_strike", "cap_strike", "yes_sub_title")
+
+# Channels carrying market metadata, per the AsyncAPI spec (see module
+# docstring). Quote channels carry none.
+LIFECYCLE_CHANNELS = ("market_lifecycle_v2", "market_lifecycle")
+QUOTE_CHANNELS = ("orderbook_delta", "trade")
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +210,15 @@ class KalshiWebSocket(DataProvider):
         # Recent trades (ticker -> deque[_TradeRecord])
         self._trades: Dict[str, deque] = {}
         self._trades_lock = threading.Lock()
+
+        # FR-1.1 bracket semantics (ticker -> {strike_type, floor_strike,
+        # cap_strike, yes_sub_title}), sourced from market_lifecycle_v2
+        # messages and/or seeded from the REST provider. Never inferred.
+        self._brackets: Dict[str, Dict[str, object]] = {}
+        self._brackets_lock = threading.Lock()
+        # Tickers we have already screamed about, so the ERROR is one per
+        # market rather than one per tick.
+        self._bracket_warned: set = set()
 
         # Subscriptions requested by caller (persisted across reconnects)
         self._subscribed_tickers: List[str] = []
@@ -322,6 +375,18 @@ class KalshiWebSocket(DataProvider):
             for t in recent
         ]
 
+        extra = {
+            "source": "kalshi_ws",
+            "no_bid": snap["no_bid"],
+            "no_ask": snap["no_ask"],
+            "recent_trades": recent_trades,
+        }
+        # PRD FR-1.1: bracket semantics on every emitted MarketData. Unknown
+        # semantics are emitted as None (never guessed, never omitted) after a
+        # loud one-shot ERROR, so parse_bracket_spec fails downstream instead
+        # of anything inferring direction from the ticker.
+        extra.update(self._bracket_extra(symbol))
+
         return MarketData(
             symbol=symbol,
             timestamp=snap["updated_at"] or datetime.now(),
@@ -329,13 +394,51 @@ class KalshiWebSocket(DataProvider):
             volume=snap["volume"],
             bid=snap["yes_bid"],
             ask=snap["yes_ask"],
-            extra={
-                "source": "kalshi_ws",
-                "no_bid": snap["no_bid"],
-                "no_ask": snap["no_ask"],
-                "recent_trades": recent_trades,
-            },
+            extra=extra,
         )
+
+    # ------------------------------------------------------------------
+    # FR-1.1 bracket metadata
+    # ------------------------------------------------------------------
+
+    def seed_bracket_metadata(self, ticker: str, fields: dict) -> None:
+        """Prime a market's bracket semantics from an authoritative source.
+
+        The WebSocket only announces metadata at lifecycle events, so a market
+        opened before this process connected never sends one. Callers holding
+        REST data (``KalshiProvider`` — the FR-1.1 authority) seed it here.
+        Only the four bracket fields are stored; anything else is ignored.
+        """
+        if not ticker or not fields:
+            return
+        known = {k: fields.get(k) for k in BRACKET_FIELDS if fields.get(k) is not None}
+        if not known:
+            return
+        with self._brackets_lock:
+            self._brackets.setdefault(ticker, {}).update(known)
+        self._bracket_warned.discard(ticker)
+
+    def get_bracket_metadata(self, ticker: str) -> Optional[dict]:
+        """Cached bracket fields for *ticker*, or ``None`` if unknown."""
+        with self._brackets_lock:
+            cached = self._brackets.get(ticker)
+            return dict(cached) if cached else None
+
+    def _bracket_extra(self, ticker: str) -> dict:
+        """The four FR-1.1 keys for ``MarketData.extra``, always all present."""
+        cached = self.get_bracket_metadata(ticker) or {}
+        if not cached.get("strike_type"):
+            if ticker not in self._bracket_warned:
+                self._bracket_warned.add(ticker)
+                logger.error(
+                    "[KalshiWS] %s: no bracket semantics known (no "
+                    "market_lifecycle_v2 message seen and no REST seed). "
+                    "Emitting strike_type=None so bracket_payoff aborts; "
+                    "call seed_bracket_metadata() from the REST provider "
+                    "before trading this market (PRD FR-1.1).",
+                    ticker,
+                )
+        return {k: cached.get(k) for k in BRACKET_FIELDS}
 
     # ------------------------------------------------------------------
     # Subscription management
@@ -382,8 +485,13 @@ class KalshiWebSocket(DataProvider):
             self._send_unsubscribe(market_tickers)
 
     def _send_subscribe(self, tickers: List[str]) -> None:
-        """Send subscribe commands for orderbook_delta and trade channels."""
-        for channel in ("orderbook_delta", "trade"):
+        """Subscribe to quotes, trades, AND market lifecycle.
+
+        ``market_lifecycle_v2`` is the only channel that carries the FR-1.1
+        bracket fields (see module docstring); without it the feed could never
+        establish contract direction from the API.
+        """
+        for channel in QUOTE_CHANNELS + ("market_lifecycle_v2",):
             msg = {
                 "id": self._next_msg_id(),
                 "cmd": "subscribe",
@@ -396,7 +504,7 @@ class KalshiWebSocket(DataProvider):
             logger.info("[KalshiWS] Subscribed to %s for %s", channel, tickers)
 
     def _send_unsubscribe(self, tickers: List[str]) -> None:
-        for channel in ("orderbook_delta", "trade"):
+        for channel in QUOTE_CHANNELS + ("market_lifecycle_v2",):
             msg = {
                 "id": self._next_msg_id(),
                 "cmd": "unsubscribe",
@@ -547,14 +655,18 @@ class KalshiWebSocket(DataProvider):
             self._handle_response(msg)
             return
 
-        # Channel data
-        channel = msg.get("channel")
+        # Channel data. Kalshi tags data frames with ``type`` (e.g.
+        # "market_lifecycle_v2"); ``channel`` is used by some proxies, so
+        # accept either.
+        channel = msg.get("channel") or msg_type
         if channel == "orderbook_delta":
             self._handle_orderbook_delta(msg)
         elif channel == "orderbook_snapshot":
             self._handle_orderbook_snapshot(msg)
         elif channel == "trade":
             self._handle_trade(msg)
+        elif channel in LIFECYCLE_CHANNELS:
+            self._handle_market_lifecycle(msg)
         elif msg_type == "error":
             logger.error("[KalshiWS] Server error: %s", msg)
         else:
@@ -680,6 +792,53 @@ class KalshiWebSocket(DataProvider):
         if self.on_orderbook_update:
             self._safe_callback(self.on_orderbook_update, ticker, snap)
 
+    def _handle_market_lifecycle(self, msg: dict) -> None:
+        """Cache FR-1.1 bracket semantics from a market_lifecycle_v2 message.
+
+        Two shapes carry them (AsyncAPI spec, 2026-07-25):
+
+        * ``event_type=created``  -> fields live under ``additional_metadata``
+        * ``event_type=metadata_updated`` -> fields are top-level in ``msg``
+
+        Both are merged into the per-ticker cache; a field absent from an
+        update never clears a previously known value, and nothing here reads
+        the ticker string.
+        """
+        data = msg.get("msg", msg.get("data", {})) or {}
+        ticker = data.get("market_ticker")
+        if not ticker:
+            return
+
+        meta = data.get("additional_metadata") or {}
+        fields = {}
+        for key in BRACKET_FIELDS:
+            # Top-level wins (metadata_updated is the more recent truth).
+            value = data.get(key)
+            if value is None:
+                value = meta.get(key)
+            if value is not None:
+                fields[key] = value
+
+        if not fields:
+            logger.debug(
+                "[KalshiWS] %s lifecycle event %s carried no bracket fields",
+                ticker,
+                data.get("event_type"),
+            )
+            return
+
+        self.seed_bracket_metadata(ticker, fields)
+        logger.info(
+            "[KalshiWS] %s bracket semantics from lifecycle (%s): %s",
+            ticker,
+            data.get("event_type"),
+            {
+                k: fields[k]
+                for k in ("strike_type", "floor_strike", "cap_strike")
+                if k in fields
+            },
+        )
+
     def _handle_trade(self, msg: dict) -> None:
         """Process a trade notification message."""
         data = msg.get("data", msg.get("msg", {}))
@@ -800,6 +959,11 @@ class KalshiWebSocket(DataProvider):
 
     def stop(self) -> None:
         """Shut down the WebSocket connection and background thread."""
+        if not hasattr(self, "_stop_event"):
+            # __del__ can reach a partially-constructed instance (e.g. one
+            # built with __new__ in a test, or a failed __init__); raising
+            # from a deallocator is noise, not information.
+            return
         logger.info("[KalshiWS] Stopping ...")
         self._stop_event.set()
         if self._ws:

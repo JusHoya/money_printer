@@ -21,7 +21,15 @@ from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
 
 
 def _make_weather_market(source: str, symbol: str = "KXHIGHNY-26MAR19-T80"):
-    """Build a MarketData with the given source and a forecast that triggers a signal."""
+    """Build a MarketData with the given source and a forecast that triggers a signal.
+
+    PRD FR-1.1 (2026-07-25): ``strike_type``/``floor_strike``/``cap_strike`` are
+    the API fields the strategy now derives contract direction from, and
+    ``KalshiProvider`` puts them on every market's ``extra``. They are added
+    here so the fixture matches production data; no assertion changed. T80 is
+    modelled as ``greater`` floor=80 ("81 or above"), the reading the old
+    suffix parser intended.
+    """
     return MarketData(
         symbol=symbol,
         timestamp=datetime(2026, 3, 19, 12, 0, 0),
@@ -35,6 +43,9 @@ def _make_weather_market(source: str, symbol: str = "KXHIGHNY-26MAR19-T80"):
             "max_temp_today_f": 79.0,
             "forecast": [{"isDaytime": True, "temperature": 85}],
             "metar_age_seconds": 120,
+            "strike_type": "greater",
+            "floor_strike": 80,
+            "cap_strike": None,
         },
     )
 

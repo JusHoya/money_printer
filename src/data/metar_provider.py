@@ -6,15 +6,54 @@ Provides higher-precision temperature data (0.1C / 0.18F) than NWS (whole degree
 by parsing the T-group from raw METAR remarks.
 
 API: https://aviationweather.gov/api/data/metar (no auth required, 100 req/min)
+
+PRD FR-1.4 — settlement stations only
+-------------------------------------
+Kalshi daily-high markets settle on a specific NWS station, not on "the city":
+
+    KXHIGHNY  -> KNYC (New York City, Central Park)
+    KXHIGHCHI -> KMDW (Chicago Midway Airport)
+    KXHIGHLAX -> KLAX (Los Angeles International Airport)
+    KXHIGHMIA -> KMIA (Miami International Airport)
+
+The non-settlement airports KJFK and KORD were previously observed instead of
+KNYC/KMDW; the microclimate difference is 3-5F, which poisons every
+observation-driven decision. Probed live on 2026-07-25, the Aviation Weather
+Center API serves all four settlement stations -- including the non-airport
+KNYC -- with hourly reports carrying full T-group precision, so METAR is the
+primary observation source for every settlement station.
+
+Running daily max is computed over the STATION'S LOCAL CALENDAR DAY. A UTC
+calendar day is wrong for every US city and catastrophically wrong for
+Los Angeles, where UTC midnight falls at 17:00 local -- mid heating window.
+A station with no configured timezone yields no daily max at all (``None``)
+rather than a silently wrong UTC-day figure.
 """
 
+import math
 import re
 import requests
 from datetime import datetime, timezone
 from typing import Dict, Optional, List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core.interfaces import DataProvider, MarketData
 from src.utils.logger import logger
+
+# Settlement stations for the tracked Kalshi KXHIGH* series (PRD FR-1.4).
+SETTLEMENT_STATIONS: List[str] = ["KNYC", "KMDW", "KLAX", "KMIA"]
+
+# IANA timezone per settlement station, verified against the ``timeZone`` field
+# of https://api.weather.gov/stations/<id> on 2026-07-25. Used only when the
+# provider is constructed standalone; ``WeatherBot`` passes the authoritative
+# map from its city config. ``tests/test_weather_stations.py`` asserts the two
+# never drift apart.
+DEFAULT_STATION_TIMEZONES: Dict[str, str] = {
+    "KNYC": "America/New_York",
+    "KMDW": "America/Chicago",
+    "KLAX": "America/Los_Angeles",
+    "KMIA": "America/New_York",
+}
 
 # Regex for T-group in METAR remarks: T{sign1}{temp3}{sign2}{dew3}
 # sign: 0=positive, 1=negative; temp3/dew3: tenths of degrees C
@@ -53,15 +92,35 @@ class METARProvider(DataProvider):
     """
 
     BASE_URL = "https://aviationweather.gov/api/data/metar"
-    DEFAULT_STATIONS = ["KJFK", "KLAX", "KORD", "KMIA"]
+    # PRD FR-1.4: settlement stations only. Airport proxies are not defaults.
+    DEFAULT_STATIONS = list(SETTLEMENT_STATIONS)
     REQUEST_TIMEOUT = 10
+    # Upper bound on the history window requested for a running daily max.
+    # A local calendar day never exceeds 25h (DST fall-back) + slack.
+    MAX_DAILY_MAX_HOURS = 30
 
-    def __init__(self, stations: Optional[List[str]] = None):
+    def __init__(
+        self,
+        stations: Optional[List[str]] = None,
+        station_timezones: Optional[Dict[str, str]] = None,
+    ):
         """
-        :param stations: List of ICAO station IDs. Defaults to KJFK, KLAX, KORD, KMIA.
+        :param stations: List of ICAO station IDs. Defaults to the four
+            settlement stations (KNYC, KMDW, KLAX, KMIA).
+        :param station_timezones: ``{station_id: IANA timezone}``. Required for
+            the running daily max, which is computed over the station's local
+            calendar day. Defaults to :data:`DEFAULT_STATION_TIMEZONES`; a
+            station absent from the map gets no daily max rather than a
+            UTC-day approximation.
         """
         self.stations = stations or self.DEFAULT_STATIONS
+        self.station_timezones = dict(
+            station_timezones
+            if station_timezones is not None
+            else DEFAULT_STATION_TIMEZONES
+        )
         self._connected = False
+        self._tz_cache: Dict[str, Optional[ZoneInfo]] = {}
 
     # ── DataProvider interface ──────────────────────────────────────
 
@@ -86,7 +145,7 @@ class METARProvider(DataProvider):
         """
         Fetch the most recent METAR observation for a single station.
 
-        :param symbol: ICAO station ID (e.g. 'KJFK')
+        :param symbol: ICAO settlement station ID (e.g. 'KNYC')
         :returns: MarketData with temperature and metadata in extra dict, or None on failure.
         """
         observations = self._api_call(ids=symbol, hours=2)
@@ -211,7 +270,7 @@ class METARProvider(DataProvider):
             now_utc = datetime.now(timezone.utc)
             age_seconds = (now_utc - obs_dt).total_seconds() if obs_dt else 0.0
 
-            # -- Daily max temperature --
+            # -- Daily max temperature (station's LOCAL calendar day) --
             daily_max_f = self._get_daily_max_temp(station)
             if daily_max_f is None:
                 daily_max_f = temp_f
@@ -220,6 +279,13 @@ class METARProvider(DataProvider):
 
             # -- SPECI count (special reports indicate rapid changes) --
             speci_count = self._count_recent_reports(station)
+
+            tz = self._timezone_for(station)
+            local_day = (
+                datetime.now(timezone.utc).astimezone(tz).date().isoformat()
+                if tz
+                else None
+            )
 
             return MarketData(
                 symbol=station,
@@ -236,6 +302,11 @@ class METARProvider(DataProvider):
                     "source": "live_metar",
                     "forecast": None,
                     "station_name": station,
+                    # PRD FR-1.4 provenance: which station this observation is
+                    # from and which calendar day the running max covers.
+                    "settlement_station": station,
+                    "station_timezone": self.station_timezones.get(station),
+                    "max_temp_local_day": local_day,
                     "metar_raw": raw_metar,
                     "observation_time": (
                         obs_dt.isoformat() if obs_dt else report_time_str
@@ -252,21 +323,83 @@ class METARProvider(DataProvider):
             )
             return None
 
+    def _timezone_for(self, station_id: str) -> Optional[ZoneInfo]:
+        """Resolve the station's IANA timezone, or ``None`` if unconfigured."""
+        if station_id in self._tz_cache:
+            return self._tz_cache[station_id]
+
+        tz_name = self.station_timezones.get(station_id)
+        tz: Optional[ZoneInfo] = None
+        if tz_name:
+            try:
+                tz = ZoneInfo(tz_name)
+            except (ZoneInfoNotFoundError, ValueError, KeyError) as e:
+                logger.error(
+                    f"[METARProvider] Bad timezone {tz_name!r} for {station_id}: {e}"
+                )
+        self._tz_cache[station_id] = tz
+        return tz
+
+    def _hours_covering_local_day(self, tz: ZoneInfo) -> int:
+        """History window (hours) that spans local midnight through now."""
+        now_utc = datetime.now(timezone.utc)
+        local_now = now_utc.astimezone(tz)
+        local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elapsed_h = (now_utc - local_midnight.astimezone(timezone.utc)).total_seconds()
+        # +2h of slack: the API's window is inclusive of partial hours and the
+        # oldest report of the local day may sit just inside the boundary.
+        hours = int(math.ceil(elapsed_h / 3600.0)) + 2
+        return max(2, min(hours, self.MAX_DAILY_MAX_HOURS))
+
+    @staticmethod
+    def _observation_datetime(obs: dict) -> Optional[datetime]:
+        """UTC datetime of an observation: ``obsTime`` epoch, else reportTime.
+
+        ``reportTime`` is normalised to the top of the hour by the API, so the
+        epoch ``obsTime`` is preferred whenever present.
+        """
+        epoch = obs.get("obsTime")
+        if epoch is not None:
+            try:
+                return datetime.fromtimestamp(float(epoch), tz=timezone.utc)
+            except (TypeError, ValueError, OSError, OverflowError):
+                pass
+        return METARProvider._parse_report_time(obs.get("reportTime", ""))
+
     def _get_daily_max_temp(self, station_id: str) -> Optional[float]:
+        """Highest temperature recorded so far in the station's LOCAL day.
+
+        PRD FR-1.4: the running daily max must be scoped to the settlement
+        station's own local calendar day, because that is the day Kalshi
+        settles on. A UTC day boundary lands at 17:00 local in Los Angeles and
+        20:00 local in New York, which would reset the running max in the
+        middle of (or just after) the heating window.
+
+        Returns ``None`` -- never a UTC-day approximation -- when the station
+        has no configured timezone, so callers degrade to "current temperature
+        is the best-known max" instead of consuming a wrong-day figure.
         """
-        Fetch up to 24 hours of observations and return the highest temperature
-        recorded today (UTC). Uses T-group precision where available.
-        """
-        observations = self._api_call(ids=station_id, hours=24, retries=0)
+        tz = self._timezone_for(station_id)
+        if tz is None:
+            logger.error(
+                f"[METARProvider] No timezone configured for {station_id}; "
+                f"refusing to compute a UTC-day daily max (PRD FR-1.4)"
+            )
+            return None
+
+        hours = self._hours_covering_local_day(tz)
+        observations = self._api_call(ids=station_id, hours=hours, retries=0)
         if not observations:
             return None
 
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        local_today = datetime.now(timezone.utc).astimezone(tz).date()
         max_c = None
 
         for obs in observations:
-            report_time_str = obs.get("reportTime", "")
-            if not report_time_str.startswith(today_str):
+            obs_dt = self._observation_datetime(obs)
+            if obs_dt is None:
+                continue
+            if obs_dt.astimezone(tz).date() != local_today:
                 continue
 
             raw = obs.get("rawOb", "")
@@ -308,21 +441,26 @@ class METARProvider(DataProvider):
         """
         Parse the reportTime string from the METAR API.
 
-        Expected format: '2026-04-02 14:53:00' (UTC).
+        The live API returns '2026-07-25T16:00:00.000Z'; older responses used
+        '2026-04-02 14:53:00'. Both are UTC and both are accepted.
         """
         if not report_time_str:
             return None
         try:
-            # Try ISO-ish format the API returns
+            # Legacy space-separated form
             dt = datetime.strptime(report_time_str, "%Y-%m-%d %H:%M:%S")
             return dt.replace(tzinfo=timezone.utc)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
         try:
-            # Fallback: full ISO with timezone
-            dt = datetime.fromisoformat(report_time_str)
+            # Current form: ISO-8601, trailing 'Z' for UTC (fromisoformat only
+            # accepts 'Z' from Python 3.11, so normalise it explicitly).
+            normalised = str(report_time_str).strip()
+            if normalised.endswith("Z"):
+                normalised = normalised[:-1] + "+00:00"
+            dt = datetime.fromisoformat(normalised)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt
-        except ValueError:
+        except (ValueError, TypeError):
             return None

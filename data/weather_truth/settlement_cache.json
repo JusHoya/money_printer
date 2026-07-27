@@ -1,0 +1,666 @@
+{
+  "markets": {
+    "KXHIGHCHI-26JUL22-B69.5": {
+      "cap_strike": 70,
+      "expiration_value": "73.00",
+      "floor_strike": 69,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL22-B71.5": {
+      "cap_strike": 72,
+      "expiration_value": "73.00",
+      "floor_strike": 71,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL22-B73.5": {
+      "cap_strike": 74,
+      "expiration_value": "73.00",
+      "floor_strike": 73,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL22-B75.5": {
+      "cap_strike": 76,
+      "expiration_value": "73.00",
+      "floor_strike": 75,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL22-T69": {
+      "cap_strike": 69,
+      "expiration_value": "73.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHCHI-26JUL22-T76": {
+      "cap_strike": null,
+      "expiration_value": "73.00",
+      "floor_strike": 76,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHCHI-26JUL23-B76.5": {
+      "cap_strike": 77,
+      "expiration_value": "77.00",
+      "floor_strike": 76,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL23-B78.5": {
+      "cap_strike": 79,
+      "expiration_value": "77.00",
+      "floor_strike": 78,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL23-B80.5": {
+      "cap_strike": 81,
+      "expiration_value": "77.00",
+      "floor_strike": 80,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL23-B82.5": {
+      "cap_strike": 83,
+      "expiration_value": "77.00",
+      "floor_strike": 82,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL23-T76": {
+      "cap_strike": 76,
+      "expiration_value": "77.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHCHI-26JUL23-T83": {
+      "cap_strike": null,
+      "expiration_value": "77.00",
+      "floor_strike": 83,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHCHI-26JUL24-B78.5": {
+      "cap_strike": 79,
+      "expiration_value": "79.00",
+      "floor_strike": 78,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL24-B80.5": {
+      "cap_strike": 81,
+      "expiration_value": "79.00",
+      "floor_strike": 80,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL24-B82.5": {
+      "cap_strike": 83,
+      "expiration_value": "79.00",
+      "floor_strike": 82,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL24-B84.5": {
+      "cap_strike": 85,
+      "expiration_value": "79.00",
+      "floor_strike": 84,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHCHI-26JUL24-T78": {
+      "cap_strike": 78,
+      "expiration_value": "79.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHCHI-26JUL24-T85": {
+      "cap_strike": null,
+      "expiration_value": "79.00",
+      "floor_strike": 85,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHLAX-26JUL22-B75.5": {
+      "cap_strike": 76,
+      "expiration_value": "77.00",
+      "floor_strike": 75,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL22-B77.5": {
+      "cap_strike": 78,
+      "expiration_value": "77.00",
+      "floor_strike": 77,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL22-B79.5": {
+      "cap_strike": 80,
+      "expiration_value": "77.00",
+      "floor_strike": 79,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL22-B81.5": {
+      "cap_strike": 82,
+      "expiration_value": "77.00",
+      "floor_strike": 81,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL22-T75": {
+      "cap_strike": 75,
+      "expiration_value": "77.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHLAX-26JUL22-T82": {
+      "cap_strike": null,
+      "expiration_value": "77.00",
+      "floor_strike": 82,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHLAX-26JUL23-B79.5": {
+      "cap_strike": 80,
+      "expiration_value": "80.00",
+      "floor_strike": 79,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL23-B81.5": {
+      "cap_strike": 82,
+      "expiration_value": "80.00",
+      "floor_strike": 81,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL23-B83.5": {
+      "cap_strike": 84,
+      "expiration_value": "80.00",
+      "floor_strike": 83,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL23-B85.5": {
+      "cap_strike": 86,
+      "expiration_value": "80.00",
+      "floor_strike": 85,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL23-T79": {
+      "cap_strike": 79,
+      "expiration_value": "80.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHLAX-26JUL23-T86": {
+      "cap_strike": null,
+      "expiration_value": "80.00",
+      "floor_strike": 86,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHLAX-26JUL24-B80.5": {
+      "cap_strike": 81,
+      "expiration_value": "78.00",
+      "floor_strike": 80,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL24-B82.5": {
+      "cap_strike": 83,
+      "expiration_value": "78.00",
+      "floor_strike": 82,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL24-B84.5": {
+      "cap_strike": 85,
+      "expiration_value": "78.00",
+      "floor_strike": 84,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL24-B86.5": {
+      "cap_strike": 87,
+      "expiration_value": "78.00",
+      "floor_strike": 86,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHLAX-26JUL24-T80": {
+      "cap_strike": 80,
+      "expiration_value": "78.00",
+      "floor_strike": null,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHLAX-26JUL24-T87": {
+      "cap_strike": null,
+      "expiration_value": "78.00",
+      "floor_strike": 87,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHMIA-26JUL22-B88.5": {
+      "cap_strike": 89,
+      "expiration_value": "92.00",
+      "floor_strike": 88,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL22-B90.5": {
+      "cap_strike": 91,
+      "expiration_value": "92.00",
+      "floor_strike": 90,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL22-B92.5": {
+      "cap_strike": 93,
+      "expiration_value": "92.00",
+      "floor_strike": 92,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL22-B94.5": {
+      "cap_strike": 95,
+      "expiration_value": "92.00",
+      "floor_strike": 94,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL22-T88": {
+      "cap_strike": 88,
+      "expiration_value": "92.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHMIA-26JUL22-T95": {
+      "cap_strike": null,
+      "expiration_value": "92.00",
+      "floor_strike": 95,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHMIA-26JUL23-B88.5": {
+      "cap_strike": 89,
+      "expiration_value": "93.00",
+      "floor_strike": 88,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL23-B90.5": {
+      "cap_strike": 91,
+      "expiration_value": "93.00",
+      "floor_strike": 90,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL23-B92.5": {
+      "cap_strike": 93,
+      "expiration_value": "93.00",
+      "floor_strike": 92,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL23-B94.5": {
+      "cap_strike": 95,
+      "expiration_value": "93.00",
+      "floor_strike": 94,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL23-T88": {
+      "cap_strike": 88,
+      "expiration_value": "93.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHMIA-26JUL23-T95": {
+      "cap_strike": null,
+      "expiration_value": "93.00",
+      "floor_strike": 95,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHMIA-26JUL24-B87.5": {
+      "cap_strike": 88,
+      "expiration_value": "93.00",
+      "floor_strike": 87,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL24-B89.5": {
+      "cap_strike": 90,
+      "expiration_value": "93.00",
+      "floor_strike": 89,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL24-B91.5": {
+      "cap_strike": 92,
+      "expiration_value": "93.00",
+      "floor_strike": 91,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL24-B93.5": {
+      "cap_strike": 94,
+      "expiration_value": "93.00",
+      "floor_strike": 93,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHMIA-26JUL24-T87": {
+      "cap_strike": 87,
+      "expiration_value": "93.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHMIA-26JUL24-T94": {
+      "cap_strike": null,
+      "expiration_value": "93.00",
+      "floor_strike": 94,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHNY-26JUL22-B84.5": {
+      "cap_strike": 85,
+      "expiration_value": "85.00",
+      "floor_strike": 84,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL22-B86.5": {
+      "cap_strike": 87,
+      "expiration_value": "85.00",
+      "floor_strike": 86,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL22-B88.5": {
+      "cap_strike": 89,
+      "expiration_value": "85.00",
+      "floor_strike": 88,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL22-B90.5": {
+      "cap_strike": 91,
+      "expiration_value": "85.00",
+      "floor_strike": 90,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL22-T84": {
+      "cap_strike": 84,
+      "expiration_value": "85.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHNY-26JUL22-T91": {
+      "cap_strike": null,
+      "expiration_value": "85.00",
+      "floor_strike": 91,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHNY-26JUL23-B79.5": {
+      "cap_strike": 80,
+      "expiration_value": "79.00",
+      "floor_strike": 79,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL23-B81.5": {
+      "cap_strike": 82,
+      "expiration_value": "79.00",
+      "floor_strike": 81,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL23-B83.5": {
+      "cap_strike": 84,
+      "expiration_value": "79.00",
+      "floor_strike": 83,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL23-B85.5": {
+      "cap_strike": 86,
+      "expiration_value": "79.00",
+      "floor_strike": 85,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL23-T79": {
+      "cap_strike": 79,
+      "expiration_value": "79.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHNY-26JUL23-T86": {
+      "cap_strike": null,
+      "expiration_value": "79.00",
+      "floor_strike": 86,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    },
+    "KXHIGHNY-26JUL24-B81.5": {
+      "cap_strike": 82,
+      "expiration_value": "83.00",
+      "floor_strike": 81,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL24-B83.5": {
+      "cap_strike": 84,
+      "expiration_value": "83.00",
+      "floor_strike": 83,
+      "result": "yes",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL24-B85.5": {
+      "cap_strike": 86,
+      "expiration_value": "83.00",
+      "floor_strike": 85,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL24-B87.5": {
+      "cap_strike": 88,
+      "expiration_value": "83.00",
+      "floor_strike": 87,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "between"
+    },
+    "KXHIGHNY-26JUL24-T81": {
+      "cap_strike": 81,
+      "expiration_value": "83.00",
+      "floor_strike": null,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "less"
+    },
+    "KXHIGHNY-26JUL24-T88": {
+      "cap_strike": null,
+      "expiration_value": "83.00",
+      "floor_strike": 88,
+      "result": "no",
+      "status": "finalized",
+      "strike_type": "greater"
+    }
+  },
+  "truth": {
+    "KLAX|2026-07-22": {
+      "fetched_at": "2026-07-25T16:33:42Z",
+      "high": 77,
+      "product": "202607230827-KLOX-CDUS46-CLILAX",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KLAX&year=2026"
+    },
+    "KLAX|2026-07-23": {
+      "fetched_at": "2026-07-25T16:33:42Z",
+      "high": 80,
+      "product": "202607240833-KLOX-CDUS46-CLILAX",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KLAX&year=2026"
+    },
+    "KLAX|2026-07-24": {
+      "fetched_at": "2026-07-25T16:33:42Z",
+      "high": 78,
+      "product": "202607250848-KLOX-CDUS46-CLILAX",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KLAX&year=2026"
+    },
+    "KMDW|2026-07-22": {
+      "fetched_at": "2026-07-25T16:33:41Z",
+      "high": 73,
+      "product": "202607230646-KLOT-CDUS43-CLIMDW",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KMDW&year=2026"
+    },
+    "KMDW|2026-07-23": {
+      "fetched_at": "2026-07-25T16:33:41Z",
+      "high": 77,
+      "product": "202607240634-KLOT-CDUS43-CLIMDW",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KMDW&year=2026"
+    },
+    "KMDW|2026-07-24": {
+      "fetched_at": "2026-07-25T16:33:41Z",
+      "high": 79,
+      "product": "202607250633-KLOT-CDUS43-CLIMDW",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KMDW&year=2026"
+    },
+    "KMIA|2026-07-22": {
+      "fetched_at": "2026-07-25T16:35:20Z",
+      "high": 92,
+      "product": "202607230824-KMFL-CDUS42-CLIMIA",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026"
+    },
+    "KMIA|2026-07-23": {
+      "fetched_at": "2026-07-25T16:35:20Z",
+      "high": 93,
+      "product": "202607240822-KMFL-CDUS42-CLIMIA",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026"
+    },
+    "KMIA|2026-07-24": {
+      "fetched_at": "2026-07-25T16:35:20Z",
+      "high": 93,
+      "product": "202607250822-KMFL-CDUS42-CLIMIA",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026"
+    },
+    "KNYC|2026-07-22": {
+      "fetched_at": "2026-07-25T16:43:24Z",
+      "high": 85,
+      "product": "202607230619-KOKX-CDUS41-CLINYC",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KNYC&year=2026"
+    },
+    "KNYC|2026-07-23": {
+      "fetched_at": "2026-07-25T16:43:24Z",
+      "high": 79,
+      "product": "202607240626-KOKX-CDUS41-CLINYC",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KNYC&year=2026"
+    },
+    "KNYC|2026-07-24": {
+      "fetched_at": "2026-07-25T17:53:21Z",
+      "high": 83,
+      "product": "202607250626-KOKX-CDUS41-CLINYC",
+      "source": "iem_cli",
+      "source_url": "https://mesonet.agron.iastate.edu/json/cli.py?station=KNYC&year=2026"
+    }
+  }
+}

@@ -42,12 +42,18 @@ def test_on_close_callback_receives_strategy_name():
         closed.append(pos)
 
     ex = SimulatedExchange(on_close=capture)
+    # 2026-07-25 (PRD FR-1.5): was KXHIGHNY-26FEB19-T44. TAKE_PROFIT is now
+    # refused on a weather bracket (held to settlement), so the reason and the
+    # symbol have to agree. strategy_name propagation is symbol-agnostic and
+    # the assertions below are unchanged; the weather families are covered by
+    # tests/test_weather_lifecycle.py and test_weather_settlement_semantics.py.
     ex.open_position(
-        symbol="KXHIGHNY-26FEB19-T44",
+        symbol="KXBTC15M-26FEB19-44",
         side="buy",
         entry_price=0.35,
         quantity=5,
         strategy_name="Trend Catcher V2",
+        strike=64000.0,
     )
 
     # Use TAKE_PROFIT reason (non-binary settlement) — passes exit_price directly
@@ -63,12 +69,17 @@ def test_on_close_callback_receives_strategy_name():
 def test_strategy_name_preserved_in_closed_trades():
     """Verify closed_trades record includes strategy_name for historical review."""
     ex = SimulatedExchange()
+    # 2026-07-25 (PRD FR-1.5): was KXHIGHCHI-26FEB19-T35. EARLY_SETTLEMENT
+    # invents a 1.00/0.00 outcome from a price peg, which is exactly NOT
+    # "settle via FR-1.2", so it is now refused on a weather bracket. The
+    # closed_trades bookkeeping under test is symbol-agnostic.
     ex.open_position(
-        symbol="KXHIGHCHI-26FEB19-T35",
+        symbol="KXBTC15M-26FEB19-35",
         side="sell",
         entry_price=0.20,
         quantity=3,
         strategy_name="LongShot Fader",
+        strike=64000.0,
     )
     pos = ex.positions[0]
     ex._close_position(pos, 0.01, reason="EARLY_SETTLEMENT")

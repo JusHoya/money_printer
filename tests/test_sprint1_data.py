@@ -232,9 +232,9 @@ class TestMockProviders:
     def test_mock_nws_produces_weather_data(self):
         from src.data.mock_providers import MockNWSProvider
 
-        provider = MockNWSProvider(stations=["KJFK"], base_temp_f=55.0, seed=42)
+        provider = MockNWSProvider(stations=["KNYC"], base_temp_f=55.0, seed=42)
         provider.connect()
-        md = provider.fetch_latest("KJFK")
+        md = provider.fetch_latest("KNYC")
         assert md is not None
         assert "temperature_f" in (md.extra or {})
         temp = md.extra["temperature_f"]
@@ -243,9 +243,9 @@ class TestMockProviders:
     def test_mock_nws_has_forecast(self):
         from src.data.mock_providers import MockNWSProvider
 
-        provider = MockNWSProvider(stations=["KJFK"], seed=42)
+        provider = MockNWSProvider(stations=["KNYC"], seed=42)
         provider.connect()
-        md = provider.fetch_latest("KJFK")
+        md = provider.fetch_latest("KNYC")
         forecast = (md.extra or {}).get("forecast", [])
         assert len(forecast) >= 1
 

@@ -97,13 +97,28 @@ def _make_rm(**kwargs):
 
 
 class TestFinalPartialCloseRemoval:
+    """FR-0.6 shell removal on the profit-target ladder.
+
+    2026-07-25 (PRD FR-1.5): these three tests drove the ladder with a
+    ``KXHIGHNY-*`` symbol. A weather bracket is now held to settlement and the
+    hard guard refuses every profit-target close on one, so the ladder can only
+    be exercised on a family that still uses it — the symbol is now a crypto
+    15m ticker. The FR-0.6 behaviour under test (final partial close empties
+    the position, fires on_close once, and never persists a qty-0 shell) is
+    unchanged and fully covered; the weather side of the same path is covered
+    by tests/test_weather_lifecycle.py::
+    test_partial_profit_target_close_is_refused_at_the_hard_guard.
+    """
+
+    LADDER_SYMBOL = "KXBTC15M-TEST-30"
+
     def test_qty1_final_partial_close_removes_position(self, tmp_path):
         """The final partial close IS the close: position gone, on_close
         fired exactly once, journal (closed_trades) row written."""
         state_file = tmp_path / "state.json"
         closes = []
         ex = SimulatedExchange(on_close=closes.append, state_file=state_file)
-        ex.open_position("KXHIGHNY-TEST-T75", "buy", 0.40, 1)
+        ex.open_position(self.LADDER_SYMBOL, "buy", 0.40, 1)
         pos = ex.positions[0]
 
         # +0.16 move hits the first target; exit_qty=max(1,0)=1 empties it.
@@ -122,7 +137,7 @@ class TestFinalPartialCloseRemoval:
         state_file = tmp_path / "state.json"
         closes = []
         ex = SimulatedExchange(on_close=closes.append, state_file=state_file)
-        ex.open_position("KXHIGHNY-TEST-T75", "buy", 0.40, 10)
+        ex.open_position(self.LADDER_SYMBOL, "buy", 0.40, 10)
         pos = ex.positions[0]
 
         # First target (+0.15, 50%): partial close, position stays.
@@ -143,7 +158,7 @@ class TestFinalPartialCloseRemoval:
         shell that a restart resurrected."""
         state_file = tmp_path / "state.json"
         ex = SimulatedExchange(on_close=lambda p: None, state_file=state_file)
-        ex.open_position("KXHIGHNY-TEST-T75", "buy", 0.40, 1)
+        ex.open_position(self.LADDER_SYMBOL, "buy", 0.40, 1)
         ex._check_profit_targets(ex.positions[0], 0.56)
 
         with open(state_file, "r", encoding="utf-8") as fh:

@@ -25,9 +25,17 @@ def make_exchange(tmp_path: Path, **kwargs) -> SimulatedExchange:
 
 
 def open_dummy_position(
-    exc: SimulatedExchange, symbol: str = "KXHIGH-NY-50", qty: int = 5
+    exc: SimulatedExchange, symbol: str = "KXBTC15M-NY-50", qty: int = 5
 ):
-    """Open a minimal position that avoids real fee-calculator network calls."""
+    """Open a minimal position that avoids real fee-calculator network calls.
+
+    2026-07-25 (PRD FR-1.5): the dummy symbols in this file were ``KXHIGH-*``,
+    which ``is_weather_symbol`` now treats as a weather bracket held to
+    settlement — ``close_all``'s synthetic ``TEST_CLOSE`` reason is refused on
+    one, so no state would ever be written. Persistence is symbol-agnostic, so
+    the dummies are crypto tickers and every assertion in this file is
+    unchanged.
+    """
     exc.open_position(
         symbol=symbol,
         side="buy",
@@ -88,8 +96,8 @@ def test_exchange_state_persists_across_restart(tmp_path):
     state_file = exc1._state_file
 
     # Open two positions, do NOT close — we want them to survive as open
-    open_dummy_position(exc1, symbol="KXHIGH-NY-55", qty=3)
-    open_dummy_position(exc1, symbol="KXHIGH-NY-60", qty=7)
+    open_dummy_position(exc1, symbol="KXBTC15M-NY-55", qty=3)
+    open_dummy_position(exc1, symbol="KXBTC15M-NY-60", qty=7)
 
     # Manually save state (simulates a graceful close or restart checkpoint)
     exc1._save_state()
@@ -195,7 +203,7 @@ def test_atomic_write_never_leaves_partial_file(tmp_path):
 def test_datetime_fields_survive_serialization(tmp_path):
     """open_time and expiration_time must round-trip through JSON as datetimes."""
     exc1 = make_exchange(tmp_path)
-    open_dummy_position(exc1, symbol="KXHIGH-NY-55", qty=2)
+    open_dummy_position(exc1, symbol="KXBTC15M-NY-55", qty=2)
     exc1._save_state()
 
     exc2 = SimulatedExchange(state_file=exc1._state_file)

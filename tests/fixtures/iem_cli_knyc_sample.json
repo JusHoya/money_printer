@@ -1,0 +1,103 @@
+{
+  "results": [
+    {
+      "station": "KNYC",
+      "valid": "2026-04-10",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/x",
+      "product": "202604120600-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": null,
+      "low": 50,
+      "high_time": null,
+      "low_time": "541 AM",
+      "precip": 0.0
+    },
+    {
+      "station": "KNYC",
+      "valid": "2026-04-11",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/x",
+      "product": "202604120600-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": "M",
+      "low": 50,
+      "high_time": null,
+      "low_time": "541 AM",
+      "precip": 0.0
+    },
+    {
+      "station": "KNYC",
+      "valid": "2026-07-20",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/202607210620-KOKX-CDUS41-CLINYC",
+      "product": "202607210620-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": 81,
+      "low": 63,
+      "high_time": "433 PM",
+      "low_time": "541 AM",
+      "precip": 0.0
+    },
+    {
+      "station": "KNYC",
+      "valid": "2026-07-21",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/202607220627-KOKX-CDUS41-CLINYC",
+      "product": "202607220627-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": 81,
+      "low": 71,
+      "high_time": "1242 PM",
+      "low_time": "1031 PM",
+      "precip": 0.24
+    },
+    {
+      "station": "KNYC",
+      "valid": "2026-07-22",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/202607230619-KOKX-CDUS41-CLINYC",
+      "product": "202607230619-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": 85,
+      "low": 71,
+      "high_time": "502 PM",
+      "low_time": "1159 PM",
+      "precip": 0.0
+    },
+    {
+      "station": "KNYC",
+      "valid": "2026-07-23",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/202607240626-KOKX-CDUS41-CLINYC",
+      "product": "202607240626-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": 79,
+      "low": 64,
+      "high_time": "446 PM",
+      "low_time": "608 AM",
+      "precip": 0.0
+    },
+    {
+      "station": "KNYC",
+      "valid": "2026-07-24",
+      "state": "NY",
+      "wfo": "OKX",
+      "link": "/api/1/nwstext/202607250626-KOKX-CDUS41-CLINYC",
+      "product": "202607250626-KOKX-CDUS41-CLINYC",
+      "name": "NEW YORK CITY",
+      "high": 83,
+      "low": 65,
+      "high_time": "128 PM",
+      "low_time": "539 AM",
+      "precip": 0.0
+    }
+  ],
+  "generated_at": "2026-07-25T16:00:00Z"
+}

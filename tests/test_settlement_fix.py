@@ -36,8 +36,13 @@ def _open_and_settle(
     entry_price=0.50,
     quantity=10,
     reason="EXPIRATION",
+    **bracket,
 ):
-    """Open a position then settle it via the binary path; return the pos."""
+    """Open a position then settle it via the binary path; return the pos.
+
+    ``**bracket`` forwards the PRD FR-1.1 API fields (``strike_type``,
+    ``floor_strike``, ``cap_strike``) that weather settlement now requires.
+    """
     ex = _fresh_exchange()
     ex.open_position(
         symbol,
@@ -46,6 +51,7 @@ def _open_and_settle(
         quantity,
         strategy_name="test",
         strike=strike,
+        **bracket,
     )
     pos = ex.positions[0]
     ex._close_position(pos, final_spot_price, reason=reason)
@@ -170,32 +176,104 @@ def test_missing_strike_15m_crypto_failsafe_no():
 
 
 # ---------------------------------------------------------------------------
-# 8-9. Weather T/B prefix preserved (cached strike None, suffix IS the strike).
+# 8-9. Weather now settles through the FR-1.2 payoff module.
+#
+# REWRITTEN 2026-07-25 (PRD FR-1.1/FR-1.2). These two tests previously asserted
+# the suffix-letter semantics: "T => above-bucket, YES iff temp >= 86" and
+# "B => below-bucket, YES iff temp <= 86.5". The 2026-07-24 review probed the
+# live API and found both are wrong -- KXHIGHNY-26JUL25-B86.5 is
+# "86 to 87" (a two-sided `between` bracket, not a below-bucket) and T-tickers
+# are `greater` OR `less` depending on the API's strike_type. The behaviour
+# these asserted was the defect, so the assertions move to the verified
+# semantics; the full golden table lives in tests/test_bracket_payoff.py and
+# tests/test_weather_settlement_semantics.py.
 # ---------------------------------------------------------------------------
-def test_weather_above_T_prefix_preserved():
-    """KXHIGHNY-...-T86 (above-bucket): YES iff temp >= 86."""
+def test_weather_greater_settles_from_api_strike_type():
+    """KXHIGHNY-...-T86, strike_type='greater', floor=86 => YES iff temp >= 87."""
     pos_yes = _open_and_settle(
-        "KXHIGHNY-26JUN04-T86", strike=None, final_spot_price=87.0
+        "KXHIGHNY-26JUN04-T86",
+        strike=None,
+        final_spot_price=87.0,
+        strike_type="greater",
+        floor_strike=86,
     )
     assert pos_yes["exit_price"] == 1.00
 
     pos_no = _open_and_settle(
-        "KXHIGHNY-26JUN04-T86", strike=None, final_spot_price=85.0
+        "KXHIGHNY-26JUN04-T86",
+        strike=None,
+        final_spot_price=85.0,
+        strike_type="greater",
+        floor_strike=86,
     )
     assert pos_no["exit_price"] == 0.00
 
-
-def test_weather_below_B_prefix_preserved():
-    """KXHIGHNY-...-B86.5 (below-bucket): YES iff temp <= 86.5."""
-    pos_yes = _open_and_settle(
-        "KXHIGHNY-26JUN04-B86.5", strike=None, final_spot_price=84.0
+    # The off-by-one that the suffix parser got wrong: `greater` floor=86 is
+    # "87 or above", so 86 itself settles NO.
+    pos_boundary = _open_and_settle(
+        "KXHIGHNY-26JUN04-T86",
+        strike=None,
+        final_spot_price=86.0,
+        strike_type="greater",
+        floor_strike=86,
     )
-    assert pos_yes["exit_price"] == 1.00  # below bucket, temp <= 86.5
+    assert pos_boundary["exit_price"] == 0.00
 
-    pos_no = _open_and_settle(
-        "KXHIGHNY-26JUN04-B86.5", strike=None, final_spot_price=88.0
+
+def test_weather_between_bracket_settles_on_both_bounds():
+    """KXHIGHNY-...-B86.5 is `between` floor=86 cap=87 -- "86 to 87", not "<= 86.5"."""
+    pos_inside = _open_and_settle(
+        "KXHIGHNY-26JUN04-B86.5",
+        strike=None,
+        final_spot_price=86.0,
+        strike_type="between",
+        floor_strike=86,
+        cap_strike=87,
     )
-    assert pos_no["exit_price"] == 0.00
+    assert pos_inside["exit_price"] == 1.00
+
+    # 84F is BELOW the band. The old below-bucket reading paid YES here.
+    pos_below = _open_and_settle(
+        "KXHIGHNY-26JUN04-B86.5",
+        strike=None,
+        final_spot_price=84.0,
+        strike_type="between",
+        floor_strike=86,
+        cap_strike=87,
+    )
+    assert pos_below["exit_price"] == 0.00
+
+    pos_above = _open_and_settle(
+        "KXHIGHNY-26JUN04-B86.5",
+        strike=None,
+        final_spot_price=88.0,
+        strike_type="between",
+        floor_strike=86,
+        cap_strike=87,
+    )
+    assert pos_above["exit_price"] == 0.00
+
+
+def test_weather_less_bracket_is_not_inverted():
+    """KXHIGHNY-...-T80 is `less` cap=80 -- "79 or below", the case the suffix
+    parser evaluated exactly backwards."""
+    pos_cold = _open_and_settle(
+        "KXHIGHNY-26JUN04-T80",
+        strike=None,
+        final_spot_price=75.0,
+        strike_type="less",
+        cap_strike=80,
+    )
+    assert pos_cold["exit_price"] == 1.00
+
+    pos_hot = _open_and_settle(
+        "KXHIGHNY-26JUN04-T80",
+        strike=None,
+        final_spot_price=85.0,
+        strike_type="less",
+        cap_strike=80,
+    )
+    assert pos_hot["exit_price"] == 0.00
 
 
 # ---------------------------------------------------------------------------
@@ -231,13 +309,22 @@ def test_precip_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# 12. Unparseable suffix with no cached strike => fail-safe NO, no crash.
+# 12. Weather with no bracket spec => SETTLEMENT_UNRESOLVED, no crash.
+#
+# REWRITTEN 2026-07-25 (PRD FR-1.2). This test previously asserted that an
+# unparseable weather ticker fail-safed to NO (exit 0.00). Under FR-1.2 that is
+# no longer the safe default: ~90% of a weather ladder settles NO, so a
+# fabricated NO looks plausible and silently books a full loss on the one
+# bracket that actually paid. Missing semantics now closes FLAT at the entry
+# price with reason SETTLEMENT_UNRESOLVED (abort-on-missing-critical-input).
+# The crypto fail-safe-to-NO behaviour above is unchanged.
 # ---------------------------------------------------------------------------
-def test_unparseable_suffix_failsafe():
-    """A weather-like ticker whose suffix has no digits and no cached strike
-    must fail safe to NO without raising."""
+def test_weather_without_bracket_spec_closes_unresolved():
+    """A weather ticker with no cached strike_type must not invent an outcome."""
     pos = _open_and_settle("KXHIGHNY-26JUN04-XYZ", strike=None, final_spot_price=85.0)
-    assert pos["exit_price"] == 0.00
+    assert pos["exit_price"] == 0.50  # entry price -- a flat, zero-PnL close
+    assert pos["reason"] == "SETTLEMENT_UNRESOLVED"
+    assert "settlement_outcome" not in pos
 
 
 if __name__ == "__main__":

@@ -532,7 +532,14 @@ class _CycleRiskStub:
         self.loss_cooldown = {}
         self.last_trade_time = None
         self.active_positions = 0
-        self.exchange = SimpleNamespace(positions=[], _next_id=1, on_close=None)
+        # PRD FR-1.5 (2026-07-25): the rollover now calls real exchange methods
+        # (_close_position / _bump_next_id / _save_state) to hold weather
+        # positions across the boundary, so the hand-rolled SimpleNamespace
+        # stub is replaced by a real, non-persisting SimulatedExchange. No
+        # assertion in this file changes — the cycle tests keep an empty book.
+        from src.core.matching_engine import SimulatedExchange
+
+        self.exchange = SimulatedExchange(state_file=None)
         self.balance_updates = []
 
     def _save_win_rates(self):

@@ -260,6 +260,11 @@ class BacktestEngine:
             signal.limit_price,
             strategy_name=strategy_name,
             contract_side=contract_side,
+            # PRD FR-1.2: replayed weather signals settle through
+            # bracket_payoff, same as live ones.
+            strike_type=getattr(signal, "strike_type", None),
+            floor_strike=getattr(signal, "floor_strike", None),
+            cap_strike=getattr(signal, "cap_strike", None),
         )
         # Immediately close for settlement
         if self.risk_manager.exchange.positions:

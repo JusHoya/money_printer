@@ -10,9 +10,27 @@ import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _opt_float(value: Any) -> Optional[float]:
+    """``float(value)`` or ``None`` — never a silent 0.0.
+
+    Settlement strikes are legitimately absent (a ``greater`` bracket has no
+    ``cap_strike``). Coercing that absence to 0.0 would rebuild a YES band of
+    ``[floor+1, 0]`` — empty — and read as "settles NO always", which is the
+    class of silent wrongness PRD FR-1.1 exists to remove.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -40,6 +58,33 @@ class TradeOutcome:
     # Required for empirical bias retune — paired with actual settled high
     # to compute: bias_sample = actual_high - nws_forecast_high
     nws_forecast_high: Optional[float] = None
+
+    # ------------------------------------------------------------------
+    # Settlement provenance (PRD FR-1.2/FR-1.3, Phase 1 exit criterion 5)
+    # ------------------------------------------------------------------
+    # Exit criterion 5 requires a settled weather position to be verifiable
+    # "in exchange state AND journal". Before these fields the journal kept
+    # only ``exit_price=1.0`` and ``close_reason="EXPIRATION"``, which says
+    # the position settled YES but not *against what truth* nor *under which
+    # rule* — so FR-1.3's reconcile (sim settlement vs IEM CLI high) had
+    # nothing in the journal to join truth to trades.
+    #
+    # ``SimulatedExchange._weather_exit_price`` stamps the first four onto the
+    # position at settlement; the bracket fields are cached on the position at
+    # open time by ``open_position`` (FR-1.1). All are Optional and default to
+    # None: crypto-era and pre-Phase-1 journal rows simply lack them, and
+    # ``load_all`` filters unknown keys, so old files keep loading unchanged.
+    settlement_high: Optional[float] = None  # CLI daily high (°F) that settled it
+    settlement_rule: Optional[str] = None  # e.g. "86 to 87" — BracketSpec.describe()
+    settlement_outcome: Optional[str] = None  # "yes" | "no"
+    settlement_error: Optional[str] = None  # why SETTLEMENT_UNRESOLVED, if it was
+    # The bracket the outcome was computed from (BracketSpec.as_dict()).
+    # Kept as its own field so a journal row can be replayed straight through
+    # ``bracket_payoff.settles_yes`` without re-fetching the market.
+    settlement_spec: Optional[Dict[str, Any]] = None
+    strike_type: Optional[str] = None
+    floor_strike: Optional[float] = None
+    cap_strike: Optional[float] = None
 
     @classmethod
     def from_position(cls, position: dict) -> "TradeOutcome":
@@ -82,6 +127,15 @@ class TradeOutcome:
         if model_prob is not None and entry_price > 0:
             edge = float(model_prob) - entry_price
 
+        # Settlement provenance (FR-1.2). ``settlement_spec`` is the exact
+        # BracketSpec the exchange settled against; the flat strike_type/
+        # floor/cap fall back to the values cached on the position at open
+        # time so a position closed for any other reason (or one that never
+        # reached settlement) still records what it was a bet ON.
+        spec = position.get("settlement_spec")
+        spec = dict(spec) if isinstance(spec, dict) else None
+        spec_or_pos = spec if spec is not None else position
+
         return cls(
             symbol=position.get("symbol", ""),
             strategy_name=position.get("strategy_name", "Unknown"),
@@ -113,7 +167,53 @@ class TradeOutcome:
             nws_forecast_high=float(ml["nws_forecast_high"])
             if ml.get("nws_forecast_high") is not None
             else None,
+            settlement_high=_opt_float(position.get("settlement_high")),
+            settlement_rule=position.get("settlement_rule"),
+            settlement_outcome=position.get("settlement_outcome"),
+            settlement_error=position.get("settlement_error"),
+            settlement_spec=spec,
+            strike_type=spec_or_pos.get("strike_type"),
+            floor_strike=_opt_float(spec_or_pos.get("floor_strike")),
+            cap_strike=_opt_float(spec_or_pos.get("cap_strike")),
         )
+
+    # ------------------------------------------------------------------
+    # Settlement helpers (FR-1.3 reconcile joins truth to trades via these)
+    # ------------------------------------------------------------------
+
+    def bracket_spec(self):
+        """Rebuild the :class:`~src.core.bracket_payoff.BracketSpec`.
+
+        :raises BracketSpecError: when the row predates FR-1.1 and carries no
+            bracket semantics. Callers must treat that as "unreconcilable",
+            never as a direction they may guess from the ticker.
+        """
+        from src.core.bracket_payoff import parse_bracket_spec
+
+        return parse_bracket_spec(
+            self.symbol,
+            self.settlement_spec
+            or {
+                "strike_type": self.strike_type,
+                "floor_strike": self.floor_strike,
+                "cap_strike": self.cap_strike,
+            },
+        )
+
+    def is_settlement_consistent(self, truth_high: Optional[float] = None) -> bool:
+        """Does the recorded outcome match ``settles_yes`` at the truth high?
+
+        ``truth_high`` defaults to the high the exchange settled against, so
+        with no argument this checks the row's *internal* consistency; pass
+        the IEM CLI value to check it against external ground truth (FR-1.3).
+        """
+        from src.core.bracket_payoff import settles_yes
+
+        high = truth_high if truth_high is not None else self.settlement_high
+        if high is None or self.settlement_outcome is None:
+            return False
+        expected = "yes" if settles_yes(self.bracket_spec(), high) else "no"
+        return expected == str(self.settlement_outcome).strip().lower()
 
 
 class TradeJournal:

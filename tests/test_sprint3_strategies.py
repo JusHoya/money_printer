@@ -59,8 +59,18 @@ def make_weather_market(
     max_temp_today_f=79.0,
     nws_high=82,
     timestamp=None,
+    strike_type="greater",
+    floor_strike=80,
+    cap_strike=None,
 ):
-    """Create a MarketData that looks like fused weather data."""
+    """Create a MarketData that looks like fused weather data.
+
+    PRD FR-1.1 (2026-07-25): the bracket fields are what the strategies now
+    read contract direction from (``KalshiProvider`` supplies them on every
+    market). The default models the existing ``-T80`` symbol as ``greater``
+    floor=80 — "81 or above" — which is the reading the removed suffix parser
+    was trying to express. No assertion in this file changed.
+    """
     if timestamp is None:
         timestamp = datetime(2026, 3, 19, 12, 0, 0)
     return MarketData(
@@ -76,6 +86,9 @@ def make_weather_market(
             "max_temp_today_f": max_temp_today_f,
             "forecast": [{"isDaytime": True, "temperature": nws_high}],
             "hrrr_forecast": nws_high + 1,
+            "strike_type": strike_type,
+            "floor_strike": floor_strike,
+            "cap_strike": cap_strike,
         },
     )
 
