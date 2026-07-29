@@ -21,6 +21,17 @@ data/weather_truth/*.csv         text eol=lf
 # Phase 2 (FR-2.4): recorded ladder history replayed by the go/no-go report.
 data/ladders/**                  text eol=lf
 
+# Phase 2 (FR-2.4): the go/no-go artifact and the calibration reports state
+# that they regenerate byte-identically from committed inputs, and a red-team
+# verified it. That claim is only true if the checkout matches what the
+# generator writes. The generators emit LF, so without this pin a Windows
+# checkout holds CRLF and the reproducibility check fails on a file nobody
+# touched — the same trap already pinned for data/ above, on the artifact that
+# actually carries the phase verdict.
+reports/phase2/*.md              text eol=lf
+reports/phase2/*.json            text eol=lf
+reports/phase2/*.txt             text eol=lf
+
 # Recorded fixtures that tests hash or byte-compare.
 tests/fixtures/**                text eol=lf
 
