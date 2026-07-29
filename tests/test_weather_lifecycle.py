@@ -43,6 +43,7 @@ import os
 import sys
 import types
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -379,9 +380,45 @@ def test_survivor_settles_at_expiry_through_fr12_payoff(exchange, truth, logs):
     assert any("FR-1.2 SETTLED" in m for m in logs.messages(logging.INFO))
 
 
+def _live_settlement_day():
+    """Ticker and cache key for a settlement day still running at the station.
+
+    The PENDING/OVERDUE branch is chosen by how long ago the settlement day
+    *closed* (:data:`SETTLEMENT_TRUTH_GRACE_HOURS`, 36 h), so a hardcoded date
+    in the ticker decays: it starts inside the window and silently crosses out
+    of it as the calendar advances, turning this test red days later for a
+    reason that has nothing to do with the code. The module-level
+    ``WEATHER_TICKER`` is fixed at 2026-07-25 and did exactly that.
+
+    Deriving the day from the station's own clock keeps
+    ``hours_since_settlement_day_close`` negative, so the PENDING branch is
+    pinned on whatever day the suite runs.
+    ``test_overdue_truth_escalates_to_error`` pins the OVERDUE branch with a
+    deliberately long-past date, so both sides stay covered.
+    """
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    ticker = f"KXHIGHNY-{today.strftime('%y%b%d').upper()}-B86.5"
+    return ticker, f"KNYC|{today.isoformat()}"
+
+
 def test_expired_weather_holds_open_until_truth_is_published(exchange, truth, logs):
     """Unpublished CLI product -> hold and retry, never a guessed outcome."""
-    weather = _open_weather(exchange, entry=0.40, qty=10)
+    ticker, station_day = _live_settlement_day()
+
+    # Fixture precondition: this test only exercises the PENDING branch while
+    # the settlement day is inside the grace window. Assert it rather than
+    # assume it, so a regression in the age helper surfaces here as a clear
+    # precondition failure instead of as a confusing missing-log assertion.
+    age_h = weather_settlement.hours_since_settlement_day_close(ticker)
+    assert (
+        age_h is not None and age_h <= weather_settlement.SETTLEMENT_TRUTH_GRACE_HOURS
+    ), (
+        f"fixture precondition: {ticker} must be within the "
+        f"{weather_settlement.SETTLEMENT_TRUTH_GRACE_HOURS}h grace window "
+        f"(age {age_h})"
+    )
+
+    weather = _open_weather(exchange, ticker=ticker, entry=0.40, qty=10)
     weather["expiration_time"] = datetime.now() - timedelta(minutes=5)
 
     exchange.update_market("TEMP_KNYC", 92.0)  # observed max is NOT truth
@@ -394,8 +431,9 @@ def test_expired_weather_holds_open_until_truth_is_published(exchange, truth, lo
     # The observed 92F must not have leaked in as a substitute for the CLI high.
     assert "settlement_high" not in weather
 
-    # Truth arrives on the next sweep; the same position now settles.
-    truth.publish(WEATHER_STATION_DAY, 92)
+    # Truth arrives on the next sweep; the same position now settles. The key
+    # must match the ticker's own settlement day, not the module constant.
+    truth.publish(station_day, 92)
     exchange.update_market("TEMP_KNYC", 92.0)
 
     assert weather not in exchange.positions

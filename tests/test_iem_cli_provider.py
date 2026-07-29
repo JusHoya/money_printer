@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -88,6 +88,77 @@ class FakeSession:
 def fixture_payload():
     with open(FIXTURE_PATH, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+# ---------------------------------------------------------------------------
+# Clock-derived fixtures
+#
+# The provider fetches the archive one *year* at a time, and two of its rules
+# are relative to the wall clock rather than absolute:
+#
+#   * ``_snapshot_is_fresh`` short-circuits to True for any year below the
+#     current UTC year ("a closed year cannot gain rows"), so the current-year
+#     TTL is unreachable for a hardcoded past year;
+#   * ``_fetch_year_live`` rejects any row outside the year it asked for.
+#
+# A fixture pinned to a literal 2026 therefore stops meaning what it meant the
+# moment the UTC year rolls over. These helpers derive the year -- and the
+# adjacent-day pair -- from the same clock the provider reads.
+# ---------------------------------------------------------------------------
+def _current_archive_year() -> int:
+    """The year the provider still treats as open, read from its own clock."""
+    return datetime.now(timezone.utc).year
+
+
+def _open_year_payload(station: str = "KNYC"):
+    """``(year, payload)`` for the currently-open archive year.
+
+    The newest row deliberately carries no maximum (the literal ``"M"`` the
+    archive uses), so a caller that must skip highless rows is actually
+    exercised by the last row rather than by one buried in the middle.
+    """
+    year = _current_archive_year()
+    rows = [
+        {
+            "station": station,
+            "valid": f"{year}-03-01",
+            "high": 55,
+            "low": 40,
+            "product": f"{year}03020600-KOKX-CDUS41-CLINYC",
+        },
+        {
+            "station": station,
+            "valid": f"{year}-03-02",
+            "high": 61,
+            "low": 44,
+            "product": f"{year}03030600-KOKX-CDUS41-CLINYC",
+        },
+        {
+            "station": station,
+            "valid": f"{year}-03-03",
+            "high": "M",
+            "low": 45,
+            "product": f"{year}03040600-KOKX-CDUS41-CLINYC",
+        },
+    ]
+    return year, {"results": rows, "generated_at": "x"}
+
+
+def _adjacent_days_inside_one_archive_year():
+    """``(previous_day, target_day)``: adjacent days in ONE archive year.
+
+    ``(today - 1 day, today)`` is the natural pair for "yesterday's product is
+    filed, today's is not issued yet" -- but on 1 January UTC those two days sit
+    in different archive years, the provider asks for the new year, and the
+    fixture's previous-year row is refused outright by the cross-year guard.
+    The lookup then raises where the test expects ``None``. Shifting the target
+    to 2 January on that one day keeps both rows inside the year the provider
+    will request; the target stays far inside ``pending_lookback_days``, so the
+    "could still be published" re-check branch is still the one under test.
+    """
+    today = datetime.now(timezone.utc).date()
+    target = today if (today.month, today.day) != (1, 1) else today + timedelta(days=1)
+    return target - timedelta(days=1), target
 
 
 @pytest.fixture()
@@ -229,22 +300,35 @@ def test_second_call_is_served_from_cache(provider_factory, fixture_payload):
     assert blob["_meta"]["source_url"]
 
 
-def test_in_memory_year_cache_expires_like_the_disk_cache(
-    provider_factory, fixture_payload
-):
+def test_in_memory_year_cache_expires_like_the_disk_cache(provider_factory):
     """FINDING A (the half that made the miss permanent).
 
     The process-lifetime memo had no expiry, so a long-lived provider -- and
     ``weather_settlement`` holds a module-level singleton -- answered every
     later lookup from the first snapshot it ever took, whatever the on-disk TTL
     said. Memory and disk now share one freshness rule.
+
+    The year is read from the clock, not hardcoded: ``current_year_ttl`` only
+    governs a year the provider still considers open, so a literal ``2026``
+    here would have turned into the *closed*-year case -- one call, cached
+    forever -- from 2027-01-01 onward, failing permanently for no code change.
     """
+    year, payload = _open_year_payload()
     provider, session = provider_factory(
-        [FakeResponse(fixture_payload), FakeResponse(fixture_payload)],
+        [FakeResponse(payload), FakeResponse(payload)],
         current_year_ttl=0,
     )
-    provider.fetch_year("KNYC", 2026)
-    provider.fetch_year("KNYC", 2026)
+
+    # Fixture precondition: `_snapshot_is_fresh` returns True unconditionally
+    # for a closed year, which would bypass the TTL this test is about. False
+    # here means "still open", i.e. the TTL branch is reachable.
+    assert provider._snapshot_is_fresh(None, year) is False, (
+        f"fixture precondition: {year} must still be an open archive year for "
+        "the current-year TTL to govern the memo at all"
+    )
+
+    provider.fetch_year("KNYC", year)
+    provider.fetch_year("KNYC", year)
     assert len(session.calls) == 2
 
 
@@ -290,10 +374,7 @@ def test_unpublished_truth_is_rechecked_without_a_restart(provider_factory, tmp_
     t1 product issued    -> 88     (2 live calls, SAME provider, no restart)
     t2 fresh provider    -> 88     (still 0 further calls: t1 wrote the cache)
     """
-    from datetime import timedelta
-
-    today = datetime.now(timezone.utc).date()
-    yesterday = today - timedelta(days=1)
+    yesterday, target = _adjacent_days_inside_one_archive_year()
 
     def payload(rows):
         return {"results": rows, "generated_at": "x"}
@@ -307,7 +388,7 @@ def test_unpublished_truth_is_rechecked_without_a_restart(provider_factory, tmp_
     }
     row_today = {
         "station": "KNYC",
-        "valid": today.isoformat(),
+        "valid": target.isoformat(),
         "high": 88,
         "low": 72,
         "product": "after",
@@ -320,12 +401,28 @@ def test_unpublished_truth_is_rechecked_without_a_restart(provider_factory, tmp_
         ]
     )
 
-    # t0 -- the CLI product for today has not been issued yet.
-    assert provider.fetch_daily_high("KNYC", today.isoformat()) is None
+    # Fixture preconditions, named so a drift fails legibly instead of as an
+    # unexplained IEMCLIError or an unexpected extra HTTP call:
+    #   1. both rows must live in the archive year the provider will request;
+    #   2. the target must still be inside the pending-lookback window, or the
+    #      live re-check this test is entirely about never happens.
+    assert yesterday.year == target.year, (
+        "fixture precondition: both rows must sit in one archive year "
+        f"({yesterday} / {target}); the provider fetches a year at a time and "
+        "refuses a cross-year payload"
+    )
+    assert provider._publication_pending(target.isoformat()), (
+        f"fixture precondition: {target} must be inside "
+        f"pending_lookback_days={provider.pending_lookback_days} for the "
+        "unpublished-product re-check to be exercised"
+    )
+
+    # t0 -- the CLI product for the target day has not been issued yet.
+    assert provider.fetch_daily_high("KNYC", target.isoformat()) is None
     assert len(session.calls) == 1
 
     # t1 -- the product is issued. Same long-lived provider, no restart.
-    assert provider.fetch_daily_high("KNYC", today.isoformat()) == 88
+    assert provider.fetch_daily_high("KNYC", target.isoformat()) == 88
     assert len(session.calls) == 2
 
     # t2 -- a restart is no longer what unblocks it; the snapshot t1 persisted
@@ -333,7 +430,7 @@ def test_unpublished_truth_is_rechecked_without_a_restart(provider_factory, tmp_
     fresh = IEMCLIProvider(
         cache_dir=provider.cache_dir, session=FakeSession([]), request_pause=0.0
     )
-    assert fresh.fetch_daily_high("KNYC", today.isoformat()) == 88
+    assert fresh.fetch_daily_high("KNYC", target.isoformat()) == 88
 
 
 def test_a_settled_gap_is_not_rechecked_every_lookup(provider_factory, fixture_payload):
@@ -356,13 +453,11 @@ def test_pending_ttl_can_throttle_the_recheck(provider_factory, tmp_path):
     ``weather_settlement`` keeps the default 0 because it already throttles a
     given station-day to one lookup per 15 minutes.
     """
-    from datetime import timedelta
-
-    today = datetime.now(timezone.utc).date()
+    yesterday, target = _adjacent_days_inside_one_archive_year()
     rows = [
         {
             "station": "KNYC",
-            "valid": (today - timedelta(days=1)).isoformat(),
+            "valid": yesterday.isoformat(),
             "high": 86,
             "product": "p",
         }
@@ -370,8 +465,21 @@ def test_pending_ttl_can_throttle_the_recheck(provider_factory, tmp_path):
     provider, session = provider_factory(
         [FakeResponse({"results": rows, "generated_at": "x"})], pending_ttl=3600.0
     )
-    assert provider.fetch_daily_high("KNYC", today.isoformat()) is None
-    assert provider.fetch_daily_high("KNYC", today.isoformat()) is None
+
+    # Same two preconditions as the t0/t1/t2 test above: one archive year, and
+    # a target the provider still considers publishable.
+    assert yesterday.year == target.year, (
+        f"fixture precondition: {yesterday} and {target} must sit in one "
+        "archive year; the provider refuses a cross-year payload"
+    )
+    assert provider._publication_pending(target.isoformat()), (
+        f"fixture precondition: {target} must be inside "
+        f"pending_lookback_days={provider.pending_lookback_days}, or there is "
+        "no re-check for pending_ttl to throttle"
+    )
+
+    assert provider.fetch_daily_high("KNYC", target.isoformat()) is None
+    assert provider.fetch_daily_high("KNYC", target.isoformat()) is None
     assert len(session.calls) == 1  # snapshot is younger than pending_ttl
 
 
@@ -590,11 +698,28 @@ def test_row_present_but_high_missing_returns_none(
     assert row is not None and row["high"] is None
 
 
-def test_latest_available_skips_rows_without_a_high(provider_factory, fixture_payload):
-    provider, _ = provider_factory([FakeResponse(fixture_payload)])
+def test_latest_available_skips_rows_without_a_high(provider_factory):
+    """The newest row WITH a maximum, never merely the newest row.
+
+    ``latest_available`` reads the *current* UTC year, so the payload is built
+    for that year rather than pinned to 2026 -- a literal year would have made
+    the provider ask for a year the fixture does not cover from 2027-01-01 on.
+    The newest row deliberately has no maximum, so the skip is load-bearing.
+    """
+    year, payload = _open_year_payload()
+    provider, _ = provider_factory([FakeResponse(payload)])
+
     latest = provider.latest_available("KNYC")
-    assert latest["date"] == "2026-07-24"
-    assert latest["high"] == 83
+
+    # Served from the memo the call above populated -- no second request.
+    rows = provider.fetch_year("KNYC", year)
+    assert rows[-1]["high"] is None, (
+        "fixture precondition: the newest archived row must carry no maximum, "
+        "or latest_available would return it whether or not it skips highless "
+        f"rows (newest={rows[-1]['date']} high={rows[-1]['high']})"
+    )
+    assert latest["date"] == rows[-2]["date"] == f"{year}-03-02"
+    assert latest["high"] == 61
 
 
 def test_offline_mode_refuses_network(tmp_path):
