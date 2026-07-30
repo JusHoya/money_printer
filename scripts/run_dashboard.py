@@ -14,7 +14,7 @@ from src.data.coinbase_provider import CoinbaseProvider
 from src.data.nws_provider import NWSProvider
 from src.data.kalshi_provider import KalshiProvider, is_test_symbol
 from src.core.risk_manager import RiskManager
-from src.core.bracket_payoff import is_weather_symbol
+from src.core.matching_engine import is_held_to_settlement
 from src.bots.registry import BotRegistry
 from src.utils.system_utils import prevent_sleep
 from src.utils.logger import logger, get_active_log_path, configure_root_logging
@@ -572,13 +572,24 @@ class OrchestratorEngine:
         return ", ".join(f"{bot.name}={self._bot_status(bot)}" for bot in self.bots)
 
     def _rollover_positions(self):
-        """Liquidate the book at a cycle boundary, holding weather positions.
+        """Liquidate the book at a cycle boundary, holding settling positions.
 
         PRD FR-1.5: weather positions are EXEMPT from cycle-reset liquidation.
         They are binary daily-high contracts that settle against the NWS
         Climatological Report at expiry (FR-1.2), so a cycle boundary — an
         internal drawdown-management event with no market meaning — must not
         crystallize them. Everything else is liquidated exactly as before.
+
+        PRD FR-4.4 (Phase 4) puts AAA gas in the same class, so the carve-out
+        tests the shared ``matching_engine.is_held_to_settlement`` predicate
+        rather than ``is_weather_symbol``. This is not cosmetic: widening only
+        the exchange's close guard would make ``_close_position`` REFUSE the
+        CYCLE_RESET below while the ``survivors`` filter still excluded the gas
+        position, and the ``positions[:] = survivors`` assignment would then
+        drop it from the open book with no closed row and no PnL — a silently
+        vanished position, strictly worse than the wrongful close. Weather
+        behaviour is unchanged: the predicate returns exactly
+        ``is_weather_symbol`` for every ``KXHIGH*`` ticker.
 
         Split out of ``_run_drawdown_cycle`` so the boundary behaviour can be
         exercised directly (Phase 1 exit criterion 5) without standing up log
@@ -623,19 +634,20 @@ class OrchestratorEngine:
         """
         exchange = self.risk_manager.exchange
         for p in list(exchange.positions):
-            if is_weather_symbol(p.get("symbol", "")):
+            if is_held_to_settlement(p.get("symbol", "")):
                 continue
             exchange._close_position(p, p["entry_price"], reason="CYCLE_RESET")
-        # A non-weather position whose close failed is still dropped from the
-        # open book, exactly as the legacy positions.clear() did; weather
-        # positions survive with their id, quantity and entry price intact.
+        # A position outside the held-to-settlement families whose close failed
+        # is still dropped from the open book, exactly as the legacy
+        # positions.clear() did; weather and gas positions survive with their
+        # id, quantity and entry price intact.
         survivors = [
-            p for p in exchange.positions if is_weather_symbol(p.get("symbol", ""))
+            p for p in exchange.positions if is_held_to_settlement(p.get("symbol", ""))
         ]
         dropped = len(exchange.positions) - len(survivors)
         if dropped:
             logger.warning(
-                "[Cycle] Dropped %d non-weather position(s) that failed to close",
+                "[Cycle] Dropped %d position(s) that failed to close",
                 dropped,
             )
         exchange.positions[:] = survivors

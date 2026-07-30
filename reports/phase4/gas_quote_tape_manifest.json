@@ -1,0 +1,135 @@
+{
+  "generated_at": "2026-07-30T01:52:18.677780+00:00",
+  "generator": "scripts/gas_backtest.py fetch-tape",
+  "endpoint": "GET /series/{series}/markets/{ticker}/candlesticks?period_interval=60 (anonymous, public)",
+  "api_base": "https://api.elections.kalshi.com/trade-api/v2",
+  "user_agent": "money-printer-phase4-backtest/1.0 (hoyeriiim87@gmail.com)",
+  "request_sleep_s": 0.35,
+  "lookback_days": 16,
+  "series": {
+    "KXAAAGASM": {
+      "settled": 74,
+      "open": 62
+    },
+    "KXAAAGASW": {
+      "settled": 266,
+      "open": 29
+    }
+  },
+  "markets_enumerated": 431,
+  "markets_skipped": 26,
+  "skipped": [
+    {
+      "ticker": "KXAAAGASM-26AUG31-5.00",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.90",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.80",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.70",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.60",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.50",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.40",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.30",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.20",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.10",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-4.00",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.90",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.80",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.70",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.60",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.50",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.40",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.30",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.20",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.10",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-3.00",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-2.90",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-2.80",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-2.70",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-2.60",
+      "reason": "no elapsed life"
+    },
+    {
+      "ticker": "KXAAAGASM-26AUG31-2.50",
+      "reason": "no elapsed life"
+    }
+  ],
+  "rows": 39623,
+  "distinct_markets": 405,
+  "distinct_events": 14,
+  "first_end_ts": 1784088000,
+  "last_end_ts": 1779678000,
+  "path": "reports/phase4/gas_quote_tape.csv",
+  "content_hash": "5f9a0c0a08340561096814db76fc4f7a69b1b4c5c86efba8c62d9b77bc2b2191",
+  "note": "yes_bid==0 and yes_ask==1 are Kalshi empty-book sentinels and are written as blank (absent), never as a price."
+}

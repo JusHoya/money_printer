@@ -1,0 +1,38 @@
+{
+ "generated_at": "2026-07-30T00:27:15Z",
+ "generator": "scripts/reconcile_gas.py --harvest-truth",
+ "endpoint": "GET https://api.elections.kalshi.com/trade-api/v2/markets",
+ "authority": "Derived exclusively from Kalshi's published settlement results. No AAA-sourced series was consulted, which is what makes this usable as held-out truth against a model fitted on the AAA history.",
+ "settled_markets_harvested": 1506,
+ "rows": 79,
+ "content_sha256": "d0ccf4079734be737aa6d6204bdb2f9f86a055ad144f59b6333694ee1c52c4b6",
+ "by_period_kind": {
+  "daily": {
+   "rows": 67,
+   "first": "2026-05-24",
+   "last": "2026-07-29",
+   "max_interval_width": 0.005,
+   "one_sided": 0
+  },
+  "monthly": {
+   "rows": 2,
+   "first": "2026-05-31",
+   "last": "2026-06-30",
+   "max_interval_width": 0.01,
+   "one_sided": 0
+  },
+  "weekly": {
+   "rows": 10,
+   "first": "2026-05-25",
+   "last": "2026-07-27",
+   "max_interval_width": 0.02,
+   "one_sided": 0
+  }
+ },
+ "month_end_dates": [
+  "2026-05-31",
+  "2026-06-30"
+ ],
+ "boundary_tie_markets": 15,
+ "retention_note": "The public API returns settled markets for roughly the last two months only; older events resolve but carry zero markets. The earliest retrievable settlement date at generation time is 2026-05-24. More month-ends cannot be pinned from Kalshi until they occur."
+}

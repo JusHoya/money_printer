@@ -1,0 +1,43 @@
+{
+  "fetched_at": "2026-07-30T02:24:22.726591+00:00",
+  "generator": "scripts/gas_backtest.py fetch-series-meta",
+  "endpoint": "GET https://api.elections.kalshi.com/trade-api/v2/series/{series_ticker} (anonymous, public)",
+  "series": {
+    "KXAAAGASM": {
+      "fee_type": "quadratic_with_maker_fees",
+      "fee_multiplier": 1,
+      "settlement_sources": [
+        "AAA"
+      ],
+      "code_says_fee_type": "quadratic_with_maker_fees",
+      "agrees_with_code": true
+    },
+    "KXAAAGASW": {
+      "fee_type": "quadratic",
+      "fee_multiplier": 1,
+      "settlement_sources": [
+        "AAA"
+      ],
+      "code_says_fee_type": "quadratic",
+      "agrees_with_code": true
+    },
+    "KXAAAGASD": {
+      "fee_type": "quadratic",
+      "fee_multiplier": 1,
+      "settlement_sources": [
+        "AAA"
+      ],
+      "code_says_fee_type": "quadratic",
+      "agrees_with_code": true
+    },
+    "KXHIGHNY": {
+      "fee_type": "quadratic",
+      "fee_multiplier": 1,
+      "settlement_sources": [
+        "NWS Climatological Report"
+      ],
+      "code_says_fee_type": "quadratic",
+      "agrees_with_code": true
+    }
+  }
+}

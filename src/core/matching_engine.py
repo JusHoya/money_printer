@@ -9,6 +9,7 @@ import os
 import random
 import tempfile
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from src.utils.logger import logger
 from src.core.bracket_payoff import (
     BracketSpecError,
@@ -23,6 +24,92 @@ from src.core.weather_settlement import (
     hours_since_settlement_day_close,
     resolve_settlement_high,
 )
+
+# PRD FR-4.4 (Phase 4). The AAA gas payoff and its truth resolver live in
+# src/data/gas_settlement.py (workstream B) and are CONSUMED here, never
+# reimplemented: its rule is `value > floor_strike` strictly, proven against
+# 1,506 published settlements including 15 that landed exactly on their strike
+# and all paid NO. Imported under gas_* aliases because the two payoff modules
+# expose deliberately identical function names for deliberately different rules
+# — a bare `settles_yes` in this file must keep meaning the temperature one.
+from src.data.gas_settlement import (
+    GasSpecError,
+    get_series as get_gas_series,
+    is_gas_symbol,
+    resolve_settlement_value as resolve_gas_settlement_value,
+    series_for as gas_series_for,
+    settlement_date_for as gas_settlement_date_for,
+    settles_yes as gas_settles_yes,
+    spec_from_position as gas_spec_from_position,
+)
+
+
+def is_held_to_settlement(symbol) -> bool:
+    """True for every contract family that may leave the book ONLY by settling.
+
+    One predicate, two families, so the "held to settlement" invariant is
+    defined in exactly one place:
+
+    * weather (``KXHIGH*``) — PRD FR-1.5, settles on the NWS Climatological
+      Report daily high (FR-1.2);
+    * AAA gas (``KXAAAGAS*``) — PRD FR-4.4, settles on the AAA national average
+      published for one calendar date.
+
+    Both are binary event contracts whose outcome is undetermined until an
+    external authority publishes a number. Every non-settlement close reason —
+    ``TIME_LIMIT``, cycle-reset liquidation, stop-losses, profit targets,
+    ``EARLY_SETTLEMENT`` — crystallizes ordinary quote oscillation instead, and
+    that is exactly why the project's weather PnL history (188 ``TIME_LIMIT``
+    and 69 ``CYCLE_RESET`` closes) was declared meaningless.
+
+    The two families are provably disjoint (``KXHIGH`` vs ``KXAAAGAS``), which
+    ``tests/test_gas_lifecycle.py`` pins, so a symbol can never be governed by
+    both payoff rules.
+    """
+    return is_weather_symbol(symbol) or is_gas_symbol(symbol)
+
+
+#: How long after an AAA settlement date *begins* a missing published value
+#: stops being ordinary latency and starts being a fault worth paging about.
+#:
+#: This is measured from local midnight at the START of the settlement date,
+#: not its close, because gas truth is published on the morning OF the
+#: settlement date (Kalshi's ``expected_expiration_time`` is 10:00 ET on the
+#: date itself) whereas a weather CLI product is issued the morning AFTER the
+#: settlement day. Measuring gas from the day's close — the weather
+#: convention — would leave the age negative until the date ended and so could
+#: never escalate a value that was already ~14 hours late. 36 hours therefore
+#: puts the escalation at noon ET on the following day: about 26 hours after
+#: the expected publication, and a full extra recorder run of slack.
+GAS_SETTLEMENT_TRUTH_GRACE_HOURS = 36.0
+
+
+def _hours_since_gas_settlement_date_open(symbol, now: Optional[datetime] = None):
+    """Hours since the AAA settlement date began, in the series' timezone.
+
+    Negative before the date starts. ``None`` when the series, the date label
+    or the timezone cannot be established — which makes the caller treat
+    missing truth as PENDING rather than escalating on a symbol it cannot even
+    date.
+    """
+    series = gas_series_for(symbol)
+    day = gas_settlement_date_for(symbol)
+    if series is None or day is None:
+        return None
+    try:
+        tz = ZoneInfo(get_gas_series(series).timezone)
+    except (ZoneInfoNotFoundError, ValueError, KeyError, GasSpecError) as exc:
+        logger.error(
+            "[OMS] %s: gas settlement timezone unavailable (%s); refusing to "
+            "age the settlement date in UTC",
+            symbol,
+            exc,
+        )
+        return None
+    date_open = datetime.combine(day, datetime.min.time(), tzinfo=tz)
+    current = now.astimezone(tz) if now is not None else datetime.now(tz)
+    return (current - date_open).total_seconds() / 3600.0
+
 
 # ---------------------------------------------------------------------------
 # Persistence helpers
@@ -955,8 +1042,11 @@ class SimulatedExchange:
             # False) and no weather strategy sets it), so honouring the caller
             # here meant every live weather position got the ladder and exited
             # on an invented mark instead of settling via FR-1.2.
+            # PRD FR-4.4 widens this to AAA gas on the same reasoning; the
+            # family test is the shared ``is_held_to_settlement`` predicate so a
+            # third settlement family cannot be onboarded and miss this.
             "profit_targets": []
-            if (disable_profit_targets or is_weather_symbol(symbol))
+            if (disable_profit_targets or is_held_to_settlement(symbol))
             else [
                 # Alt A: 1/2 + 1/2, no residual. Empirically the 1/3+1/3+1/3
                 # ladder's residual tranche bled $240/24h via EARLY_SETTLEMENT
@@ -1058,6 +1148,12 @@ class SimulatedExchange:
                 continue
 
             is_weather = is_weather_symbol(pos["symbol"])
+            is_gas = is_gas_symbol(pos["symbol"])
+            # PRD FR-1.5 (weather) + FR-4.4 (gas): one flag for every family
+            # that may only leave the book by settling. Every exemption below
+            # tests THIS, so onboarding a family to ``is_held_to_settlement``
+            # carries all of them at once.
+            held_to_settlement = is_weather or is_gas
 
             # --- EXPIRATION CHECK ---
             if pos.get("expiration_time"):
@@ -1080,6 +1176,16 @@ class SimulatedExchange:
                         # Truth not published yet: hold the position and retry
                         # on a later sweep (logged inside the helper). Skip the
                         # rest of this position's valuation — the market is gone.
+                        continue
+                    if is_gas:
+                        # PRD FR-4.4: an AAA gas contract settles on the AAA
+                        # national average published for its settlement date.
+                        # Trading closes the evening BEFORE that number exists,
+                        # so `current_spot_price` at expiry is a quote or a
+                        # projection and never the settled value — resolve the
+                        # published one, or hold and retry.
+                        if self._settle_gas_position(pos):
+                            continue
                         continue
                     self._close_position(pos, current_spot_price, reason="EXPIRATION")
                     continue
@@ -1113,18 +1219,22 @@ class SimulatedExchange:
             # PRD FR-1.5 extends this to weather: a daily-high contract is a
             # binary event too, and a stop-loss on one crystallizes a loss from
             # ordinary intraday oscillation while the settlement outcome is
-            # still undetermined. Expiry IS the stop.
+            # still undetermined. Expiry IS the stop. PRD FR-4.4 extends it
+            # again to AAA gas, for which the argument is even stronger: the
+            # settled value is not published until after trading has closed.
             is_binary_event = (
                 "KXBTC15M" in pos["symbol"]
                 or "KXBTCD" in pos["symbol"]
                 or "kxbtcd" in pos["symbol"]
-                or is_weather
+                or held_to_settlement
             )
 
             # Check Time Limit (Legacy fallback)
-            # PRD FR-1.5: weather positions are exempt — they are held to
-            # settlement, so a 60-minute wall clock must never close one.
-            if age >= self.TIME_LIMIT_MIN and not is_weather:
+            # PRD FR-1.5/FR-4.4: held-to-settlement positions are exempt — a
+            # 60-minute wall clock must never close one. A gas contract's
+            # horizon is up to 14 days (GAS_FINAL_WINDOW_DAYS), so every gas
+            # position would otherwise be closed by this within the hour.
+            if age >= self.TIME_LIMIT_MIN and not held_to_settlement:
                 # Use estimated option price, NOT raw spot price
                 self._close_position(
                     pos,
@@ -1140,7 +1250,7 @@ class SimulatedExchange:
                 # --- CASE 1: PRECIPITATION ---
                 if "PRECIP" in pos["symbol"]:
                     estimated_price = current_spot_price
-                # --- CASE 2a: WEATHER (binary daily-high bracket) ---
+                # --- CASE 2a: HELD-TO-SETTLEMENT (weather bracket / AAA gas) ---
                 # PRD FR-1.2/FR-1.5. A bracket's value is P(YES), which the tanh
                 # estimator cannot express: it maps a signed distance to a
                 # strike, and a `between` bracket has TWO bounds while a `less`
@@ -1151,7 +1261,11 @@ class SimulatedExchange:
                 # weather contract: the observed Kalshi price. With no observed
                 # price the mark holds at entry (unrealized PnL 0) until one
                 # arrives or the position settles.
-                elif is_weather:
+                # PRD FR-4.4 routes AAA gas here for the same reason — a
+                # $4.60/gal strike against a ~$3-5/gal underlying would give the
+                # tanh estimator a distance of ~0.0005 scale units and mark
+                # every contract at ~0.50 regardless of the projection.
+                elif held_to_settlement:
                     lmp = pos.get("last_market_price", 0) or 0
                     if lmp > 0:
                         estimated_price = lmp
@@ -1160,7 +1274,7 @@ class SimulatedExchange:
                         logger.debug(
                             "[OMS] %s: no observed Kalshi price yet; holding mark "
                             "at entry %.2f (no synthetic price for a binary "
-                            "weather contract)",
+                            "event contract)",
                             pos["symbol"],
                             pos["entry_price"],
                         )
@@ -1257,11 +1371,12 @@ class SimulatedExchange:
 
                 # --- EARLY SETTLEMENT (Liquidity/Heuristic) ---
                 # If price is pegged at 0.99 or 0.01 for a sustained period (10m), assume market has decided.
-                # PRD FR-1.5 exempts weather: this heuristic invents a 1.00/0.00
-                # outcome from a price peg, which is precisely NOT "settle via
-                # FR-1.2". A weather bracket resolves against the CLI daily high
-                # at expiry and nothing else.
-                if age >= 10 and not is_weather:
+                # PRD FR-1.5/FR-4.4 exempt every held-to-settlement family: this
+                # heuristic invents a 1.00/0.00 outcome from a price peg, which
+                # is precisely NOT "settle via FR-1.2/FR-4.4". A weather bracket
+                # resolves against the CLI daily high at expiry and a gas
+                # contract against the published AAA value, and nothing else.
+                if age >= 10 and not held_to_settlement:
                     if (pos["side"] == "buy" and estimated_price >= 0.99) or (
                         pos["side"] == "sell" and estimated_price <= 0.01
                     ):
@@ -1279,15 +1394,15 @@ class SimulatedExchange:
 
                 # --- PROFIT TARGET LADDER (Partial Exits) ---
                 # Skip during grace period to prevent instant tanh gaming.
-                # PRD FR-1.5 (defence 2 of 3) exempts weather: a profit-target
-                # exit closes the position at an invented mark with no
-                # ``settlement_high``, which is precisely NOT "settle via
-                # FR-1.2". Positions restored from a state file written before
-                # the ladder was withheld at open still carry targets, so the
-                # skip must live at the call site too, not only at open time.
+                # PRD FR-1.5 (defence 2 of 3) exempts weather, and FR-4.4 gas: a
+                # profit-target exit closes the position at an invented mark with
+                # no settled truth, which is precisely NOT "settle via
+                # FR-1.2/FR-4.4". Positions restored from a state file written
+                # before the ladder was withheld at open still carry targets, so
+                # the skip must live at the call site too, not only at open time.
                 if (
                     not in_grace_period
-                    and not is_weather
+                    and not held_to_settlement
                     and self._check_profit_targets(pos, display_price)
                 ):
                     continue
@@ -1336,10 +1451,10 @@ class SimulatedExchange:
 
                 # Fallback: PCT stops and the PCT take-profit. Skipped during
                 # the grace period and for every binary event contract —
-                # which includes weather (``is_binary_event`` above ORs in
-                # ``is_weather``). PRD FR-1.5: TAKE_PROFIT closes at an
-                # invented mark with no settlement_high, exactly like the
-                # ladder, so weather must never reach it.
+                # which includes weather and gas (``is_binary_event`` above ORs
+                # in ``held_to_settlement``). PRD FR-1.5/FR-4.4: TAKE_PROFIT
+                # closes at an invented mark with no settled truth, exactly like
+                # the ladder, so neither family must ever reach it.
                 if in_grace_period or is_binary_event:
                     continue
                 pnl_pct = (
@@ -1379,7 +1494,7 @@ class SimulatedExchange:
         # an invented exit price and with no settlement_high. Refuse here as
         # well as at the two call sites, so reverting either one is caught
         # rather than absorbed.
-        if self._weather_close_refused(
+        if self._held_to_settlement_close_refused(
             pos, "PROFIT_TARGET", context="_check_profit_targets"
         ):
             return False
@@ -1483,22 +1598,29 @@ class SimulatedExchange:
         return False
 
     # ------------------------------------------------------------------
-    # FR-1.5 close-reason policy for weather positions
+    # FR-1.5 / FR-4.4 close-reason policy for held-to-settlement positions
     # ------------------------------------------------------------------
-    # The guard is a WHITELIST, not a blacklist: a weather bracket may only
-    # leave the book through settlement. Enumerating forbidden reasons was
-    # provably incomplete — the original tuple below covered TIME_LIMIT /
-    # CYCLE_RESET / STOP_LOSS* but not TAKE_PROFIT, PROFIT_TARGET,
+    # The guard is a WHITELIST, not a blacklist: a weather bracket or an AAA gas
+    # contract may only leave the book through settlement. Enumerating forbidden
+    # reasons was provably incomplete — the original tuple below covered
+    # TIME_LIMIT / CYCLE_RESET / STOP_LOSS* but not TAKE_PROFIT, PROFIT_TARGET,
     # EARLY_SETTLEMENT or the default reason="MARKET", and a weather position
     # was observed closing TAKE_PROFIT with no guard, no alert and no test
     # failure. Any reason not listed here is refused, so a close reason added
     # in the future cannot silently bypass the invariant.
     #
-    #   EXPIRATION            -> FR-1.2 payoff against the published CLI high
-    #   SETTLEMENT_UNRESOLVED -> set by _weather_exit_price AFTER the guard,
-    #                            when bracket semantics are unavailable; the
-    #                            position closes flat at entry, loudly.
-    _WEATHER_SETTLEMENT_CLOSE_REASONS = ("EXPIRATION", "SETTLEMENT_UNRESOLVED")
+    #   EXPIRATION            -> FR-1.2 payoff against the published CLI high,
+    #                            or the FR-4.4 payoff against the published AAA
+    #                            national average
+    #   SETTLEMENT_UNRESOLVED -> set by _weather_exit_price / _gas_exit_price
+    #                            AFTER the guard, when the payoff semantics are
+    #                            unavailable; the position closes flat at entry,
+    #                            loudly.
+    #
+    # Deliberately ONE whitelist for both families rather than one per family:
+    # gas introduces no new close reason, and a per-family list would be a
+    # second place to forget.
+    _SETTLEMENT_CLOSE_REASONS = ("EXPIRATION", "SETTLEMENT_UNRESOLVED")
 
     # Every non-settlement reason string that exists in this file, in
     # run_dashboard.py and in src/backtest/engine.py, kept as explicit
@@ -1507,7 +1629,7 @@ class SimulatedExchange:
     # enforcement mechanism (the whitelist above is);
     # tests/test_weather_lifecycle.py walks the sources and asserts every
     # literal reason is classified by one list or the other.
-    _WEATHER_FORBIDDEN_CLOSE_PREFIXES = (
+    _FORBIDDEN_SETTLEMENT_CLOSE_PREFIXES = (
         "TIME_LIMIT",
         "CYCLE_RESET",
         "STOP_LOSS",
@@ -1517,27 +1639,45 @@ class SimulatedExchange:
         "MARKET",
     )
 
-    def _weather_close_refused(self, pos, reason, context: str = "close") -> bool:
-        """True when ``reason`` must not be applied to weather position ``pos``.
+    # Phase 1 names, retained as aliases to the SAME tuples. They are read by
+    # ``tests/test_weather_lifecycle.py`` (a Phase 1 exit-criterion file owned
+    # outside this workstream), so renaming without aliasing would have meant
+    # editing a golden weather test to widen a guard for gas.
+    _WEATHER_SETTLEMENT_CLOSE_REASONS = _SETTLEMENT_CLOSE_REASONS
+    _WEATHER_FORBIDDEN_CLOSE_PREFIXES = _FORBIDDEN_SETTLEMENT_CLOSE_PREFIXES
 
-        The single enforcement point for FR-1.5's "held to settlement" rule,
-        shared by :meth:`_close_position` (full closes) and
-        :meth:`_check_profit_targets` (partial closes, which never route
-        through ``_close_position`` and so had no guard at all).
+    def _held_to_settlement_close_refused(
+        self, pos, reason, context: str = "close"
+    ) -> bool:
+        """True when ``reason`` must not be applied to held-to-settlement ``pos``.
+
+        The single enforcement point for FR-1.5's (weather) and FR-4.4's (AAA
+        gas) "held to settlement" rule, shared by :meth:`_close_position` (full
+        closes) and :meth:`_check_profit_targets` (partial closes, which never
+        route through ``_close_position`` and so had no guard at all).
+
+        Widened from weather-only by testing the shared
+        :func:`is_held_to_settlement` predicate instead of ``is_weather_symbol``.
+        Weather behaviour is unchanged: the predicate returns exactly
+        ``is_weather_symbol`` for every ``KXHIGH*`` ticker, the whitelist is the
+        same tuple object it always was, and the log/alert strings are byte
+        identical apart from naming the family.
         """
         symbol = pos.get("symbol", "")
-        if not is_weather_symbol(symbol):
+        if not is_held_to_settlement(symbol):
             return False
-        if str(reason) in self._WEATHER_SETTLEMENT_CLOSE_REASONS:
+        if str(reason) in self._SETTLEMENT_CLOSE_REASONS:
             return False
 
+        family = "weather" if is_weather_symbol(symbol) else "gas"
         logger.error(
-            "[OMS] FR-1.5 VIOLATION REFUSED (%s): attempt to close weather "
-            "position id=%s %s with reason=%s. Weather positions are exempt "
-            "from TIME_LIMIT, cycle-reset liquidation, stop-losses, profit "
-            "targets and early settlement; they are held to settlement "
-            "(FR-1.2). No-op.",
+            "[OMS] FR-1.5 VIOLATION REFUSED (%s): attempt to close %s "
+            "position id=%s %s with reason=%s. Held-to-settlement positions are "
+            "exempt from TIME_LIMIT, cycle-reset liquidation, stop-losses, "
+            "profit targets and early settlement; they are held to settlement "
+            "(FR-1.2 weather / FR-4.4 gas). No-op.",
             context,
+            family,
             pos.get("id"),
             symbol,
             reason,
@@ -1551,6 +1691,11 @@ class SimulatedExchange:
             alerted.append(str(reason))
             self._alert(f"FR-1.5 REFUSED | {symbol} | close reason {reason} blocked")
         return True
+
+    #: Phase 1 name for the guard above, retained because
+    #: ``tests/test_weather_lifecycle.py`` calls it directly. It is an alias to
+    #: the one implementation, not a second guard.
+    _weather_close_refused = _held_to_settlement_close_refused
 
     def _settle_weather_position(self, pos) -> bool:
         """Settle one expired weather position against published CLI truth.
@@ -1598,6 +1743,172 @@ class SimulatedExchange:
             pos[pending_key] = "PENDING"
         return False
 
+    def _settle_gas_position(self, pos) -> bool:
+        """Settle one expired AAA gas position against the published AAA value.
+
+        Structural mirror of :meth:`_settle_weather_position`: returns ``True``
+        when the position was closed (settled, or explicitly closed flat as
+        ``SETTLEMENT_UNRESOLVED``), ``False`` when the AAA national average for
+        the settlement date is not published yet and the position must stay open
+        for a later sweep. PRD FR-4.4.
+
+        Truth is resolved through workstream B's
+        :func:`src.data.gas_settlement.resolve_settlement_value`, which reads
+        the FR-4.4 settlement cache first and then the AAA daily series, and
+        returns ``None`` for *not published yet* and nothing else — never the
+        last observed value, never a projection, never an interpolation. This
+        method therefore **aborts rather than guesses**: with no published value
+        the position is held open and, past the grace window, paged about. A
+        gas contract closes trading the evening BEFORE its value exists, so a
+        wait of hours at expiry is the normal case, not a fault.
+        """
+        symbol = pos["symbol"]
+        value = resolve_gas_settlement_value(symbol)
+        if value is not None:
+            self._close_position(pos, float(value), reason="EXPIRATION")
+            return True
+
+        # No published AAA value. The position is NOT closed and NOT marked:
+        # yesterday's national average is not this settlement date's, and a
+        # projection is what we were betting against in the first place
+        # (abort-on-missing-critical-input).
+        age_h = _hours_since_gas_settlement_date_open(symbol)
+        pending_key = "_settlement_pending_logged"
+        if age_h is not None and age_h > GAS_SETTLEMENT_TRUTH_GRACE_HOURS:
+            logger.error(
+                "[OMS] SETTLEMENT_TRUTH_OVERDUE %s: no published AAA national "
+                "average %.1fh after the settlement date began (grace %.0fh, AAA "
+                "publishes ~10:00 ET on the date). Position id=%s held open; "
+                "check the FR-4.4 gas settlement recorder.",
+                symbol,
+                age_h,
+                GAS_SETTLEMENT_TRUTH_GRACE_HOURS,
+                pos.get("id"),
+            )
+            if pos.get(pending_key) != "OVERDUE":  # alert once, then log only
+                self._alert(
+                    f"SETTLEMENT TRUTH OVERDUE | {symbol} | "
+                    f"{age_h:.0f}h past the settlement date, position held open"
+                )
+                pos[pending_key] = "OVERDUE"
+        else:
+            logger.info(
+                "[OMS] SETTLEMENT_TRUTH_PENDING %s: AAA national average not "
+                "published yet (%s); holding position id=%s open for a later sweep",
+                symbol,
+                f"{age_h:+.1f}h into the settlement date"
+                if age_h is not None
+                else "age unknown",
+                pos.get("id"),
+            )
+            pos[pending_key] = "PENDING"
+        return False
+
+    def _gas_exit_price(self, pos, final_value):
+        """``(exit_price, reason_override)`` for a settling AAA gas position.
+
+        The FR-4.4 counterpart of :meth:`_weather_exit_price`, with the same
+        contract: ``None`` means settlement truth is unavailable and the caller
+        must leave the position open and retry later; ``reason_override`` is
+        ``None`` to keep the caller's reason.
+
+        ``final_value`` is the **published AAA national average in USD/gal**.
+        ``None`` makes this resolve it itself.
+
+        The payoff is workstream B's, not a local reimplementation: YES pays iff
+        ``value > floor_strike``, strictly, and a value exactly equal to the
+        strike pays NO (15 live markets settled exactly on their strike and all
+        15 paid NO). Direction and strike come from the API fields cached on the
+        position at open time, never from the ticker (PRD FR-1.1).
+        """
+        symbol = pos.get("symbol", "")
+
+        # Defence in depth against a misrouted symbol. Routing is by the same
+        # predicate that selected this method, so this cannot fire in the
+        # current code — it exists so that if it ever could, a gas contract is
+        # closed flat and loudly rather than priced by a rule that does not
+        # govern it.
+        if is_weather_symbol(symbol):
+            logger.error(
+                "[OMS] SETTLEMENT_UNRESOLVED %s (id=%s): a weather bracket "
+                "reached the FR-4.4 gas payoff. The two rules differ (gas: "
+                "value > floor_strike; temperature 'greater': high >= floor+1), "
+                "so pricing it here would be wrong. Closing flat at entry.",
+                symbol,
+                pos.get("id"),
+            )
+            self._alert(
+                f"SETTLEMENT UNRESOLVED | {symbol} | weather symbol misrouted to "
+                f"the gas payoff — closed flat at entry"
+            )
+            pos["settlement_error"] = "weather symbol routed to the gas payoff"
+            return (pos["entry_price"], "SETTLEMENT_UNRESOLVED")
+
+        try:
+            spec = gas_spec_from_position(pos)
+        except GasSpecError as exc:
+            # A position opened without the API fields cached. Settling it NO
+            # would be a systematically-wrong "safe" default — most ladder rungs
+            # settle NO, so it would look plausible and be wrong — and the
+            # project's abort-on-missing-critical-input rule forbids it. Close
+            # flat instead: zero PnL, loudly.
+            logger.error(
+                "[OMS] SETTLEMENT_UNRESOLVED %s (id=%s): gas settlement "
+                "semantics unavailable (%s). Refusing to fabricate a settlement "
+                "outcome; closing flat at entry price $%.2f with zero PnL.",
+                symbol,
+                pos.get("id"),
+                exc,
+                pos.get("entry_price", 0.0),
+            )
+            self._alert(
+                f"SETTLEMENT UNRESOLVED | {symbol} | no gas spec on position — "
+                f"closed flat at entry"
+            )
+            pos["settlement_error"] = str(exc)
+            return (pos["entry_price"], "SETTLEMENT_UNRESOLVED")
+
+        value = final_value
+        if value is None:
+            value = resolve_gas_settlement_value(symbol)
+        if value is None:
+            return None
+
+        try:
+            outcome_is_yes = gas_settles_yes(spec, value)
+        except GasSpecError as exc:
+            logger.error(
+                "[OMS] SETTLEMENT_UNRESOLVED %s (id=%s): %s. Closing flat at "
+                "entry price with zero PnL.",
+                symbol,
+                pos.get("id"),
+                exc,
+            )
+            self._alert(
+                f"SETTLEMENT UNRESOLVED | {symbol} | unusable AAA value — "
+                f"closed flat at entry"
+            )
+            pos["settlement_error"] = str(exc)
+            return (pos["entry_price"], "SETTLEMENT_UNRESOLVED")
+
+        # Provenance: what settled this, and under which rule. Deliberately
+        # ``settlement_value`` and not ``settlement_high`` — the units are
+        # USD/gal, not F, and reusing the weather key would let a reader join a
+        # gas row to a temperature truth table without noticing.
+        pos["settlement_value"] = float(value)
+        pos["settlement_spec"] = spec.as_dict()
+        pos["settlement_rule"] = spec.describe()
+        pos["settlement_outcome"] = "yes" if outcome_is_yes else "no"
+        logger.info(
+            "[OMS] FR-4.4 SETTLED %s: AAA national average $%.3f/gal vs %s (%s) -> %s",
+            symbol,
+            float(value),
+            spec.describe(),
+            spec.strike_type,
+            "YES" if outcome_is_yes else "NO",
+        )
+        return (1.00 if outcome_is_yes else 0.00, None)
+
     def _weather_exit_price(self, pos, final_spot_price):
         """``(exit_price, reason_override)`` for a settling weather position.
 
@@ -1617,6 +1928,32 @@ class SimulatedExchange:
         computed from.
         """
         symbol = pos.get("symbol", "")
+
+        # PRD FR-4.4, structural: an AAA gas contract must NEVER be priced by
+        # the temperature payoff. The two `greater` rules genuinely differ —
+        # bracket_payoff.yes_bounds turns a `greater` strike into
+        # ``high >= floor + 1`` because a daily high is an integer count of
+        # degrees, so a $4.60/gal gas strike run through it would demand $5.60
+        # to pay YES. Routing already selects _gas_exit_price for these symbols,
+        # so this cannot fire in the current code; it is here so that a future
+        # caller that reaches the wrong payoff closes flat and loudly instead of
+        # settling against a rule that does not govern it.
+        if is_gas_symbol(symbol):
+            logger.error(
+                "[OMS] SETTLEMENT_UNRESOLVED %s (id=%s): a gas contract reached "
+                "the FR-1.2 temperature payoff, whose 'greater' rule is "
+                "high >= floor+1, not value > floor. Refusing to price it here; "
+                "closing flat at entry.",
+                symbol,
+                pos.get("id"),
+            )
+            self._alert(
+                f"SETTLEMENT UNRESOLVED | {symbol} | gas symbol misrouted to the "
+                f"temperature payoff — closed flat at entry"
+            )
+            pos["settlement_error"] = "gas symbol routed to the temperature payoff"
+            return (pos["entry_price"], "SETTLEMENT_UNRESOLVED")
+
         try:
             spec = spec_from_position(pos)
         except BracketSpecError as exc:
@@ -1690,6 +2027,10 @@ class SimulatedExchange:
               running observed max. Callers that do not have it must use
               ``_settle_weather_position`` (or pass ``None``) so the position is
               held open instead of settled against a substitute.
+            * AAA gas (KXAAAGAS*): the **published AAA national average in
+              USD/gal** for the settlement date. Callers that do not have it must
+              use ``_settle_gas_position`` (or pass ``None``) so the position is
+              held open instead of settled against a stale or assumed value.
             * crypto: the underlying spot ($).
             exit_price is determined as 1.00 or 0.00 based on outcome.
 
@@ -1697,20 +2038,24 @@ class SimulatedExchange:
             final_spot_price should be the ESTIMATED OPTION PRICE (0.00-1.00),
             NOT the raw underlying spot price.
 
-        FR-1.5: a weather position accepts ONLY the settlement reasons in
-        ``_WEATHER_SETTLEMENT_CLOSE_REASONS``. Every other reason is refused
-        (logged + alerted) and the position stays open.
+        FR-1.5 / FR-4.4: a held-to-settlement position (weather or gas) accepts
+        ONLY the settlement reasons in ``_SETTLEMENT_CLOSE_REASONS``. Every other
+        reason is refused (logged + alerted) and the position stays open.
         """
         try:
             symbol = pos.get("symbol", "")
             is_weather = is_weather_symbol(symbol)
+            is_gas = is_gas_symbol(symbol)
 
-            # --- FR-1.5 HARD INVARIANT ---------------------------------
-            # Weather positions persist across cycles and settle via FR-1.2.
-            # Refuse every non-settlement close outright rather than relying on
-            # each caller to remember, so "no TIME_LIMIT or CYCLE_RESET close
-            # reason appears on any weather position" is an enforced property.
-            if self._weather_close_refused(pos, reason, context="_close_position"):
+            # --- FR-1.5 / FR-4.4 HARD INVARIANT ------------------------
+            # Weather and gas positions persist across cycles and settle via
+            # FR-1.2 / FR-4.4. Refuse every non-settlement close outright rather
+            # than relying on each caller to remember, so "no TIME_LIMIT or
+            # CYCLE_RESET close reason appears on any held-to-settlement
+            # position" is an enforced property.
+            if self._held_to_settlement_close_refused(
+                pos, reason, context="_close_position"
+            ):
                 return
 
             # Determine Exit Price Strategy
@@ -1719,6 +2064,18 @@ class SimulatedExchange:
             if is_binary_settlement and is_weather:
                 # --- FR-1.2 WEATHER SETTLEMENT (shared payoff module) ---
                 resolved = self._weather_exit_price(pos, final_spot_price)
+                if resolved is None:
+                    return  # truth pending — position stays open (logged inside)
+                exit_price, reason_override = resolved
+                if reason_override:
+                    reason = reason_override
+            elif is_binary_settlement and is_gas:
+                # --- FR-4.4 AAA GAS SETTLEMENT (workstream B's payoff) ---
+                # Placed as its own branch BEFORE the legacy path so a gas
+                # symbol can never reach either the temperature payoff above or
+                # the crypto strike parsing below (which would read "4.60" out
+                # of the ticker suffix and compare a price to a price).
+                resolved = self._gas_exit_price(pos, final_spot_price)
                 if resolved is None:
                     return  # truth pending — position stays open (logged inside)
                 exit_price, reason_override = resolved
@@ -1733,8 +2090,9 @@ class SimulatedExchange:
                         outcome_is_yes = True
                 else:
                     # ----------------------------------------------------------
-                    # LEGACY CRYPTO SETTLEMENT (weather never reaches here —
-                    # KXHIGH* is routed to the FR-1.2 payoff module above).
+                    # LEGACY CRYPTO SETTLEMENT (weather and gas never reach here
+                    # — KXHIGH* is routed to the FR-1.2 payoff module above and
+                    # KXAAAGAS* to the FR-4.4 one).
                     #
                     # 2026-06-10 SETTLEMENT FIX (strike resolution)
                     #

@@ -34,11 +34,28 @@ repos:
         #     the in-house decoder's tests run offline and deterministically.
         #     Stored as text on purpose: .gitattributes normalizes line
         #     endings under tests/fixtures/, which would corrupt raw binary.
+        #
+        # Two PRD Phase 4 evidence artifacts join them on the same terms:
+        #
+        #   gas_quote_tape.csv (7.9 MB) is 39,623 hourly yes_bid/yes_ask
+        #     candles over 405 markets -- the ONLY historical gas orderbook
+        #     this project will ever hold. Kalshi prunes settled markets from
+        #     the public API after ~60 days, so the events it covers are
+        #     already unfetchable: this file cannot be regenerated, only lost.
+        #     The Phase 4 backtest replays it to produce the phase verdict and
+        #     a test hashes its on-disk bytes against a committed manifest.
+        #   phase4_backtest_data_<date>.json (617 KB) is the machine-readable
+        #     companion to the artifact that carries the verdict. A test
+        #     asserts it cannot disagree with the markdown, so it is evidence
+        #     rather than a convenience copy. Matched by date pattern because
+        #     the filename is generated, not because the shape is open-ended.
         exclude: |
           (?x)^(
             data/forecast_archive/forecast_series_(gfs_mex|gefs)\.csv|
             data/forecast_archive/gefs_manifest\.json|
-            tests/fixtures/ensemble/.*\.grib2\.b64
+            tests/fixtures/ensemble/.*\.grib2\.b64|
+            reports/phase4/gas_quote_tape\.csv|
+            reports/phase4/phase4_backtest_data_\d{4}-\d{2}-\d{2}\.json
           )$
       - id: check-merge-conflict
 
