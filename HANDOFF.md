@@ -178,6 +178,25 @@ stopped; disk billing (~$1.20/mo for 29 GB) continues until the disk is deleted.
 placeholder Coinbase keys. No secret value is in the snapshot, but the stopped disk
 still has them in plaintext. Treat the Anthropic key and Discord webhook as exposed.
 
+### Move the archive by hand — `git clone` will not bring it
+
+`vm_snapshot_2026_08_22/archive/` is git-ignored. Cloning this repo onto the new
+host gives you `MANIFEST.md`, the checksums, the captured VM state, and the
+committed `reconcile_record/` — **but not the 197 MB of data they describe.** A
+clone alone produces a repository that documents an archive it does not contain.
+
+Copy `vm_snapshot_2026_08_22/archive/` across by whatever means suits (USB, rsync,
+object storage), then verify it arrived intact rather than assuming it did:
+
+```bash
+cd vm_snapshot_2026_08_22 && sha256sum -c meta/archive_sha256.txt
+```
+
+The GCE instance is stopped, not deleted, so until that disk is removed the archive
+can also be re-pulled from the source. Once the disk is gone, this copy is the only
+one — the market tape in particular cannot be regenerated, because Kalshi prunes
+settled markets from the public API after ~60 days.
+
 ### What to stand back up
 
 The VM did exactly four things. Only the first three are worth reproducing:
