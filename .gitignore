@@ -105,3 +105,14 @@ data/forecast_archive/cache/
 
 # Phase 2 (FR-2.1): decoded GEFS member cache — regenerable from NOAA NODD.
 data/ensemble/cache/
+
+# VM decommission snapshot (2026-08-22): 197 MB of compressed archives pulled off
+# the GCE instance money-printer-preschool-20260322 before it was stopped. The
+# payload is deliberately untracked (too large for git history); the committed
+# record of what it contains, where each piece came from, and its SHA-256 lives
+# in vm_snapshot_2026_08_22/MANIFEST.md.
+vm_snapshot_2026_08_22/archive/
+# Working extraction of the VM snapshot archives — regenerable by untarring
+# archive/*.tgz. The 27 daily reconcile runs are the one irreplaceable piece and
+# are committed separately under vm_snapshot_2026_08_22/reconcile_record/.
+vm_snapshot_2026_08_22/extracted/

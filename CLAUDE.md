@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Start with [`HANDOFF.md`](HANDOFF.md).** As of 2026-08-22 the project has taken
+> **two consecutive HALT verdicts** — weather (Phase 2, 2026-07-26) and AAA gas
+> (Phase 4, 2026-07-30) — so **no strategy is currently cleared to trade** and
+> `PRD.md` has no third engine. The Google Cloud VM was archived and stopped on
+> 2026-08-22; its data lives in `vm_snapshot_2026_08_22/` (see that folder's
+> `MANIFEST.md`). `HANDOFF.md` records what is dead, what is proven, and the open
+> decision — read it before acting on the roadmap in `PRD.md`, which describes a
+> path whose Phase 3 and Phase 5 are downstream of a proceed decision that never came.
+
 ## What This Is
 
 Money Printer is an algorithmic trading system for the **Kalshi** prediction market. It fetches live data (weather forecasts, market orderbooks), runs trading strategies against that data, and manages simulated/demo positions with full risk management. The goal is paper-trading validation before any real capital deployment.

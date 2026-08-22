@@ -11,8 +11,18 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
+      # Both reformatting hooks skip the VM decommission snapshot. Everything
+      # under vm_snapshot_2026_08_22/ is archival evidence copied verbatim off
+      # the retired GCE instance, and MANIFEST.md cites those bytes by SHA-256
+      # against digests taken on the VM itself. end-of-file-fixer appends a
+      # trailing newline to the 27 reconcile JSONs, which silently invalidates
+      # every one of those digests -- the artifact would still look fine while
+      # no longer being the thing the manifest attests to. Correct the record,
+      # never the as-run artifact.
       - id: trailing-whitespace
+        exclude: '^vm_snapshot_2026_08_22/'
       - id: end-of-file-fixer
+        exclude: '^vm_snapshot_2026_08_22/'
       - id: check-yaml
       - id: check-added-large-files
         args: [--maxkb=500]

@@ -1,0 +1,60 @@
+==============================================================================
+WEATHER SETTLEMENT RECONCILIATION REPORT (PRD FR-1.3)
+==============================================================================
+  Generated         : 2026-08-16T13:30:05Z
+  Dates             : 2026-08-14, 2026-08-15
+  Stations          : KNYC, KMDW, KLAX, KMIA
+  Markets checked   : 48
+  Outcomes verified : 24
+  Matched           : 24
+  Explained (no breach) : 24
+  UNEXPLAINED       : 0  (threshold 0)
+
+  Per city/date:
+    DATE        STN    CLI SRC        MKTS  VERI   OK  EXPL  BAD
+    ------------------------------------------------------------------
+    2026-08-14  KNYC    84 iem_cli       6     6    6     0    0
+    2026-08-14  KMDW    80 iem_cli       6     6    6     0    0
+    2026-08-14  KLAX    78 iem_cli       6     6    6     0    0
+    2026-08-14  KMIA    96 iem_cli       6     6    6     0    0
+    2026-08-15  KNYC    83 iem_cli       6     0    0     6    0
+    2026-08-15  KMDW    81 iem_cli       6     0    0     6    0
+    2026-08-15  KLAX    77 iem_cli       6     0    0     6    0
+    2026-08-15  KMIA    93 iem_cli       6     0    0     6    0
+
+  Coverage floor (a run that checks nothing must not pass):
+    markets fetched   :   48  (floor 32 over 8 city-day(s))
+    outcomes verified :   24  (floor 8)
+    COVERAGE          : OK
+
+  Sim leg           : NOTHING TO CHECK -- 1050 sim record(s) loaded, none for a reconciled market. No weather position has ever been opened, so SIM_MISMATCH is untested against live data here (it is covered by unit tests).
+
+  Non-match categories (explained items are listed, never dropped):
+    NO_RESULT            24   [explained]
+
+  Explained detail:
+    2026-08-15 KNYC  KXHIGHNY-26AUG15-T80           NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KNYC  KXHIGHNY-26AUG15-B80.5         NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KNYC  KXHIGHNY-26AUG15-B82.5         NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KNYC  KXHIGHNY-26AUG15-B84.5         NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KNYC  KXHIGHNY-26AUG15-B86.5         NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KNYC  KXHIGHNY-26AUG15-T87           NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMDW  KXHIGHCHI-26AUG15-T81          NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMDW  KXHIGHCHI-26AUG15-B81.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMDW  KXHIGHCHI-26AUG15-B83.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMDW  KXHIGHCHI-26AUG15-B85.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMDW  KXHIGHCHI-26AUG15-B87.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMDW  KXHIGHCHI-26AUG15-T88          NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KLAX  KXHIGHLAX-26AUG15-T74          NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KLAX  KXHIGHLAX-26AUG15-B74.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KLAX  KXHIGHLAX-26AUG15-B76.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KLAX  KXHIGHLAX-26AUG15-B78.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KLAX  KXHIGHLAX-26AUG15-B80.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KLAX  KXHIGHLAX-26AUG15-T81          NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMIA  KXHIGHMIA-26AUG15-T88          NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMIA  KXHIGHMIA-26AUG15-B88.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMIA  KXHIGHMIA-26AUG15-B90.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMIA  KXHIGHMIA-26AUG15-B92.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMIA  KXHIGHMIA-26AUG15-B94.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-15 KMIA  KXHIGHMIA-26AUG15-T95          NO_RESULT        status='closed' but no yes/no result pub
+==============================================================================

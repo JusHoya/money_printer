@@ -60,3 +60,10 @@ tests/fixtures/**/*.gz           -text
 tests/fixtures/**/*.zip          -text
 tests/fixtures/**/*.tgz          -text
 tests/fixtures/**/*.png          -text
+
+# VM decommission snapshot (2026-08-22): committed evidence from the retired GCE
+# instance. The reconcile record and the captured VM state are archival artifacts
+# whose bytes are cited by MANIFEST.md — including a SHA-256 table — so they are
+# pinned to LF for the same reason reports/phase4/** is: a CRLF checkout would
+# alter files nobody edited and break the digests that make them evidence.
+vm_snapshot_2026_08_22/**         text eol=lf
