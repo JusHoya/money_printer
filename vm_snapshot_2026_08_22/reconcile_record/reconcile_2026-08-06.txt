@@ -1,0 +1,31 @@
+==============================================================================
+WEATHER SETTLEMENT RECONCILIATION REPORT (PRD FR-1.3)
+==============================================================================
+  Generated         : 2026-08-07T13:30:06Z
+  Dates             : 2026-08-05, 2026-08-06
+  Stations          : KNYC, KMDW, KLAX, KMIA
+  Markets checked   : 48
+  Outcomes verified : 48
+  Matched           : 48
+  Explained (no breach) : 0
+  UNEXPLAINED       : 0  (threshold 0)
+
+  Per city/date:
+    DATE        STN    CLI SRC        MKTS  VERI   OK  EXPL  BAD
+    ------------------------------------------------------------------
+    2026-08-05  KNYC    83 iem_cli       6     6    6     0    0
+    2026-08-05  KMDW    83 iem_cli       6     6    6     0    0
+    2026-08-05  KLAX    77 iem_cli       6     6    6     0    0
+    2026-08-05  KMIA    90 iem_cli       6     6    6     0    0
+    2026-08-06  KNYC    88 iem_cli       6     6    6     0    0
+    2026-08-06  KMDW    80 iem_cli       6     6    6     0    0
+    2026-08-06  KLAX    78 iem_cli       6     6    6     0    0
+    2026-08-06  KMIA    88 iem_cli       6     6    6     0    0
+
+  Coverage floor (a run that checks nothing must not pass):
+    markets fetched   :   48  (floor 32 over 8 city-day(s))
+    outcomes verified :   48  (floor 8)
+    COVERAGE          : OK
+
+  Sim leg           : NOTHING TO CHECK -- 1050 sim record(s) loaded, none for a reconciled market. No weather position has ever been opened, so SIM_MISMATCH is untested against live data here (it is covered by unit tests).
+==============================================================================

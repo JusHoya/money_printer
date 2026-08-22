@@ -1,0 +1,3061 @@
+{
+  "generated_at": "2026-07-30T04:40:19+00:00",
+  "window": {
+    "start": "2022-01-01",
+    "end": "2026-07-29"
+  },
+  "capture_selection": {
+    "strategy": "unlimited",
+    "total_captures": 2728,
+    "selected": 2728,
+    "excluded": 0,
+    "bad_timestamps": 0
+  },
+  "captures_enumerated": 2728,
+  "captures_parsed": 2721,
+  "captures_failed": 7,
+  "failures": [
+    {
+      "timestamp": "20220715195518",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20220715195518id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20220715195518id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    },
+    {
+      "timestamp": "20231015191939",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20231015191939id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20231015191939id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    },
+    {
+      "timestamp": "20231021224058",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20231021224058id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20231021224058id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    },
+    {
+      "timestamp": "20231029202242",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20231029202242id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20231029202242id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    },
+    {
+      "timestamp": "20231119213213",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20231119213213id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20231119213213id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    },
+    {
+      "timestamp": "20231125195211",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20231125195211id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20231125195211id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    },
+    {
+      "timestamp": "20231209204807",
+      "reason_code": "AAA_SITE_OFFLINE",
+      "detail": "AAA served its maintenance page (905 bytes) at https://web.archive.org/web/20231209204807id_/https://gasprices.aaa.com/",
+      "url": "https://web.archive.org/web/20231209204807id_/https://gasprices.aaa.com/",
+      "bytes": 905
+    }
+  ],
+  "publication_hour_sweep": [
+    {
+      "publication_hour_et": 0,
+      "comparable": 2968,
+      "agreements": 2452,
+      "disagreements": 516,
+      "disagreement_rate": 0.173854,
+      "same_date_groups": 384,
+      "same_date_inconsistent": 170,
+      "cross_date_pairs": 2584,
+      "cross_date_inconsistent": 346,
+      "distinct_dates": 1564
+    },
+    {
+      "publication_hour_et": 1,
+      "comparable": 3015,
+      "agreements": 2603,
+      "disagreements": 412,
+      "disagreement_rate": 0.13665,
+      "same_date_groups": 428,
+      "same_date_inconsistent": 140,
+      "cross_date_pairs": 2587,
+      "cross_date_inconsistent": 272,
+      "distinct_dates": 1563
+    },
+    {
+      "publication_hour_et": 2,
+      "comparable": 3041,
+      "agreements": 2743,
+      "disagreements": 298,
+      "disagreement_rate": 0.097994,
+      "same_date_groups": 458,
+      "same_date_inconsistent": 106,
+      "cross_date_pairs": 2583,
+      "cross_date_inconsistent": 192,
+      "distinct_dates": 1557
+    },
+    {
+      "publication_hour_et": 3,
+      "comparable": 3049,
+      "agreements": 2853,
+      "disagreements": 196,
+      "disagreement_rate": 0.064283,
+      "same_date_groups": 467,
+      "same_date_inconsistent": 72,
+      "cross_date_pairs": 2582,
+      "cross_date_inconsistent": 124,
+      "distinct_dates": 1556
+    },
+    {
+      "publication_hour_et": 4,
+      "comparable": 3051,
+      "agreements": 2882,
+      "disagreements": 169,
+      "disagreement_rate": 0.055392,
+      "same_date_groups": 475,
+      "same_date_inconsistent": 66,
+      "cross_date_pairs": 2576,
+      "cross_date_inconsistent": 103,
+      "distinct_dates": 1553
+    },
+    {
+      "publication_hour_et": 5,
+      "comparable": 3046,
+      "agreements": 2896,
+      "disagreements": 150,
+      "disagreement_rate": 0.049245,
+      "same_date_groups": 474,
+      "same_date_inconsistent": 61,
+      "cross_date_pairs": 2572,
+      "cross_date_inconsistent": 89,
+      "distinct_dates": 1554
+    },
+    {
+      "publication_hour_et": 6,
+      "comparable": 3047,
+      "agreements": 2848,
+      "disagreements": 199,
+      "disagreement_rate": 0.06531,
+      "same_date_groups": 475,
+      "same_date_inconsistent": 82,
+      "cross_date_pairs": 2572,
+      "cross_date_inconsistent": 117,
+      "distinct_dates": 1553
+    },
+    {
+      "publication_hour_et": 7,
+      "comparable": 3058,
+      "agreements": 2757,
+      "disagreements": 301,
+      "disagreement_rate": 0.09843,
+      "same_date_groups": 478,
+      "same_date_inconsistent": 122,
+      "cross_date_pairs": 2580,
+      "cross_date_inconsistent": 179,
+      "distinct_dates": 1557
+    },
+    {
+      "publication_hour_et": 8,
+      "comparable": 3047,
+      "agreements": 2612,
+      "disagreements": 435,
+      "disagreement_rate": 0.142763,
+      "same_date_groups": 475,
+      "same_date_inconsistent": 176,
+      "cross_date_pairs": 2572,
+      "cross_date_inconsistent": 259,
+      "distinct_dates": 1553
+    },
+    {
+      "publication_hour_et": 9,
+      "comparable": 3035,
+      "agreements": 2497,
+      "disagreements": 538,
+      "disagreement_rate": 0.177265,
+      "same_date_groups": 469,
+      "same_date_inconsistent": 212,
+      "cross_date_pairs": 2566,
+      "cross_date_inconsistent": 326,
+      "distinct_dates": 1550
+    },
+    {
+      "publication_hour_et": 10,
+      "comparable": 3003,
+      "agreements": 2384,
+      "disagreements": 619,
+      "disagreement_rate": 0.206127,
+      "same_date_groups": 460,
+      "same_date_inconsistent": 242,
+      "cross_date_pairs": 2543,
+      "cross_date_inconsistent": 377,
+      "distinct_dates": 1544
+    },
+    {
+      "publication_hour_et": 11,
+      "comparable": 2982,
+      "agreements": 2297,
+      "disagreements": 685,
+      "disagreement_rate": 0.229712,
+      "same_date_groups": 452,
+      "same_date_inconsistent": 260,
+      "cross_date_pairs": 2530,
+      "cross_date_inconsistent": 425,
+      "distinct_dates": 1540
+    },
+    {
+      "publication_hour_et": 12,
+      "comparable": 2973,
+      "agreements": 2205,
+      "disagreements": 768,
+      "disagreement_rate": 0.258325,
+      "same_date_groups": 440,
+      "same_date_inconsistent": 273,
+      "cross_date_pairs": 2533,
+      "cross_date_inconsistent": 495,
+      "distinct_dates": 1540
+    }
+  ],
+  "publication_schedule_in_force": [
+    {
+      "effective_from": "2022-01-01",
+      "hour_et": 5
+    },
+    {
+      "effective_from": "2024-01-01",
+      "hour_et": 6
+    },
+    {
+      "effective_from": "2025-04-01",
+      "hour_et": 3
+    }
+  ],
+  "publication_hour_best_fit": {
+    "publication_hour_et": 5,
+    "comparable": 3046,
+    "agreements": 2896,
+    "disagreements": 150,
+    "disagreement_rate": 0.049245,
+    "same_date_groups": 474,
+    "same_date_inconsistent": 61,
+    "cross_date_pairs": 2572,
+    "cross_date_inconsistent": 89,
+    "distinct_dates": 1554
+  },
+  "publication_hour_by_era": {
+    "2022": {
+      "captures": 627,
+      "distinct_dates": 358,
+      "discriminating_captures": 248,
+      "identified": true,
+      "best_hours": [
+        5
+      ],
+      "best_rate": 0.035139,
+      "profile": {
+        "0": 0.1659,
+        "1": 0.1313,
+        "2": 0.1059,
+        "3": 0.0793,
+        "4": 0.0513,
+        "5": 0.0351,
+        "6": 0.0439,
+        "7": 0.0877,
+        "8": 0.1283,
+        "9": 0.163,
+        "10": 0.1985,
+        "11": 0.2295,
+        "12": 0.2747
+      }
+    },
+    "2023": {
+      "captures": 515,
+      "distinct_dates": 359,
+      "discriminating_captures": 144,
+      "identified": true,
+      "best_hours": [
+        5
+      ],
+      "best_rate": 0.038938,
+      "profile": {
+        "0": 0.159,
+        "1": 0.1395,
+        "2": 0.1066,
+        "3": 0.0764,
+        "4": 0.0532,
+        "5": 0.0389,
+        "6": 0.0461,
+        "7": 0.0795,
+        "8": 0.1048,
+        "9": 0.137,
+        "10": 0.1679,
+        "11": 0.1856,
+        "12": 0.223
+      }
+    },
+    "2024": {
+      "captures": 544,
+      "distinct_dates": 358,
+      "discriminating_captures": 188,
+      "identified": true,
+      "best_hours": [
+        6
+      ],
+      "best_rate": 0.038961,
+      "profile": {
+        "0": 0.2101,
+        "1": 0.1711,
+        "2": 0.1315,
+        "3": 0.1031,
+        "4": 0.0833,
+        "5": 0.0582,
+        "6": 0.039,
+        "7": 0.0616,
+        "8": 0.1036,
+        "9": 0.1403,
+        "10": 0.1763,
+        "11": 0.1983,
+        "12": 0.2213
+      }
+    },
+    "2025": {
+      "captures": 561,
+      "distinct_dates": 293,
+      "discriminating_captures": 234,
+      "identified": true,
+      "best_hours": [
+        3
+      ],
+      "best_rate": 0.038206,
+      "profile": {
+        "0": 0.1942,
+        "1": 0.1433,
+        "2": 0.0811,
+        "3": 0.0382,
+        "4": 0.0569,
+        "5": 0.0601,
+        "6": 0.1041,
+        "7": 0.1331,
+        "8": 0.1639,
+        "9": 0.1934,
+        "10": 0.222,
+        "11": 0.2423,
+        "12": 0.2652
+      }
+    },
+    "2026": {
+      "captures": 474,
+      "distinct_dates": 185,
+      "discriminating_captures": 242,
+      "identified": true,
+      "best_hours": [
+        3
+      ],
+      "best_rate": 0.020942,
+      "profile": {
+        "0": 0.1326,
+        "1": 0.0952,
+        "2": 0.0615,
+        "3": 0.0209,
+        "4": 0.0314,
+        "5": 0.0561,
+        "6": 0.0986,
+        "7": 0.1345,
+        "8": 0.2214,
+        "9": 0.2616,
+        "10": 0.2722,
+        "11": 0.298,
+        "12": 0.3083
+      }
+    }
+  },
+  "publication_schedule_alternatives": [
+    {
+      "name": "single-constant-5",
+      "eras": 1,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 5
+        }
+      ],
+      "comparable": 3046,
+      "disagreements": 150,
+      "disagreement_rate": 0.049245
+    },
+    {
+      "name": "single-constant-3",
+      "eras": 1,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 3
+        }
+      ],
+      "comparable": 3049,
+      "disagreements": 196,
+      "disagreement_rate": 0.064283
+    },
+    {
+      "name": "2-era",
+      "eras": 2,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 5
+        },
+        {
+          "effective_from": "2025-04-01",
+          "hour_et": 3
+        }
+      ],
+      "comparable": 3050,
+      "disagreements": 109,
+      "disagreement_rate": 0.035738
+    },
+    {
+      "name": "3-era-shipped",
+      "eras": 3,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 5
+        },
+        {
+          "effective_from": "2024-01-01",
+          "hour_et": 6
+        },
+        {
+          "effective_from": "2025-04-01",
+          "hour_et": 3
+        }
+      ],
+      "comparable": 3046,
+      "disagreements": 95,
+      "disagreement_rate": 0.031188
+    },
+    {
+      "name": "3-era-boundary-2025-01-01",
+      "eras": 3,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 5
+        },
+        {
+          "effective_from": "2024-01-01",
+          "hour_et": 6
+        },
+        {
+          "effective_from": "2025-01-01",
+          "hour_et": 3
+        }
+      ],
+      "comparable": 3049,
+      "disagreements": 105,
+      "disagreement_rate": 0.034438
+    },
+    {
+      "name": "4-era-per-capture-year",
+      "eras": 4,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 5
+        },
+        {
+          "effective_from": "2024-01-01",
+          "hour_et": 6
+        },
+        {
+          "effective_from": "2025-01-01",
+          "hour_et": 3
+        },
+        {
+          "effective_from": "2026-01-01",
+          "hour_et": 3
+        }
+      ],
+      "comparable": 3049,
+      "disagreements": 105,
+      "disagreement_rate": 0.034438
+    },
+    {
+      "name": "5-era-quarterly-2026Q2",
+      "eras": 5,
+      "schedule": [
+        {
+          "effective_from": "2022-01-01",
+          "hour_et": 5
+        },
+        {
+          "effective_from": "2024-01-01",
+          "hour_et": 6
+        },
+        {
+          "effective_from": "2025-01-01",
+          "hour_et": 3
+        },
+        {
+          "effective_from": "2026-01-01",
+          "hour_et": 3
+        },
+        {
+          "effective_from": "2026-04-01",
+          "hour_et": 4
+        }
+      ],
+      "comparable": 3049,
+      "disagreements": 103,
+      "disagreement_rate": 0.033782
+    }
+  ],
+  "publication_schedule_row_effect": {
+    "schedule": [
+      {
+        "effective_from": "2022-01-01",
+        "hour_et": 5
+      },
+      {
+        "effective_from": "2024-01-01",
+        "hour_et": 6
+      },
+      {
+        "effective_from": "2025-04-01",
+        "hour_et": 3
+      }
+    ],
+    "anchor_et_window": [
+      12,
+      20
+    ],
+    "candidate_hour_ceiling": 12,
+    "rows_total": 1550,
+    "rows_structurally_immune": 1401,
+    "rows_structurally_immune_pct": 90.39,
+    "rows_whose_capture_is_in_the_anchor_window": 1318,
+    "immunity_note": "A capture at or after 12:00 ET is post-publication under every candidate hour in 0..12, so its attributed date is identical under any of them. Those rows cannot move, whatever the constant. Counted on the capture hour rather than on the anchor window, because an evening capture (20:00-23:59 ET) is outside the anchor window and equally immune.",
+    "metric_definitions": {
+      "rows_redated": "Rows the schedule wrote whose own capture would be attributed to a different date under the single constant.",
+      "rows_moved": "Rows of the resulting series that would differ: a date present under one attribution and not the other, plus a date present under both whose value differs. Neither metric dominates the other -- re-dating a capture can change which capture wins its day (raising this above rows_redated), and two re-datings can land on one date or be collapsed away by a capture carrying the same value (lowering it below)."
+    },
+    "by_single_hour": [
+      {
+        "single_hour_et": 3,
+        "rows_under_schedule": 1550,
+        "rows_under_single_hour": 1556,
+        "rows_redated": 8,
+        "rows_redated_pct": 0.52,
+        "dates_redated": [
+          "2024-01-30",
+          "2024-02-04",
+          "2024-03-11",
+          "2024-10-17",
+          "2024-10-19",
+          "2024-10-28",
+          "2024-12-06",
+          "2025-01-04"
+        ],
+        "dates_only_under_schedule": [],
+        "dates_only_under_single_hour": [
+          "2022-01-06",
+          "2024-02-02",
+          "2024-10-20",
+          "2024-12-07",
+          "2025-01-05",
+          "2025-03-02"
+        ],
+        "dates_with_a_different_value": [
+          "2024-10-19"
+        ],
+        "rows_moved": 7,
+        "rows_moved_pct": 0.45
+      },
+      {
+        "single_hour_et": 4,
+        "rows_under_schedule": 1550,
+        "rows_under_single_hour": 1553,
+        "rows_redated": 9,
+        "rows_redated_pct": 0.58,
+        "dates_redated": [
+          "2024-01-30",
+          "2024-02-04",
+          "2024-03-11",
+          "2024-10-17",
+          "2024-10-28",
+          "2024-12-06",
+          "2025-01-04",
+          "2025-08-23",
+          "2026-02-23"
+        ],
+        "dates_only_under_schedule": [
+          "2025-08-23",
+          "2026-02-23"
+        ],
+        "dates_only_under_single_hour": [
+          "2024-02-02",
+          "2024-12-07",
+          "2025-01-05",
+          "2026-02-22",
+          "2026-05-22"
+        ],
+        "dates_with_a_different_value": [
+          "2025-01-04",
+          "2025-07-24",
+          "2025-08-22",
+          "2025-12-17",
+          "2025-12-30",
+          "2026-02-10"
+        ],
+        "rows_moved": 13,
+        "rows_moved_pct": 0.84
+      },
+      {
+        "single_hour_et": 5,
+        "rows_under_schedule": 1550,
+        "rows_under_single_hour": 1554,
+        "rows_redated": 9,
+        "rows_redated_pct": 0.58,
+        "dates_redated": [
+          "2024-02-04",
+          "2024-03-11",
+          "2024-10-17",
+          "2025-01-04",
+          "2025-05-05",
+          "2025-05-24",
+          "2025-08-23",
+          "2026-02-23",
+          "2026-05-05"
+        ],
+        "dates_only_under_schedule": [
+          "2025-05-05",
+          "2025-05-24",
+          "2025-08-23",
+          "2026-02-23",
+          "2026-05-05"
+        ],
+        "dates_only_under_single_hour": [
+          "2024-02-02",
+          "2025-01-05",
+          "2025-05-04",
+          "2025-05-14",
+          "2025-07-31",
+          "2025-10-16",
+          "2026-02-22",
+          "2026-05-22",
+          "2026-05-28"
+        ],
+        "dates_with_a_different_value": [
+          "2025-01-04",
+          "2025-04-05",
+          "2025-07-24",
+          "2025-08-22",
+          "2025-12-16",
+          "2025-12-17",
+          "2025-12-30",
+          "2026-01-03",
+          "2026-02-10",
+          "2026-04-25",
+          "2026-07-12"
+        ],
+        "rows_moved": 25,
+        "rows_moved_pct": 1.61
+      },
+      {
+        "single_hour_et": 6,
+        "rows_under_schedule": 1550,
+        "rows_under_single_hour": 1553,
+        "rows_redated": 8,
+        "rows_redated_pct": 0.52,
+        "dates_redated": [
+          "2025-04-26",
+          "2025-05-05",
+          "2025-05-24",
+          "2025-08-23",
+          "2025-11-08",
+          "2026-02-23",
+          "2026-03-05",
+          "2026-05-05"
+        ],
+        "dates_only_under_schedule": [
+          "2025-04-26",
+          "2025-05-05",
+          "2025-05-24",
+          "2025-08-23",
+          "2025-11-08",
+          "2026-02-23",
+          "2026-03-05",
+          "2026-05-05"
+        ],
+        "dates_only_under_single_hour": [
+          "2025-05-04",
+          "2025-05-14",
+          "2025-07-31",
+          "2025-08-27",
+          "2025-09-25",
+          "2025-10-16",
+          "2025-11-07",
+          "2025-11-15",
+          "2026-02-22",
+          "2026-05-22",
+          "2026-05-28"
+        ],
+        "dates_with_a_different_value": [
+          "2025-04-05",
+          "2025-07-24",
+          "2025-08-22",
+          "2025-10-14",
+          "2025-12-16",
+          "2025-12-17",
+          "2025-12-30",
+          "2026-01-03",
+          "2026-01-29",
+          "2026-02-10",
+          "2026-03-23",
+          "2026-04-25",
+          "2026-07-12"
+        ],
+        "rows_moved": 32,
+        "rows_moved_pct": 2.06
+      },
+      {
+        "single_hour_et": 7,
+        "rows_under_schedule": 1550,
+        "rows_under_single_hour": 1557,
+        "rows_redated": 13,
+        "rows_redated_pct": 0.84,
+        "dates_redated": [
+          "2025-04-26",
+          "2025-05-05",
+          "2025-05-24",
+          "2025-07-19",
+          "2025-08-15",
+          "2025-08-23",
+          "2025-08-24",
+          "2025-09-21",
+          "2025-11-08",
+          "2026-02-23",
+          "2026-03-05",
+          "2026-05-05",
+          "2026-05-08"
+        ],
+        "dates_only_under_schedule": [
+          "2025-04-26",
+          "2025-05-05",
+          "2025-05-24",
+          "2025-08-15",
+          "2025-08-24",
+          "2025-09-21",
+          "2025-11-08",
+          "2026-02-23",
+          "2026-03-05",
+          "2026-05-05",
+          "2026-05-08"
+        ],
+        "dates_only_under_single_hour": [
+          "2024-10-25",
+          "2025-05-04",
+          "2025-05-14",
+          "2025-07-31",
+          "2025-08-14",
+          "2025-08-27",
+          "2025-09-20",
+          "2025-09-25",
+          "2025-10-05",
+          "2025-10-11",
+          "2025-10-16",
+          "2025-10-21",
+          "2025-11-07",
+          "2025-11-15",
+          "2025-12-01",
+          "2026-02-22",
+          "2026-05-22",
+          "2026-05-28"
+        ],
+        "dates_with_a_different_value": [
+          "2022-02-27",
+          "2023-08-26",
+          "2024-02-25",
+          "2025-04-05",
+          "2025-07-19",
+          "2025-07-24",
+          "2025-08-22",
+          "2025-08-23",
+          "2025-10-14",
+          "2025-12-16",
+          "2025-12-17",
+          "2025-12-30",
+          "2026-01-03",
+          "2026-01-09",
+          "2026-01-15",
+          "2026-01-29",
+          "2026-02-10",
+          "2026-02-18",
+          "2026-03-06",
+          "2026-03-23",
+          "2026-04-25",
+          "2026-07-12",
+          "2026-07-25"
+        ],
+        "rows_moved": 52,
+        "rows_moved_pct": 3.35
+      }
+    ],
+    "worst_case_rows_redated": 13,
+    "worst_case_rows_moved": 52
+  },
+  "cdx_day_count_reconciliation": {
+    "question": "Two snapshot-day counts for gasprices.aaa.com over 2025-06-01 .. 2026-07-29 were reported during Phase 4: 362 and 348.",
+    "resolved": true,
+    "count_362": "CDX collapsed to one row per day with NO statuscode filter: 362 days have at least one capture of any status.",
+    "count_348": "CDX filtered to statuscode=200 and mimetype text/html: 348 distinct UTC days (347 distinct ET days) have a capture that can actually be parsed.",
+    "difference": "14 days whose every capture is a 301 redirect or an archived 403/error page. Measured unfiltered totals over that window: 886x 200, 173x 301, 37x 403, 8x '-', 1x 204.",
+    "authoritative_for_this_backfill": "348 UTC / 347 ET. A 301 carries no averages table and an archived 403 is an error page; parsing either would fabricate a row or a spurious suspect, so only 200 + text/html captures are admissible."
+  },
+  "publication_hour_tied_at_minimum": [
+    5
+  ],
+  "publication_hour_min_rate": 0.049245,
+  "captures_discriminating_between_hours": 1056,
+  "intraday_consistency": {
+    "dates_with_multiple_captures": 476,
+    "inconsistent_dates": 39,
+    "details": [
+      {
+        "date": "2022-01-05",
+        "values": [
+          3.293,
+          3.301
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-01-05T14:52:38-05:00",
+            "value": 3.293,
+            "url": "https://web.archive.org/web/20220105195238id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-01-06T03:54:01-05:00",
+            "value": 3.301,
+            "url": "https://web.archive.org/web/20220106085401id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-03-09",
+        "values": [
+          4.252,
+          4.318
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-03-09T15:04:44-05:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220309200444id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-10T00:06:18-05:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220310050618id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-10T01:03:32-05:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220310060332id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-10T02:23:01-05:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220310072301id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-10T03:04:50-05:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220310080450id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-10T04:24:56-05:00",
+            "value": 4.318,
+            "url": "https://web.archive.org/web/20220310092456id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-03-21",
+        "values": [
+          4.252,
+          4.255
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-03-21T05:22:57-04:00",
+            "value": 4.255,
+            "url": "https://web.archive.org/web/20220321092257id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T06:24:01-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321102401id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T07:04:55-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321110455id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T08:03:18-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321120318id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T09:08:21-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321130821id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T10:07:56-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321140756id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T11:07:49-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321150749id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T12:06:52-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321160652id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-03-21T15:23:05-04:00",
+            "value": 4.252,
+            "url": "https://web.archive.org/web/20220321192305id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-04-01",
+        "values": [
+          4.215,
+          4.225
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-04-01T05:07:09-04:00",
+            "value": 4.225,
+            "url": "https://web.archive.org/web/20220401090709id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T06:04:58-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401100458id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T07:08:40-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401110840id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T08:07:22-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401120722id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T09:11:30-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401131130id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T10:09:56-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401140956id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T11:04:59-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401150459id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T12:05:30-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401160530id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-01T15:04:00-04:00",
+            "value": 4.215,
+            "url": "https://web.archive.org/web/20220401190400id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-04-11",
+        "values": [
+          4.098,
+          4.114
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-04-11T15:24:45-04:00",
+            "value": 4.114,
+            "url": "https://web.archive.org/web/20220411192445id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-12T00:06:39-04:00",
+            "value": 4.114,
+            "url": "https://web.archive.org/web/20220412040639id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-12T02:09:44-04:00",
+            "value": 4.114,
+            "url": "https://web.archive.org/web/20220412060944id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-12T03:24:40-04:00",
+            "value": 4.114,
+            "url": "https://web.archive.org/web/20220412072440id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-04-12T04:37:54-04:00",
+            "value": 4.098,
+            "url": "https://web.archive.org/web/20220412083754id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-05-16",
+        "values": [
+          4.47,
+          4.483
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-05-16T05:38:07-04:00",
+            "value": 4.47,
+            "url": "https://web.archive.org/web/20220516093807id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T06:34:04-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516103404id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T07:23:45-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516112345id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T08:51:53-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516125153id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T09:23:10-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516132310id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T10:06:21-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516140621id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T11:52:25-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516155225id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T12:10:00-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516161000id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-16T15:23:18-04:00",
+            "value": 4.483,
+            "url": "https://web.archive.org/web/20220516192318id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-05-27",
+        "values": [
+          4.599,
+          4.6
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-05-27T05:22:53-04:00",
+            "value": 4.6,
+            "url": "https://web.archive.org/web/20220527092253id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T06:09:37-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527100937id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T07:09:12-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527110912id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T08:10:35-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527121035id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T09:03:28-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527130328id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T10:08:36-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527140836id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T11:06:53-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527150653id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T12:03:30-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527160330id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-05-27T15:39:30-04:00",
+            "value": 4.599,
+            "url": "https://web.archive.org/web/20220527193930id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-06-08",
+        "values": [
+          4.919,
+          4.955
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-06-08T05:24:56-04:00",
+            "value": 4.919,
+            "url": "https://web.archive.org/web/20220608092456id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T06:05:15-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608100515id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T07:25:40-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608112540id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T08:08:00-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608120800id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T09:08:26-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608130826id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T10:00:52-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608140052id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T11:08:18-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608150818id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T12:23:02-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608162302id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-06-08T15:06:37-04:00",
+            "value": 4.955,
+            "url": "https://web.archive.org/web/20220608190637id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-07-11",
+        "values": [
+          4.655,
+          4.678
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-07-11T15:09:52-04:00",
+            "value": 4.678,
+            "url": "https://web.archive.org/web/20220711190952id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-07-12T00:02:09-04:00",
+            "value": 4.678,
+            "url": "https://web.archive.org/web/20220712040209id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-07-12T01:40:13-04:00",
+            "value": 4.678,
+            "url": "https://web.archive.org/web/20220712054013id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-07-12T02:25:59-04:00",
+            "value": 4.678,
+            "url": "https://web.archive.org/web/20220712062559id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-07-12T03:07:21-04:00",
+            "value": 4.678,
+            "url": "https://web.archive.org/web/20220712070721id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-07-12T04:03:40-04:00",
+            "value": 4.655,
+            "url": "https://web.archive.org/web/20220712080340id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-08-15",
+        "values": [
+          3.949,
+          3.956
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-08-15T14:15:38-04:00",
+            "value": 3.956,
+            "url": "https://web.archive.org/web/20220815181538id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-08-16T00:38:47-04:00",
+            "value": 3.956,
+            "url": "https://web.archive.org/web/20220816043847id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-08-16T02:46:19-04:00",
+            "value": 3.956,
+            "url": "https://web.archive.org/web/20220816064619id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-08-16T04:43:52-04:00",
+            "value": 3.949,
+            "url": "https://web.archive.org/web/20220816084352id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-09-30",
+        "values": [
+          3.797,
+          3.8
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-09-30T15:27:26-04:00",
+            "value": 3.797,
+            "url": "https://web.archive.org/web/20220930192726id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-10-01T00:04:00-04:00",
+            "value": 3.797,
+            "url": "https://web.archive.org/web/20221001040400id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-10-01T02:41:20-04:00",
+            "value": 3.797,
+            "url": "https://web.archive.org/web/20221001064120id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-10-01T04:07:54-04:00",
+            "value": 3.8,
+            "url": "https://web.archive.org/web/20221001080754id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2022-11-04",
+        "values": [
+          3.778,
+          3.792
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2022-11-04T05:23:43-04:00",
+            "value": 3.778,
+            "url": "https://web.archive.org/web/20221104092343id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-11-04T06:06:48-04:00",
+            "value": 3.792,
+            "url": "https://web.archive.org/web/20221104100648id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-11-04T08:44:00-04:00",
+            "value": 3.792,
+            "url": "https://web.archive.org/web/20221104124400id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-11-04T11:40:18-04:00",
+            "value": 3.792,
+            "url": "https://web.archive.org/web/20221104154018id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-11-04T12:29:23-04:00",
+            "value": 3.792,
+            "url": "https://web.archive.org/web/20221104162923id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2022-11-04T15:13:05-04:00",
+            "value": 3.792,
+            "url": "https://web.archive.org/web/20221104191305id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2023-01-11",
+        "values": [
+          3.267,
+          3.272
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2023-01-11T14:34:26-05:00",
+            "value": 3.267,
+            "url": "https://web.archive.org/web/20230111193426id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-01-12T00:35:23-05:00",
+            "value": 3.267,
+            "url": "https://web.archive.org/web/20230112053523id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-01-12T01:06:48-05:00",
+            "value": 3.267,
+            "url": "https://web.archive.org/web/20230112060648id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-01-12T02:04:53-05:00",
+            "value": 3.267,
+            "url": "https://web.archive.org/web/20230112070453id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-01-12T03:23:18-05:00",
+            "value": 3.272,
+            "url": "https://web.archive.org/web/20230112082318id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-01-12T04:06:14-05:00",
+            "value": 3.272,
+            "url": "https://web.archive.org/web/20230112090614id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2023-03-20",
+        "values": [
+          3.443,
+          3.446
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2023-03-20T05:06:18-04:00",
+            "value": 3.446,
+            "url": "https://web.archive.org/web/20230320090618id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-03-20T06:54:09-04:00",
+            "value": 3.443,
+            "url": "https://web.archive.org/web/20230320105409id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-03-20T08:20:46-04:00",
+            "value": 3.443,
+            "url": "https://web.archive.org/web/20230320122046id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-03-20T11:56:21-04:00",
+            "value": 3.443,
+            "url": "https://web.archive.org/web/20230320155621id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-03-20T12:11:06-04:00",
+            "value": 3.443,
+            "url": "https://web.archive.org/web/20230320161106id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-03-20T15:07:54-04:00",
+            "value": 3.443,
+            "url": "https://web.archive.org/web/20230320190754id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2023-04-04",
+        "values": [
+          3.507,
+          3.528
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2023-04-04T15:46:38-04:00",
+            "value": 3.507,
+            "url": "https://web.archive.org/web/20230404194638id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-04-05T01:24:04-04:00",
+            "value": 3.507,
+            "url": "https://web.archive.org/web/20230405052404id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-04-05T04:25:20-04:00",
+            "value": 3.528,
+            "url": "https://web.archive.org/web/20230405082520id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2023-08-04",
+        "values": [
+          3.821,
+          3.831
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2023-08-04T05:14:35-04:00",
+            "value": 3.821,
+            "url": "https://web.archive.org/web/20230804091435id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-08-04T07:09:22-04:00",
+            "value": 3.831,
+            "url": "https://web.archive.org/web/20230804110922id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-08-04T08:05:43-04:00",
+            "value": 3.831,
+            "url": "https://web.archive.org/web/20230804120543id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-08-04T09:10:57-04:00",
+            "value": 3.831,
+            "url": "https://web.archive.org/web/20230804131057id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-08-04T11:06:16-04:00",
+            "value": 3.831,
+            "url": "https://web.archive.org/web/20230804150616id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-08-04T12:38:22-04:00",
+            "value": 3.831,
+            "url": "https://web.archive.org/web/20230804163822id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-08-04T15:21:54-04:00",
+            "value": 3.831,
+            "url": "https://web.archive.org/web/20230804192154id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2023-09-18",
+        "values": [
+          3.88,
+          3.881
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2023-09-18T13:08:09-04:00",
+            "value": 3.881,
+            "url": "https://web.archive.org/web/20230918170809id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-09-19T00:10:35-04:00",
+            "value": 3.881,
+            "url": "https://web.archive.org/web/20230919041035id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-09-19T01:00:37-04:00",
+            "value": 3.881,
+            "url": "https://web.archive.org/web/20230919050037id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-09-19T04:56:08-04:00",
+            "value": 3.88,
+            "url": "https://web.archive.org/web/20230919085608id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2023-11-27",
+        "values": [
+          3.25,
+          3.253
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2023-11-27T05:06:03-05:00",
+            "value": 3.253,
+            "url": "https://web.archive.org/web/20231127100603id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T07:07:30-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127120730id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T08:52:01-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127135201id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T09:24:32-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127142432id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T10:07:08-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127150708id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T11:37:36-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127163736id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T12:08:04-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127170804id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2023-11-27T15:06:32-05:00",
+            "value": 3.25,
+            "url": "https://web.archive.org/web/20231127200632id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-03-12",
+        "values": [
+          3.394,
+          3.397
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-03-12T06:28:25-04:00",
+            "value": 3.397,
+            "url": "https://web.archive.org/web/20240312102825id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-03-12T09:18:52-04:00",
+            "value": 3.394,
+            "url": "https://web.archive.org/web/20240312131852id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-03-12T10:52:57-04:00",
+            "value": 3.394,
+            "url": "https://web.archive.org/web/20240312145257id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-03-19",
+        "values": [
+          3.489,
+          3.515
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-03-19T16:24:43-04:00",
+            "value": 3.489,
+            "url": "https://web.archive.org/web/20240319202443id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-03-20T00:29:04-04:00",
+            "value": 3.489,
+            "url": "https://web.archive.org/web/20240320042904id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-03-20T02:33:13-04:00",
+            "value": 3.489,
+            "url": "https://web.archive.org/web/20240320063313id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-03-20T04:16:45-04:00",
+            "value": 3.515,
+            "url": "https://web.archive.org/web/20240320081645id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-04-11",
+        "values": [
+          3.63,
+          3.634
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-04-11T14:36:26-04:00",
+            "value": 3.63,
+            "url": "https://web.archive.org/web/20240411183626id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-12T03:27:05-04:00",
+            "value": 3.63,
+            "url": "https://web.archive.org/web/20240412072705id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-12T05:36:15-04:00",
+            "value": 3.634,
+            "url": "https://web.archive.org/web/20240412093615id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-04-23",
+        "values": [
+          3.667,
+          3.675
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-04-23T06:10:57-04:00",
+            "value": 3.675,
+            "url": "https://web.archive.org/web/20240423101057id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-23T07:21:16-04:00",
+            "value": 3.667,
+            "url": "https://web.archive.org/web/20240423112116id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-23T08:56:52-04:00",
+            "value": 3.667,
+            "url": "https://web.archive.org/web/20240423125652id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-23T09:53:42-04:00",
+            "value": 3.667,
+            "url": "https://web.archive.org/web/20240423135342id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-23T12:51:59-04:00",
+            "value": 3.667,
+            "url": "https://web.archive.org/web/20240423165159id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-04-23T15:26:52-04:00",
+            "value": 3.667,
+            "url": "https://web.archive.org/web/20240423192652id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-06-19",
+        "values": [
+          3.44,
+          3.449
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-06-19T06:14:07-04:00",
+            "value": 3.44,
+            "url": "https://web.archive.org/web/20240619101407id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-06-19T07:38:53-04:00",
+            "value": 3.44,
+            "url": "https://web.archive.org/web/20240619113853id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-06-19T08:50:15-04:00",
+            "value": 3.449,
+            "url": "https://web.archive.org/web/20240619125015id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-06-19T16:03:39-04:00",
+            "value": 3.449,
+            "url": "https://web.archive.org/web/20240619200339id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-07-01",
+        "values": [
+          3.491,
+          3.492
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-07-01T06:22:26-04:00",
+            "value": 3.492,
+            "url": "https://web.archive.org/web/20240701102226id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-07-01T07:37:10-04:00",
+            "value": 3.491,
+            "url": "https://web.archive.org/web/20240701113710id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-07-01T09:47:52-04:00",
+            "value": 3.491,
+            "url": "https://web.archive.org/web/20240701134752id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-07-01T10:27:38-04:00",
+            "value": 3.491,
+            "url": "https://web.archive.org/web/20240701142738id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-07-01T11:23:37-04:00",
+            "value": 3.491,
+            "url": "https://web.archive.org/web/20240701152337id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-07-01T12:54:55-04:00",
+            "value": 3.491,
+            "url": "https://web.archive.org/web/20240701165455id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-07-01T15:48:51-04:00",
+            "value": 3.491,
+            "url": "https://web.archive.org/web/20240701194851id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-09-07",
+        "values": [
+          3.273,
+          3.281,
+          3.296
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-09-07T13:17:30-04:00",
+            "value": 3.296,
+            "url": "https://web.archive.org/web/20240907171730id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-09-08T01:48:26-04:00",
+            "value": 3.281,
+            "url": "https://web.archive.org/web/20240908054826id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-09-08T05:08:05-04:00",
+            "value": 3.273,
+            "url": "https://web.archive.org/web/20240908090805id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-09-18",
+        "values": [
+          3.215,
+          3.224
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-09-18T15:05:47-04:00",
+            "value": 3.215,
+            "url": "https://web.archive.org/web/20240918190547id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-09-19T00:06:16-04:00",
+            "value": 3.215,
+            "url": "https://web.archive.org/web/20240919040616id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-09-19T02:16:57-04:00",
+            "value": 3.215,
+            "url": "https://web.archive.org/web/20240919061657id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-09-19T04:27:40-04:00",
+            "value": 3.224,
+            "url": "https://web.archive.org/web/20240919082740id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-09-30",
+        "values": [
+          3.204,
+          3.216
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-09-30T14:43:00-04:00",
+            "value": 3.216,
+            "url": "https://web.archive.org/web/20240930184300id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-10-01T00:11:02-04:00",
+            "value": 3.216,
+            "url": "https://web.archive.org/web/20241001041102id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-10-01T05:54:48-04:00",
+            "value": 3.204,
+            "url": "https://web.archive.org/web/20241001095448id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2024-10-19",
+        "values": [
+          3.177,
+          3.183
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2024-10-19T20:14:46-04:00",
+            "value": 3.183,
+            "url": "https://web.archive.org/web/20241020001446id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2024-10-20T03:34:12-04:00",
+            "value": 3.177,
+            "url": "https://web.archive.org/web/20241020073412id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2025-01-04",
+        "values": [
+          3.061,
+          3.064
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2025-01-04T10:27:10-05:00",
+            "value": 3.064,
+            "url": "https://web.archive.org/web/20250104152710id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-01-05T02:10:27-05:00",
+            "value": 3.064,
+            "url": "https://web.archive.org/web/20250105071027id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-01-05T03:59:11-05:00",
+            "value": 3.061,
+            "url": "https://web.archive.org/web/20250105085911id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-01-05T05:39:17-05:00",
+            "value": 3.064,
+            "url": "https://web.archive.org/web/20250105103917id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2025-02-03",
+        "values": [
+          3.098,
+          3.107
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2025-02-03T14:45:52-05:00",
+            "value": 3.098,
+            "url": "https://web.archive.org/web/20250203194552id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-02-04T01:05:42-05:00",
+            "value": 3.098,
+            "url": "https://web.archive.org/web/20250204060542id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-02-04T04:26:40-05:00",
+            "value": 3.107,
+            "url": "https://web.archive.org/web/20250204092640id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2025-03-22",
+        "values": [
+          3.126,
+          3.127
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2025-03-22T19:34:02-04:00",
+            "value": 3.127,
+            "url": "https://web.archive.org/web/20250322233402id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-03-23T00:07:00-04:00",
+            "value": 3.127,
+            "url": "https://web.archive.org/web/20250323040700id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-03-23T03:58:53-04:00",
+            "value": 3.126,
+            "url": "https://web.archive.org/web/20250323075853id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-03-23T04:30:10-04:00",
+            "value": 3.127,
+            "url": "https://web.archive.org/web/20250323083010id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2025-04-05",
+        "values": [
+          3.262,
+          3.268
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2025-04-05T04:56:08-04:00",
+            "value": 3.268,
+            "url": "https://web.archive.org/web/20250405085608id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-04-05T09:19:39-04:00",
+            "value": 3.262,
+            "url": "https://web.archive.org/web/20250405131939id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-04-06T00:29:07-04:00",
+            "value": 3.262,
+            "url": "https://web.archive.org/web/20250406042907id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-04-06T01:09:56-04:00",
+            "value": 3.262,
+            "url": "https://web.archive.org/web/20250406050956id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2025-06-15",
+        "values": [
+          3.133,
+          3.135
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2025-06-15T03:49:09-04:00",
+            "value": 3.133,
+            "url": "https://web.archive.org/web/20250615074909id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2025-06-16T01:15:03-04:00",
+            "value": 3.135,
+            "url": "https://web.archive.org/web/20250616051503id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2026-01-16",
+        "values": [
+          2.839,
+          2.844
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2026-01-16T03:04:34-05:00",
+            "value": 2.844,
+            "url": "https://web.archive.org/web/20260116080434id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-16T06:29:11-05:00",
+            "value": 2.839,
+            "url": "https://web.archive.org/web/20260116112911id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-16T11:55:00-05:00",
+            "value": 2.839,
+            "url": "https://web.archive.org/web/20260116165500id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-16T12:39:41-05:00",
+            "value": 2.839,
+            "url": "https://web.archive.org/web/20260116173941id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-16T17:56:00-05:00",
+            "value": 2.839,
+            "url": "https://web.archive.org/web/20260116225600id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-16T23:40:56-05:00",
+            "value": 2.839,
+            "url": "https://web.archive.org/web/20260117044056id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-17T01:11:34-05:00",
+            "value": 2.839,
+            "url": "https://web.archive.org/web/20260117061134id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2026-01-18",
+        "values": [
+          2.824,
+          2.83
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2026-01-18T03:04:17-05:00",
+            "value": 2.83,
+            "url": "https://web.archive.org/web/20260118080417id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-18T08:36:30-05:00",
+            "value": 2.824,
+            "url": "https://web.archive.org/web/20260118133630id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-18T18:00:29-05:00",
+            "value": 2.824,
+            "url": "https://web.archive.org/web/20260118230029id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-18T22:15:54-05:00",
+            "value": 2.824,
+            "url": "https://web.archive.org/web/20260119031554id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-01-19T00:39:17-05:00",
+            "value": 2.824,
+            "url": "https://web.archive.org/web/20260119053917id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2026-04-17",
+        "values": [
+          4.076,
+          4.093
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2026-04-17T03:09:35-04:00",
+            "value": 4.093,
+            "url": "https://web.archive.org/web/20260417070935id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-04-17T19:31:34-04:00",
+            "value": 4.076,
+            "url": "https://web.archive.org/web/20260417233134id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2026-06-05",
+        "values": [
+          4.22,
+          4.241
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2026-06-05T03:17:37-04:00",
+            "value": 4.241,
+            "url": "https://web.archive.org/web/20260605071737id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-06-05T17:25:48-04:00",
+            "value": 4.22,
+            "url": "https://web.archive.org/web/20260605212548id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-06-05T19:08:40-04:00",
+            "value": 4.22,
+            "url": "https://web.archive.org/web/20260605230840id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2026-06-07",
+        "values": [
+          4.174,
+          4.191
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2026-06-07T03:16:16-04:00",
+            "value": 4.191,
+            "url": "https://web.archive.org/web/20260607071616id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-06-07T10:50:52-04:00",
+            "value": 4.174,
+            "url": "https://web.archive.org/web/20260607145052id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-06-07T11:22:47-04:00",
+            "value": 4.174,
+            "url": "https://web.archive.org/web/20260607152247id_/https://gasprices.aaa.com/"
+          }
+        ]
+      },
+      {
+        "date": "2026-07-25",
+        "values": [
+          4.105,
+          4.111
+        ],
+        "captures": [
+          {
+            "captured_at_et": "2026-07-25T03:22:55-04:00",
+            "value": 4.105,
+            "url": "https://web.archive.org/web/20260725072255id_/https://gasprices.aaa.com/"
+          },
+          {
+            "captured_at_et": "2026-07-25T07:01:31-04:00",
+            "value": 4.111,
+            "url": "https://web.archive.org/web/20260725110131id_/https://gasprices.aaa.com/"
+          }
+        ]
+      }
+    ]
+  },
+  "external_cross_check_eia": {
+    "paired": 214,
+    "eia_rows": 291,
+    "mean_abs_diff": 0.0147,
+    "median_abs_diff": 0.014,
+    "max_abs_diff": 0.042,
+    "mean_signed_diff": 0.0135,
+    "worst_date": "2024-09-02",
+    "worst_aaa": 3.331,
+    "worst_eia": 3.289,
+    "exceeds_threshold": false,
+    "warn_threshold": 0.1,
+    "sample": [
+      {
+        "date": "2022-01-03",
+        "aaa": 3.288,
+        "eia": 3.281,
+        "diff": 0.007
+      },
+      {
+        "date": "2022-01-17",
+        "aaa": 3.31,
+        "eia": 3.306,
+        "diff": 0.004
+      },
+      {
+        "date": "2022-01-24",
+        "aaa": 3.331,
+        "eia": 3.323,
+        "diff": 0.008
+      },
+      {
+        "date": "2022-01-31",
+        "aaa": 3.366,
+        "eia": 3.368,
+        "diff": -0.002
+      },
+      {
+        "date": "2022-02-07",
+        "aaa": 3.441,
+        "eia": 3.444,
+        "diff": -0.003
+      },
+      {
+        "date": "2022-02-14",
+        "aaa": 3.488,
+        "eia": 3.487,
+        "diff": 0.001
+      },
+      {
+        "date": "2022-02-21",
+        "aaa": 3.532,
+        "eia": 3.53,
+        "diff": 0.002
+      },
+      {
+        "date": "2022-02-28",
+        "aaa": 3.61,
+        "eia": 3.608,
+        "diff": 0.002
+      },
+      {
+        "date": "2022-03-07",
+        "aaa": 4.065,
+        "eia": 4.102,
+        "diff": -0.037
+      },
+      {
+        "date": "2022-03-14",
+        "aaa": 4.325,
+        "eia": 4.315,
+        "diff": 0.01
+      }
+    ]
+  },
+  "yesterday_chain_check": {
+    "comparable": 1461,
+    "agreements": 1449,
+    "disagreements": 12,
+    "disagreement_rate": 0.008214,
+    "skipped_gap": 89,
+    "skipped_no_yesterday": 0,
+    "tolerance": 0.0005,
+    "details": [
+      {
+        "date": "2023-03-18",
+        "yesterday_on_date": 3.464,
+        "current_on_prev_date": 3.457,
+        "delta": 0.007,
+        "snapshot_url": "https://web.archive.org/web/20230318190711id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20230317201920id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2023-03-18T15:07:11-04:00",
+        "prev_captured_at_et": "2023-03-17T16:19:20-04:00"
+      },
+      {
+        "date": "2023-03-19",
+        "yesterday_on_date": 3.449,
+        "current_on_prev_date": 3.457,
+        "delta": 0.008,
+        "snapshot_url": "https://web.archive.org/web/20230319190513id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20230318190711id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2023-03-19T15:05:13-04:00",
+        "prev_captured_at_et": "2023-03-18T15:07:11-04:00"
+      },
+      {
+        "date": "2023-12-18",
+        "yesterday_on_date": 3.075,
+        "current_on_prev_date": 3.068,
+        "delta": 0.007,
+        "snapshot_url": "https://web.archive.org/web/20231218212242id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20231217202028id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2023-12-18T16:22:42-05:00",
+        "prev_captured_at_et": "2023-12-17T15:20:28-05:00"
+      },
+      {
+        "date": "2023-12-19",
+        "yesterday_on_date": 3.066,
+        "current_on_prev_date": 3.068,
+        "delta": 0.002,
+        "snapshot_url": "https://web.archive.org/web/20231219200522id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20231218212242id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2023-12-19T15:05:22-05:00",
+        "prev_captured_at_et": "2023-12-18T16:22:42-05:00"
+      },
+      {
+        "date": "2024-09-07",
+        "yesterday_on_date": 3.308,
+        "current_on_prev_date": 3.296,
+        "delta": 0.012,
+        "snapshot_url": "https://web.archive.org/web/20240907171730id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20240906192120id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2024-09-07T13:17:30-04:00",
+        "prev_captured_at_et": "2024-09-06T15:21:20-04:00"
+      },
+      {
+        "date": "2024-09-08",
+        "yesterday_on_date": 3.281,
+        "current_on_prev_date": 3.296,
+        "delta": 0.015,
+        "snapshot_url": "https://web.archive.org/web/20240908180341id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20240907171730id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2024-09-08T14:03:41-04:00",
+        "prev_captured_at_et": "2024-09-07T13:17:30-04:00"
+      },
+      {
+        "date": "2024-09-22",
+        "yesterday_on_date": 3.222,
+        "current_on_prev_date": 3.214,
+        "delta": 0.008,
+        "snapshot_url": "https://web.archive.org/web/20240922172415id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20240921183553id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2024-09-22T13:24:15-04:00",
+        "prev_captured_at_et": "2024-09-21T14:35:53-04:00"
+      },
+      {
+        "date": "2024-09-23",
+        "yesterday_on_date": 3.208,
+        "current_on_prev_date": 3.214,
+        "delta": 0.006,
+        "snapshot_url": "https://web.archive.org/web/20240923192214id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20240922172415id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2024-09-23T15:22:14-04:00",
+        "prev_captured_at_et": "2024-09-22T13:24:15-04:00"
+      },
+      {
+        "date": "2024-10-19",
+        "yesterday_on_date": 3.183,
+        "current_on_prev_date": 3.191,
+        "delta": 0.008,
+        "snapshot_url": "https://web.archive.org/web/20241020073412id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20241019021506id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2024-10-20T03:34:12-04:00",
+        "prev_captured_at_et": "2024-10-18T22:15:06-04:00"
+      },
+      {
+        "date": "2025-05-24",
+        "yesterday_on_date": 3.195,
+        "current_on_prev_date": 3.196,
+        "delta": 0.001,
+        "snapshot_url": "https://web.archive.org/web/20250524081010id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20250523231541id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2025-05-24T04:10:10-04:00",
+        "prev_captured_at_et": "2025-05-23T19:15:41-04:00"
+      },
+      {
+        "date": "2025-05-25",
+        "yesterday_on_date": 3.187,
+        "current_on_prev_date": 3.196,
+        "delta": 0.009,
+        "snapshot_url": "https://web.archive.org/web/20250525161111id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20250524081010id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2025-05-25T12:11:11-04:00",
+        "prev_captured_at_et": "2025-05-24T04:10:10-04:00"
+      },
+      {
+        "date": "2025-07-16",
+        "yesterday_on_date": 3.15,
+        "current_on_prev_date": 3.153,
+        "delta": 0.003,
+        "snapshot_url": "https://web.archive.org/web/20250716174249id_/https://gasprices.aaa.com/",
+        "prev_snapshot_url": "https://web.archive.org/web/20250715124609id_/https://gasprices.aaa.com/",
+        "captured_at_et": "2025-07-16T13:42:49-04:00",
+        "prev_captured_at_et": "2025-07-15T08:46:09-04:00"
+      }
+    ]
+  },
+  "coverage": {
+    "window_start": "2022-01-01",
+    "window_end": "2026-07-29",
+    "days_in_window": 1671,
+    "days_present": 1550,
+    "days_missing": 121,
+    "coverage_pct": 92.76,
+    "longest_consecutive_run": 355,
+    "rows_outside_window": 0,
+    "dates_outside_window": [],
+    "by_month": {
+      "2022-01": {
+        "days_in_window": 31,
+        "present": 25
+      },
+      "2022-02": {
+        "days_in_window": 28,
+        "present": 28
+      },
+      "2022-03": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2022-04": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2022-05": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2022-06": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2022-07": {
+        "days_in_window": 31,
+        "present": 30
+      },
+      "2022-08": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2022-09": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2022-10": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2022-11": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2022-12": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2023-01": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2023-02": {
+        "days_in_window": 28,
+        "present": 28
+      },
+      "2023-03": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2023-04": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2023-05": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2023-06": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2023-07": {
+        "days_in_window": 31,
+        "present": 30
+      },
+      "2023-08": {
+        "days_in_window": 31,
+        "present": 30
+      },
+      "2023-09": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2023-10": {
+        "days_in_window": 31,
+        "present": 28
+      },
+      "2023-11": {
+        "days_in_window": 30,
+        "present": 28
+      },
+      "2023-12": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2024-01": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2024-02": {
+        "days_in_window": 29,
+        "present": 28
+      },
+      "2024-03": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2024-04": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2024-05": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2024-06": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2024-07": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2024-08": {
+        "days_in_window": 31,
+        "present": 31
+      },
+      "2024-09": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2024-10": {
+        "days_in_window": 31,
+        "present": 26
+      },
+      "2024-11": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2024-12": {
+        "days_in_window": 31,
+        "present": 28
+      },
+      "2025-01": {
+        "days_in_window": 31,
+        "present": 28
+      },
+      "2025-02": {
+        "days_in_window": 28,
+        "present": 27
+      },
+      "2025-03": {
+        "days_in_window": 31,
+        "present": 28
+      },
+      "2025-04": {
+        "days_in_window": 30,
+        "present": 26
+      },
+      "2025-05": {
+        "days_in_window": 31,
+        "present": 24
+      },
+      "2025-06": {
+        "days_in_window": 30,
+        "present": 23
+      },
+      "2025-07": {
+        "days_in_window": 31,
+        "present": 28
+      },
+      "2025-08": {
+        "days_in_window": 31,
+        "present": 23
+      },
+      "2025-09": {
+        "days_in_window": 30,
+        "present": 20
+      },
+      "2025-10": {
+        "days_in_window": 31,
+        "present": 19
+      },
+      "2025-11": {
+        "days_in_window": 30,
+        "present": 19
+      },
+      "2025-12": {
+        "days_in_window": 31,
+        "present": 27
+      },
+      "2026-01": {
+        "days_in_window": 31,
+        "present": 30
+      },
+      "2026-02": {
+        "days_in_window": 28,
+        "present": 15
+      },
+      "2026-03": {
+        "days_in_window": 31,
+        "present": 25
+      },
+      "2026-04": {
+        "days_in_window": 30,
+        "present": 30
+      },
+      "2026-05": {
+        "days_in_window": 31,
+        "present": 28
+      },
+      "2026-06": {
+        "days_in_window": 30,
+        "present": 29
+      },
+      "2026-07": {
+        "days_in_window": 29,
+        "present": 28
+      }
+    },
+    "missing_days": [
+      "2022-01-06",
+      "2022-01-07",
+      "2022-01-09",
+      "2022-01-10",
+      "2022-01-16",
+      "2022-01-28",
+      "2022-07-15",
+      "2023-07-06",
+      "2023-08-08",
+      "2023-10-15",
+      "2023-10-21",
+      "2023-10-29",
+      "2023-11-19",
+      "2023-11-25",
+      "2024-02-02",
+      "2024-10-10",
+      "2024-10-15",
+      "2024-10-16",
+      "2024-10-20",
+      "2024-10-25",
+      "2024-12-07",
+      "2024-12-10",
+      "2024-12-30",
+      "2025-01-05",
+      "2025-01-09",
+      "2025-01-15",
+      "2025-02-17",
+      "2025-03-02",
+      "2025-03-04",
+      "2025-03-29",
+      "2025-04-02",
+      "2025-04-03",
+      "2025-04-23",
+      "2025-04-30",
+      "2025-05-03",
+      "2025-05-04",
+      "2025-05-10",
+      "2025-05-14",
+      "2025-05-18",
+      "2025-05-26",
+      "2025-05-27",
+      "2025-06-03",
+      "2025-06-11",
+      "2025-06-19",
+      "2025-06-24",
+      "2025-06-25",
+      "2025-06-26",
+      "2025-06-27",
+      "2025-07-04",
+      "2025-07-28",
+      "2025-07-31",
+      "2025-08-03",
+      "2025-08-06",
+      "2025-08-07",
+      "2025-08-10",
+      "2025-08-13",
+      "2025-08-14",
+      "2025-08-26",
+      "2025-08-27",
+      "2025-09-02",
+      "2025-09-12",
+      "2025-09-15",
+      "2025-09-16",
+      "2025-09-18",
+      "2025-09-19",
+      "2025-09-20",
+      "2025-09-22",
+      "2025-09-25",
+      "2025-09-30",
+      "2025-10-04",
+      "2025-10-05",
+      "2025-10-08",
+      "2025-10-11",
+      "2025-10-16",
+      "2025-10-18",
+      "2025-10-20",
+      "2025-10-21",
+      "2025-10-24",
+      "2025-10-25",
+      "2025-10-26",
+      "2025-10-28",
+      "2025-11-01",
+      "2025-11-02",
+      "2025-11-03",
+      "2025-11-07",
+      "2025-11-13",
+      "2025-11-14",
+      "2025-11-15",
+      "2025-11-19",
+      "2025-11-23",
+      "2025-11-27",
+      "2025-11-29",
+      "2025-12-01",
+      "2025-12-04",
+      "2025-12-05",
+      "2025-12-10",
+      "2026-01-02",
+      "2026-02-04",
+      "2026-02-07",
+      "2026-02-12",
+      "2026-02-14",
+      "2026-02-15",
+      "2026-02-16",
+      "2026-02-21",
+      "2026-02-22",
+      "2026-02-24",
+      "2026-02-25",
+      "2026-02-26",
+      "2026-02-27",
+      "2026-02-28",
+      "2026-03-02",
+      "2026-03-13",
+      "2026-03-14",
+      "2026-03-15",
+      "2026-03-27",
+      "2026-03-29",
+      "2026-05-01",
+      "2026-05-22",
+      "2026-05-28",
+      "2026-06-02",
+      "2026-07-28"
+    ]
+  },
+  "suspect_rows": [
+    {
+      "date": "2022-01-05",
+      "value": 3.293,
+      "url": "https://web.archive.org/web/20220105195238id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-03-09",
+      "value": 4.252,
+      "url": "https://web.archive.org/web/20220309200444id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-03-21",
+      "value": 4.252,
+      "url": "https://web.archive.org/web/20220321192305id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-04-01",
+      "value": 4.215,
+      "url": "https://web.archive.org/web/20220401190400id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-04-11",
+      "value": 4.114,
+      "url": "https://web.archive.org/web/20220411192445id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-05-16",
+      "value": 4.483,
+      "url": "https://web.archive.org/web/20220516192318id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-05-27",
+      "value": 4.599,
+      "url": "https://web.archive.org/web/20220527193930id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-06-08",
+      "value": 4.955,
+      "url": "https://web.archive.org/web/20220608190637id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-07-11",
+      "value": 4.678,
+      "url": "https://web.archive.org/web/20220711190952id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-08-15",
+      "value": 3.956,
+      "url": "https://web.archive.org/web/20220815181538id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-09-30",
+      "value": 3.797,
+      "url": "https://web.archive.org/web/20220930192726id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2022-11-04",
+      "value": 3.792,
+      "url": "https://web.archive.org/web/20221104191305id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-01-11",
+      "value": 3.267,
+      "url": "https://web.archive.org/web/20230111193426id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-03-17",
+      "value": 3.457,
+      "url": "https://web.archive.org/web/20230317201920id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2023-03-18",
+      "value": 3.457,
+      "url": "https://web.archive.org/web/20230318190711id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2023-03-19",
+      "value": 3.446,
+      "url": "https://web.archive.org/web/20230319190513id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2023-03-20",
+      "value": 3.443,
+      "url": "https://web.archive.org/web/20230320190754id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-04-04",
+      "value": 3.507,
+      "url": "https://web.archive.org/web/20230404194638id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-08-04",
+      "value": 3.831,
+      "url": "https://web.archive.org/web/20230804192154id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-09-18",
+      "value": 3.881,
+      "url": "https://web.archive.org/web/20230918170809id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-11-27",
+      "value": 3.25,
+      "url": "https://web.archive.org/web/20231127200632id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2023-12-17",
+      "value": 3.068,
+      "url": "https://web.archive.org/web/20231217202028id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2023-12-18",
+      "value": 3.068,
+      "url": "https://web.archive.org/web/20231218212242id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2023-12-19",
+      "value": 3.08,
+      "url": "https://web.archive.org/web/20231219200522id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-03-12",
+      "value": 3.394,
+      "url": "https://web.archive.org/web/20240312145257id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-03-19",
+      "value": 3.489,
+      "url": "https://web.archive.org/web/20240319202443id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-04-11",
+      "value": 3.63,
+      "url": "https://web.archive.org/web/20240411183626id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-04-23",
+      "value": 3.667,
+      "url": "https://web.archive.org/web/20240423192652id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-06-19",
+      "value": 3.449,
+      "url": "https://web.archive.org/web/20240619200339id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-07-01",
+      "value": 3.491,
+      "url": "https://web.archive.org/web/20240701194851id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-09-06",
+      "value": 3.296,
+      "url": "https://web.archive.org/web/20240906192120id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-09-07",
+      "value": 3.296,
+      "url": "https://web.archive.org/web/20240907171730id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree+yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-09-08",
+      "value": 3.273,
+      "url": "https://web.archive.org/web/20240908180341id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-09-18",
+      "value": 3.215,
+      "url": "https://web.archive.org/web/20240918190547id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-09-21",
+      "value": 3.214,
+      "url": "https://web.archive.org/web/20240921183553id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-09-22",
+      "value": 3.214,
+      "url": "https://web.archive.org/web/20240922172415id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-09-23",
+      "value": 3.208,
+      "url": "https://web.archive.org/web/20240923192214id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-09-30",
+      "value": 3.216,
+      "url": "https://web.archive.org/web/20240930184300id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2024-10-18",
+      "value": 3.191,
+      "url": "https://web.archive.org/web/20241019021506id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2024-10-19",
+      "value": 3.177,
+      "url": "https://web.archive.org/web/20241020073412id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree+yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2025-01-04",
+      "value": 3.064,
+      "url": "https://web.archive.org/web/20250105103917id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2025-02-03",
+      "value": 3.098,
+      "url": "https://web.archive.org/web/20250203194552id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2025-03-22",
+      "value": 3.127,
+      "url": "https://web.archive.org/web/20250322233402id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2025-04-05",
+      "value": 3.262,
+      "url": "https://web.archive.org/web/20250406050956id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2025-05-23",
+      "value": 3.196,
+      "url": "https://web.archive.org/web/20250523231541id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2025-05-24",
+      "value": 3.196,
+      "url": "https://web.archive.org/web/20250524081010id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2025-05-25",
+      "value": 3.181,
+      "url": "https://web.archive.org/web/20250525161111id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2025-06-15",
+      "value": 3.135,
+      "url": "https://web.archive.org/web/20250616051503id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2025-07-15",
+      "value": 3.153,
+      "url": "https://web.archive.org/web/20250715124609id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2025-07-16",
+      "value": 3.16,
+      "url": "https://web.archive.org/web/20250716174249id_/https://gasprices.aaa.com/",
+      "reason": "yesterday_vs_current_chain_disagreement"
+    },
+    {
+      "date": "2026-01-16",
+      "value": 2.839,
+      "url": "https://web.archive.org/web/20260116225600id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2026-01-18",
+      "value": 2.824,
+      "url": "https://web.archive.org/web/20260118230029id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2026-04-17",
+      "value": 4.076,
+      "url": "https://web.archive.org/web/20260417233134id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2026-06-05",
+      "value": 4.22,
+      "url": "https://web.archive.org/web/20260605230840id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2026-06-07",
+      "value": 4.174,
+      "url": "https://web.archive.org/web/20260607152247id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    },
+    {
+      "date": "2026-07-25",
+      "value": 4.111,
+      "url": "https://web.archive.org/web/20260725110131id_/https://gasprices.aaa.com/",
+      "reason": "same_day_captures_disagree"
+    }
+  ],
+  "suspect_rows_by_reason": {
+    "same_day_captures_disagree": 39,
+    "yesterday_vs_current_chain_disagreement": 19
+  },
+  "series_reconciliation": {
+    "csv_path": "C:\\Users\\hoyer\\WorkSpace\\Projects\\money_printer\\data\\gas_truth\\aaa_daily_national.csv",
+    "window": [
+      "2022-01-01",
+      "2026-07-29"
+    ],
+    "compared_before_write": true,
+    "write_mode": "regenerate",
+    "rows_on_disk_in_window_before_write": 1550,
+    "rows_produced_by_this_run": 1550,
+    "dates_on_disk_not_reproduced_by_this_run": [],
+    "dates_produced_but_absent_from_disk": [],
+    "agrees": true,
+    "note": "Under first-writer-wins a date on disk that this run did not reproduce is an orphan: it survives untouched and nothing re-enumerates it. Under --regenerate the same list is the set of rows this run DROPS. Either way it must be explained, not merely counted -- re-derive from a capture that exists, or drop it with a correction record in manifest.json."
+  },
+  "write_result": {
+    "added": 1550,
+    "unchanged": 0,
+    "corrections": 0,
+    "rows": 1550,
+    "path": "C:\\Users\\hoyer\\WorkSpace\\Projects\\money_printer\\data\\gas_truth\\aaa_daily_national.csv"
+  }
+}

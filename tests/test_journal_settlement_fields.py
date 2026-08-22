@@ -24,7 +24,10 @@ Coverage:
 3.  backward compatibility: pre-Phase-1 rows (which lack every new field) still
     load, mixed old/new files load, and no absent strike is coerced to 0.0;
 4.  a static contract check that the producer (``SimulatedExchange``) and the
-    consumer (``TradeOutcome.from_position``) still agree on the key names.
+    consumer (``TradeOutcome.from_position``) still agree on the key names;
+5.  ``is_settlement_consistent`` routes each market kind through its OWN payoff
+    rule -- gas through ``value > floor_strike`` (PRD FR-4.4), temperature
+    through the bracket rule -- and neither can be re-crossed by a refactor.
 
 Run: $env:PYTHONPATH="."; python -m pytest tests/test_journal_settlement_fields.py -v
 """
@@ -420,6 +423,241 @@ def test_matching_engine_stamps_every_field_the_journal_reads():
         f"src/core/matching_engine.py no longer stamps {sorted(missing)} onto a "
         f"settling position; TradeOutcome.from_position reads those keys"
     )
+
+
+# ===========================================================================
+# 5. is_settlement_consistent routes by market kind, never by unit-blind guess
+# ===========================================================================
+#
+# The 2026-07-30 red-team finding (D8): the method was temperature-only, so a
+# CORRECTLY settled gas row read as inconsistent both with and without an
+# explicit truth --
+#
+#     settlement_value=4.75, floor_strike=4.60, outcome="yes"
+#     is_settlement_consistent()     -> False   (truth: 4.75 > 4.60 -> yes)
+#     is_settlement_consistent(4.75) -> False   (temperature "greater" wants
+#                                                floor + 1, i.e. $5.60)
+#
+# No production caller existed at the time, which is exactly why it needed
+# pinning: Phase 5's capital gate reads this method, and every good gas row
+# would have tripped its phantom-PnL check.
+
+
+def _gas_position(floor: float, value: float, ticker=None, strategy="Gas Convergence"):
+    """A settled AAA gas position, keyed as the exchange builds one.
+
+    Note ``settlement_value`` (USD/gal), never ``settlement_high`` (F) -- the
+    contract keeps them in separate columns precisely so a reconcile cannot
+    join a gas row to a temperature truth table.
+    """
+    from src.data.gas_settlement import GasSpec, expected_result
+
+    spec = GasSpec(ticker or f"KXAAAGASM-26AUG31-{floor:.2f}", "greater", floor, None)
+    outcome = expected_result(spec, value)
+    now = datetime(2026, 8, 31, 14, 0, 0)
+    pos = {
+        "id": 7714,
+        "symbol": spec.ticker,
+        "side": "buy",
+        "contract_side": "YES",
+        "entry_price": 0.38,
+        "exit_price": 1.0 if outcome == "yes" else 0.0,
+        "quantity": 40,
+        "open_time": now - timedelta(days=3),
+        "close_time": now,
+        "pnl": 24.8 if outcome == "yes" else -15.2,
+        "reason": "EXPIRATION",
+        "strategy_name": strategy,
+        "strike": None,
+    }
+    pos.update(spec.as_dict())
+    pos["settlement_value"] = float(value)
+    pos["settlement_spec"] = spec.as_dict()
+    pos["settlement_rule"] = spec.describe()
+    pos["settlement_outcome"] = outcome
+    return pos
+
+
+class TestSettlementConsistencyRoutesByMarketKind:
+    # (floor, settled value, expected outcome). The 4.60/4.75 row is the
+    # red-team's verbatim repro; the two boundary rows are the whole ballgame
+    # of FR-4.4 -- settle == strike pays NO, strictly.
+    GAS_CASES = [
+        pytest.param(4.60, 4.75, "yes", id="above-strike"),
+        pytest.param(4.60, 4.60, "no", id="exactly-on-strike-pays-NO"),
+        pytest.param(4.60, 4.599, "no", id="a-tenth-of-a-cent-below"),
+        pytest.param(3.89, 3.847, "no", id="live-26JUN30-3.89"),
+    ]
+
+    @pytest.mark.parametrize("floor,value,expected", GAS_CASES)
+    def test_a_correctly_settled_gas_row_reads_consistent(self, floor, value, expected):
+        outcome = TradeOutcome.from_position(_gas_position(floor, value))
+        assert outcome.settlement_outcome == expected
+        assert outcome.settlement_value == pytest.approx(value)
+        assert outcome.settlement_high is None, "a gas row must not carry a F high"
+        assert outcome.is_settlement_consistent() is True
+        assert outcome.is_settlement_consistent(value) is True
+        assert outcome.is_settlement_consistent(truth_value=value) is True
+
+    @pytest.mark.parametrize("floor,value,expected", GAS_CASES)
+    def test_the_gas_row_never_routes_through_the_temperature_rule(
+        self, floor, value, expected, monkeypatch
+    ):
+        """Make the temperature payoff explode; the gas row must still settle.
+
+        This is the wire-crossing guard. ``bracket_payoff.settles_yes`` is the
+        function the defect routed through, and the gas path must not touch it
+        even though a gas ``greater`` spec is *parseable* by it.
+        """
+        import src.core.bracket_payoff as bp
+
+        def _forbidden(*_a, **_k):
+            raise AssertionError(
+                "a gas row was routed through bracket_payoff.settles_yes -- the "
+                "temperature 'greater' rule wants floor + 1, i.e. $5.60 for a "
+                "$4.60 strike"
+            )
+
+        monkeypatch.setattr(bp, "settles_yes", _forbidden)
+        outcome = TradeOutcome.from_position(_gas_position(floor, value))
+        assert outcome.is_settlement_consistent() is True
+
+    def test_a_wrongly_settled_gas_row_reads_inconsistent(self):
+        """The gate must be able to fail: flip the recorded outcome."""
+        pos = _gas_position(4.60, 4.75)
+        pos["settlement_outcome"] = "no"  # truth says 4.75 > 4.60 -> yes
+        outcome = TradeOutcome.from_position(pos)
+        assert outcome.is_settlement_consistent() is False
+
+    def test_external_gas_truth_disagreeing_with_the_sim_is_detected(self):
+        """FR-4.4 in miniature: journal row vs the published AAA value.
+
+        The sim settled on 4.75 and paid YES. If AAA's published value for that
+        date is 4.55 the row is wrong, and the row alone proves it.
+        """
+        outcome = TradeOutcome.from_position(_gas_position(4.60, 4.75))
+        assert outcome.is_settlement_consistent(truth_value=4.75) is True
+        assert outcome.is_settlement_consistent(truth_value=4.61) is True  # same side
+        assert outcome.is_settlement_consistent(truth_value=4.60) is False  # tie -> NO
+        assert outcome.is_settlement_consistent(truth_value=4.55) is False
+
+    def test_the_weather_control_still_routes_through_the_bracket_rule(self):
+        """A temperature row must be unaffected -- and must not touch gas."""
+        spec = BracketSpec("KXHIGHNY-26JUL25-B86.5", STRIKE_TYPE_BETWEEN, 86.0, 87.0)
+        outcome = TradeOutcome.from_position(_closed_position(spec, 86.0))
+        assert outcome.is_gas() is False
+        assert outcome.is_settlement_consistent() is True
+        assert outcome.is_settlement_consistent(86.0) is True
+        assert outcome.is_settlement_consistent(truth_high=88.0) is False
+
+    def test_the_weather_row_never_routes_through_the_gas_rule(self, monkeypatch):
+        """The mirror guard: a bracket row must not reach the gas payoff.
+
+        Without it, a "unify the two payoffs" refactor could settle every
+        weather row under ``value > floor_strike`` -- which for the T87
+        ``greater`` bracket would pay YES on a high of 87F, inverting the live
+        result the FR-1.2 golden table pins.
+        """
+        import src.data.gas_settlement as gs
+
+        def _forbidden(*_a, **_k):
+            raise AssertionError(
+                "a temperature row was routed through gas_settlement.settles_yes"
+            )
+
+        monkeypatch.setattr(gs, "settles_yes", _forbidden)
+        monkeypatch.setattr(gs, "expected_result", _forbidden)
+        spec = BracketSpec("KXHIGHNY-26JUL25-T87", STRIKE_TYPE_GREATER, 87.0, None)
+        outcome = TradeOutcome.from_position(_closed_position(spec, 87.0))
+        assert outcome.settlement_outcome == "no"  # "88 or above"
+        assert outcome.is_settlement_consistent() is True
+
+    def test_the_two_rules_genuinely_disagree_on_the_same_numbers(self):
+        """Prove the routing matters rather than asserting it does.
+
+        The same ``greater`` spec at floor 4.60 and the same value 4.75 give
+        opposite answers under the two modules. If this ever stops being true
+        the wire-crossing guards above become vacuous, so it is asserted
+        directly.
+        """
+        from src.core.bracket_payoff import parse_bracket_spec
+        from src.core.bracket_payoff import settles_yes as temperature_settles_yes
+        from src.data.gas_settlement import parse_gas_spec
+        from src.data.gas_settlement import settles_yes as gas_settles_yes
+
+        fields = {"strike_type": "greater", "floor_strike": 4.60, "cap_strike": None}
+        assert gas_settles_yes(parse_gas_spec("KXAAAGASM-26AUG31-4.60", fields), 4.75)
+        assert not temperature_settles_yes(
+            parse_bracket_spec("KXAAAGASM-26AUG31-4.60", fields), 4.75
+        )
+        # ...and the temperature rule needs floor + 1 to flip, i.e. $5.60/gal.
+        assert temperature_settles_yes(
+            parse_bracket_spec("KXAAAGASM-26AUG31-4.60", fields), 5.60
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs,needle",
+        [
+            pytest.param(
+                {"truth_high": 4.75}, "temperature", id="gas-given-truth_high"
+            ),
+            pytest.param(
+                {"truth": 4.75, "truth_value": 4.75}, "at most one", id="two-truths"
+            ),
+        ],
+    )
+    def test_a_unit_crossed_argument_raises_rather_than_answering(self, kwargs, needle):
+        outcome = TradeOutcome.from_position(_gas_position(4.60, 4.75))
+        with pytest.raises(ValueError, match=needle):
+            outcome.is_settlement_consistent(**kwargs)
+
+    def test_a_temperature_row_given_the_gas_argument_raises(self):
+        spec = BracketSpec("KXHIGHNY-26JUL25-B86.5", STRIKE_TYPE_BETWEEN, 86.0, 87.0)
+        outcome = TradeOutcome.from_position(_closed_position(spec, 86.0))
+        with pytest.raises(ValueError, match="USD/gal"):
+            outcome.is_settlement_consistent(truth_value=86.0)
+
+    def test_a_row_carrying_both_settlement_columns_is_ambiguous_and_raises(self):
+        """ "Exactly one of the two is populated" is enforced, not just documented."""
+        pos = _gas_position(4.60, 4.75)
+        pos["settlement_high"] = 86.0  # units now ambiguous
+        outcome = TradeOutcome.from_position(pos)
+        with pytest.raises(ValueError, match="BOTH"):
+            outcome.is_settlement_consistent()
+
+    def test_an_unsettled_gas_row_is_not_consistent_and_says_why(self):
+        from src.data.gas_settlement import GasSpecError
+
+        pos = {
+            "symbol": "KXAAAGASM-26AUG31-4.60",
+            "strategy_name": "Gas Convergence",
+            "entry_price": 0.38,
+            "exit_price": 0.38,
+            "quantity": 40,
+            "pnl": 0.0,
+            "reason": "SETTLEMENT_UNRESOLVED",
+            "settlement_error": "no AAA national average published yet",
+        }
+        outcome = TradeOutcome.from_position(pos)
+        assert outcome.is_gas() is True
+        assert outcome.settlement_value is None
+        assert outcome.is_settlement_consistent() is False
+        with pytest.raises(GasSpecError):
+            outcome.gas_spec()
+
+    def test_the_gas_series_registry_is_what_decides_the_route(self):
+        """``KXAAAGASMAX`` is a DIFFERENT (annual) series and must not be gas.
+
+        The discriminator is the registry's longest-prefix match, not a
+        ``startswith("KXAAAGAS")``, so a neighbouring series cannot be settled
+        under a rule that was never verified against it.
+        """
+        assert TradeOutcome("KXAAAGASM-26AUG31-4.60", "s").is_gas() is True
+        assert TradeOutcome("KXAAAGASD-26JUL28-4.10", "s").is_gas() is True
+        assert TradeOutcome("KXAAAGASW-26JUL27-4.11", "s").is_gas() is True
+        assert TradeOutcome("KXAAAGASMAX-26-5.00", "s").is_gas() is False
+        assert TradeOutcome("KXHIGHNY-26JUL25-T87", "s").is_gas() is False
+        assert TradeOutcome("KXBTCD-26MAY20-T104000", "s").is_gas() is False
 
 
 def test_from_position_reads_every_stamped_settlement_key():

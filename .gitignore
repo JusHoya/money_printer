@@ -66,6 +66,21 @@ data/trade_journal.jsonl
 data/weather_truth/settlement_cache.json
 data/weather_truth/reconcile/
 
+# Phase 4 (FR-4.4): the same split, for the same reason — reconcile_gas.py
+# rewrites these on every cron run, so tracking them makes the VM's next
+# `git pull` abort. The aaa_daily_national.csv / eia_weekly_regular.csv /
+# rbob_daily.csv series beside them stay tracked: those are the provenance-
+# bearing ground-truth record, and the reconcile job reads them rather than
+# writing them (a job that validated against its own output would shadow any
+# later correction to the AAA series).
+data/gas_truth/settlement_cache.json
+data/gas_truth/reconcile/
+# Per-ET-day scrape-failure record (FR-4.1 / EC-1): written by the live recorder
+# when a fetch fails and cleared on a same-day live success. Pure runtime state,
+# rewritten on the VM, and tracking it would abort the VM's next `git pull` for
+# the same reason as the two paths above.
+data/gas_truth/scrape_failures.json
+
 # Review/audit artifacts (large pulled VM data dumps). Globbed 2026-07-27:
 # review_2026_06_09/, _06_26/ and _07_24/ total ~430 MB locally and one of
 # them holds a 372 MiB file that GitHub would reject outright.
@@ -90,3 +105,14 @@ data/forecast_archive/cache/
 
 # Phase 2 (FR-2.1): decoded GEFS member cache — regenerable from NOAA NODD.
 data/ensemble/cache/
+
+# VM decommission snapshot (2026-08-22): 197 MB of compressed archives pulled off
+# the GCE instance money-printer-preschool-20260322 before it was stopped. The
+# payload is deliberately untracked (too large for git history); the committed
+# record of what it contains, where each piece came from, and its SHA-256 lives
+# in vm_snapshot_2026_08_22/MANIFEST.md.
+vm_snapshot_2026_08_22/archive/
+# Working extraction of the VM snapshot archives — regenerable by untarring
+# archive/*.tgz. The 27 daily reconcile runs are the one irreplaceable piece and
+# are committed separately under vm_snapshot_2026_08_22/reconcile_record/.
+vm_snapshot_2026_08_22/extracted/

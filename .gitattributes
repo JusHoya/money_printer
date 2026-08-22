@@ -32,6 +32,19 @@ reports/phase2/*.md              text eol=lf
 reports/phase2/*.json            text eol=lf
 reports/phase2/*.txt             text eol=lf
 
+# Phase 4 (FR-4.1/FR-4.2): the gas ground-truth series carry a per-row
+# raw_sha256 and a manifest content_hash, and the backtest artifact states it
+# regenerates byte-identically. Same trap as Phase 2 above, same pin — a CRLF
+# checkout would fail the hash on files nobody edited.
+data/gas_truth/*.csv             text eol=lf
+data/gas_truth/*.json            text eol=lf
+
+# Phase 4 (FR-4.2): the backtest artifact carrying the phase verdict, plus the
+# recovered quote tape it replays. `test_tape_manifest_hash_matches_the_tape_on
+# _disk` hashes the tape's on-disk bytes, so this pin is what keeps a fresh
+# Windows checkout green.
+reports/phase4/**                text eol=lf
+
 # Recorded fixtures that tests hash or byte-compare.
 tests/fixtures/**                text eol=lf
 
@@ -47,3 +60,10 @@ tests/fixtures/**/*.gz           -text
 tests/fixtures/**/*.zip          -text
 tests/fixtures/**/*.tgz          -text
 tests/fixtures/**/*.png          -text
+
+# VM decommission snapshot (2026-08-22): committed evidence from the retired GCE
+# instance. The reconcile record and the captured VM state are archival artifacts
+# whose bytes are cited by MANIFEST.md — including a SHA-256 table — so they are
+# pinned to LF for the same reason reports/phase4/** is: a CRLF checkout would
+# alter files nobody edited and break the digests that make them evidence.
+vm_snapshot_2026_08_22/**         text eol=lf

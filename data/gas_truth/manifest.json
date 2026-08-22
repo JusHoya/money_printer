@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-07-30T04:40:19+00:00",
+  "series": {
+    "aaa_daily_national": {
+      "rows": 1550,
+      "first": "2022-01-01",
+      "last": "2026-07-29",
+      "content_hash": "d03ed6bf70e8f022c71f290cd4a5e1d4ac7918d1722a9b95e9792a5dfd1caf18",
+      "by_source": {
+        "aaa_live": 0,
+        "aaa_wayback": 1550
+      },
+      "suspect": 56
+    },
+    "eia_weekly_regular": {
+      "rows": 291,
+      "first": "2021-01-04",
+      "last": "2026-07-27",
+      "content_hash": "4cdb2b6f140a36a984a5da921aa3c2799dacc411c4c879e20029856de11739b3"
+    },
+    "rbob_daily": {
+      "rows": 1391,
+      "first": "2021-01-04",
+      "last": "2026-07-27",
+      "content_hash": "461fcef929b95540cdc42a64dbcfc18eb08fe7cda3c830fdbdf842108b2a72c2"
+    }
+  },
+  "corrections": [
+    {
+      "recorded_at": "2026-07-30T04:10:00+00:00",
+      "series": "aaa_daily_national",
+      "date": "2026-07-28",
+      "action": "row_removed_by_regeneration",
+      "removed_value": "4.099",
+      "removed_source": "aaa_wayback",
+      "removed_source_url": "https://web.archive.org/web/20260728110106id_/https://gasprices.aaa.com/",
+      "removed_raw_sha256": "2cbbf9b741afa3b5aedeb826fac4d593ef5c8f05a121df8755779c27abcb400c",
+      "reason": "The cited Wayback snapshot 20260728110106 is not retrievable, so the row's provenance could not be verified and the row was dropped by backfill_gas_history.py --regenerate. 2026-07-28 is now a legitimate missing day per data contract 1.1.",
+      "evidence": [
+        "CDX (url=gasprices.aaa.com, from=20260725, to=20260731, no statuscode filter, queried 2026-07-29): captures exist on 20260725002925, 20260725072255, 20260725110131, 20260726100740, 20260726110201, 20260726170915, 20260727110114 and 20260729110138. There is NO capture of the landing page on 2026-07-28.",
+        "Re-fetching the cited replay URL on 2026-07-29 returns HTTP 200 but serves the 2026-07-27 capture: Memento-Datetime 'Mon, 27 Jul 2026 11:01:14 GMT', final URL https://web.archive.org/web/20260727110114id_/https://gasprices.aaa.com/, 97497 bytes, sha256 6af73873d79d0026f00b0cbe6c3b5fa63b203d8886d3854461cb80c7ef71fc66. That does NOT match the recorded raw_sha256, so the URL resolves while validating the wrong day -- the shape a naive re-check cannot see.",
+        "The row was an orphan from an earlier run: the committed backfill_audit.json reported days_present=1550 and listed 2026-07-28 among missing_days while the CSV beside it held 1551 rows including one for that date. First-writer-wins preserved it and nothing re-enumerated it. scripts/backfill_gas_history.py's series_reconciliation block now measures that disagreement on every run.",
+        "NOT hidden, because it argues the other way: a local capture cache file named 20260728110106.html does exist outside the repository (under the OS temp dir), its sha256 matches the recorded raw_sha256, it is 95193 bytes -- distinct from both neighbours -- and it parses to Current=4.099 / Yesterday=4.110, which chains correctly against 2026-07-27 (Current 4.110) and 2026-07-29 (Yesterday 4.099). Sibling subresources of that crawl (favicon.ico and a cdn-cgi script at 20260728110109/110110) are still in CDX, so the crawl did happen and was later de-indexed. The value 4.099 is therefore probably correct -- but an uncommitted file in a temp directory is not retrievable provenance, and this series' raw_sha256 column exists so that a third party can re-obtain the bytes. An unverifiable row in a provenance file is worse than an honest gap, so the row went. It was NOT re-derived from the 2026-07-27 capture: that capture carries 07-27's Current value and cannot supply 07-28's."
+      ],
+      "note": "No provenance URL was invented and no value was substituted. backfill_gas_history.fetch_snapshot now rejects any response whose served capture instant disagrees with the requested timestamp, so this class of row cannot be written again."
+    }
+  ]
+}

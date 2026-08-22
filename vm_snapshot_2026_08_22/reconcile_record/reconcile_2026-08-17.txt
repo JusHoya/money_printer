@@ -1,0 +1,42 @@
+==============================================================================
+WEATHER SETTLEMENT RECONCILIATION REPORT (PRD FR-1.3)
+==============================================================================
+  Generated         : 2026-08-18T13:30:05Z
+  Dates             : 2026-08-16, 2026-08-17
+  Stations          : KNYC, KMDW, KLAX, KMIA
+  Markets checked   : 48
+  Outcomes verified : 42
+  Matched           : 42
+  Explained (no breach) : 6
+  UNEXPLAINED       : 0  (threshold 0)
+
+  Per city/date:
+    DATE        STN    CLI SRC        MKTS  VERI   OK  EXPL  BAD
+    ------------------------------------------------------------------
+    2026-08-16  KNYC    80 iem_cli       6     6    6     0    0
+    2026-08-16  KMDW    86 iem_cli       6     6    6     0    0
+    2026-08-16  KLAX    77 iem_cli       6     6    6     0    0
+    2026-08-16  KMIA    94 iem_cli       6     6    6     0    0
+    2026-08-17  KNYC    81 iem_cli       6     6    6     0    0
+    2026-08-17  KMDW    78 iem_cli       6     6    6     0    0
+    2026-08-17  KLAX    78 iem_cli       6     0    0     6    0
+    2026-08-17  KMIA    95 iem_cli       6     6    6     0    0
+
+  Coverage floor (a run that checks nothing must not pass):
+    markets fetched   :   48  (floor 32 over 8 city-day(s))
+    outcomes verified :   42  (floor 8)
+    COVERAGE          : OK
+
+  Sim leg           : NOTHING TO CHECK -- 1050 sim record(s) loaded, none for a reconciled market. No weather position has ever been opened, so SIM_MISMATCH is untested against live data here (it is covered by unit tests).
+
+  Non-match categories (explained items are listed, never dropped):
+    NO_RESULT             6   [explained]
+
+  Explained detail:
+    2026-08-17 KLAX  KXHIGHLAX-26AUG17-T76          NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-17 KLAX  KXHIGHLAX-26AUG17-B76.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-17 KLAX  KXHIGHLAX-26AUG17-B78.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-17 KLAX  KXHIGHLAX-26AUG17-B80.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-17 KLAX  KXHIGHLAX-26AUG17-B82.5        NO_RESULT        status='closed' but no yes/no result pub
+    2026-08-17 KLAX  KXHIGHLAX-26AUG17-T83          NO_RESULT        status='closed' but no yes/no result pub
+==============================================================================

@@ -1,0 +1,26 @@
+data_*.csv files scanned : 904
+total rows               : 19,316,720
+weather (KXHIGH*) rows   : 12,783,852
+distinct calendar days   : 174
+weather day span         : 2026-01-27 -> 2026-08-22
+
+rows per weather series:
+  KXHIGHCHI     2,367,672
+  KXHIGHNY      2,366,599
+  KXHIGHMIA     2,364,813
+  KXHIGHLAX     2,345,048
+  KXHIGHLAX (F) 826,602
+  KXHIGHCHI (F) 826,570
+  KXHIGHMIA (F) 826,566
+  KXHIGHNY (F)  825,116
+  KXHIGH        34,866
+
+weather rows per month:
+  2026-01  35,673
+  2026-02  70,905
+  2026-03  580,918
+  2026-04  1,525,407
+  2026-05  1,075,499
+  2026-06  1,085,558
+  2026-07  2,752,158
+  2026-08  5,657,734

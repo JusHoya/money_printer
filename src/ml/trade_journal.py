@@ -75,6 +75,13 @@ class TradeOutcome:
     # None: crypto-era and pre-Phase-1 journal rows simply lack them, and
     # ``load_all`` filters unknown keys, so old files keep loading unchanged.
     settlement_high: Optional[float] = None  # CLI daily high (°F) that settled it
+    # PRD FR-4.4 (Phase 4): the AAA national average (USD/gal) that settled an
+    # AAA gas contract. Deliberately its OWN field rather than reusing
+    # ``settlement_high``: the units differ, and one column holding either °F or
+    # USD/gal would let a reconcile join a gas row to a temperature truth table
+    # and produce a plausible, wrong answer. Exactly one of the two is populated
+    # on any settled row; both are None on a row that never settled.
+    settlement_value: Optional[float] = None
     settlement_rule: Optional[str] = None  # e.g. "86 to 87" — BracketSpec.describe()
     settlement_outcome: Optional[str] = None  # "yes" | "no"
     settlement_error: Optional[str] = None  # why SETTLEMENT_UNRESOLVED, if it was
@@ -168,6 +175,7 @@ class TradeOutcome:
             if ml.get("nws_forecast_high") is not None
             else None,
             settlement_high=_opt_float(position.get("settlement_high")),
+            settlement_value=_opt_float(position.get("settlement_value")),
             settlement_rule=position.get("settlement_rule"),
             settlement_outcome=position.get("settlement_outcome"),
             settlement_error=position.get("settlement_error"),
@@ -181,6 +189,28 @@ class TradeOutcome:
     # Settlement helpers (FR-1.3 reconcile joins truth to trades via these)
     # ------------------------------------------------------------------
 
+    def _spec_fields(self) -> Dict[str, Any]:
+        """The settlement semantics on this row: the settled spec, else the
+        FR-1.1 fields cached at open time. Never the ticker (FR-1.1)."""
+        return self.settlement_spec or {
+            "strike_type": self.strike_type,
+            "floor_strike": self.floor_strike,
+            "cap_strike": self.cap_strike,
+        }
+
+    def is_gas(self) -> bool:
+        """Is this row an AAA gas contract (PRD FR-4.4) rather than a bracket?
+
+        Decided from the *symbol* via the gas series registry, not from which
+        settlement field happens to be populated: the registry is what
+        :mod:`src.data.gas_settlement` itself dispatches on, and a row with
+        neither field set (or, wrongly, both) must still route to the right
+        payoff rule rather than defaulting to temperature.
+        """
+        from src.data.gas_settlement import is_gas_symbol
+
+        return is_gas_symbol(self.symbol)
+
     def bracket_spec(self):
         """Rebuild the :class:`~src.core.bracket_payoff.BracketSpec`.
 
@@ -190,29 +220,115 @@ class TradeOutcome:
         """
         from src.core.bracket_payoff import parse_bracket_spec
 
-        return parse_bracket_spec(
-            self.symbol,
-            self.settlement_spec
-            or {
-                "strike_type": self.strike_type,
-                "floor_strike": self.floor_strike,
-                "cap_strike": self.cap_strike,
-            },
-        )
+        return parse_bracket_spec(self.symbol, self._spec_fields())
 
-    def is_settlement_consistent(self, truth_high: Optional[float] = None) -> bool:
-        """Does the recorded outcome match ``settles_yes`` at the truth high?
+    def gas_spec(self):
+        """Rebuild the :class:`~src.data.gas_settlement.GasSpec` (PRD FR-4.4).
 
-        ``truth_high`` defaults to the high the exchange settled against, so
-        with no argument this checks the row's *internal* consistency; pass
-        the IEM CLI value to check it against external ground truth (FR-1.3).
+        The gas sibling of :meth:`bracket_spec`, and deliberately a *separate*
+        method: the two payoff modules encode different rules, and one method
+        that picked between them by inspecting the fields would be one rename
+        away from settling a gas row under the temperature rule again.
+
+        :raises GasSpecError: when the row carries no usable gas semantics.
         """
-        from src.core.bracket_payoff import settles_yes
+        from src.data.gas_settlement import parse_gas_spec
 
-        high = truth_high if truth_high is not None else self.settlement_high
-        if high is None or self.settlement_outcome is None:
+        return parse_gas_spec(self.symbol, self._spec_fields())
+
+    def is_settlement_consistent(
+        self,
+        truth: Optional[float] = None,
+        *,
+        truth_high: Optional[float] = None,
+        truth_value: Optional[float] = None,
+    ) -> bool:
+        """Does the recorded outcome match the payoff rule at the truth value?
+
+        With no argument this checks the row's *internal* consistency against
+        the number the exchange settled it on; pass a truth to check it against
+        external ground truth (FR-1.3 for weather, FR-4.4 for gas).
+
+        **The payoff rule is chosen by market kind, never by unit-agnostic
+        guesswork.** A gas row (``KXAAAGAS*``) routes through
+        :func:`src.data.gas_settlement.settles_yes` -- *strictly* greater than
+        ``floor_strike``, per ``docs/phase4_data_contract.md`` §0. A bracket row
+        routes through :func:`src.core.bracket_payoff.settles_yes`, whose
+        ``greater`` rule is the temperature convention ``high >= floor + 1``.
+        Routing a gas row through the temperature rule asks whether $4.75
+        exceeded $5.60 on a $4.60 strike, so every correctly settled gas row
+        reads as inconsistent -- a false-negative machine feeding Phase 5's
+        phantom-PnL check on good data.
+
+        Arguments:
+            truth: the truth in the row's own units -- USD/gal for gas, degrees
+                Fahrenheit for a temperature bracket.
+            truth_high: the same thing, named for a temperature row. Passing it
+                on a gas row is a unit error and raises.
+            truth_value: the same thing, named for a gas row (mirrors the
+                ``settlement_value`` column). Passing it on a temperature row
+                is a unit error and raises.
+
+        :raises ValueError: when a unit-crossed keyword is used, when more than
+            one truth is supplied, or when the row populates both
+            ``settlement_high`` and ``settlement_value`` (the contract says
+            exactly one).
+        :raises BracketSpecError / GasSpecError: when a truth exists but the
+            row's semantics cannot be rebuilt. Unreconcilable is reported as
+            such, never as a guessed direction.
+        """
+        gas = self.is_gas()
+        supplied = [
+            name
+            for name, val in (
+                ("truth", truth),
+                ("truth_high", truth_high),
+                ("truth_value", truth_value),
+            )
+            if val is not None
+        ]
+        if len(supplied) > 1:
+            raise ValueError(
+                f"{self.symbol}: is_settlement_consistent got {supplied}; supply "
+                f"at most one truth"
+            )
+        if gas and truth_high is not None:
+            raise ValueError(
+                f"{self.symbol}: truth_high is a temperature (F) argument and "
+                f"this is an AAA gas row settled in USD/gal -- pass truth_value "
+                f"(or the positional truth) instead"
+            )
+        if not gas and truth_value is not None:
+            raise ValueError(
+                f"{self.symbol}: truth_value is the USD/gal gas argument and "
+                f"this is a temperature-bracket row -- pass truth_high (or the "
+                f"positional truth) instead"
+            )
+        if self.settlement_high is not None and self.settlement_value is not None:
+            raise ValueError(
+                f"{self.symbol}: row populates BOTH settlement_high "
+                f"({self.settlement_high}) and settlement_value "
+                f"({self.settlement_value}); the FR-4.4 contract says exactly "
+                f"one is populated, so the units of the settled truth are "
+                f"ambiguous and no payoff rule may be chosen"
+            )
+
+        explicit = next(
+            (v for v in (truth, truth_high, truth_value) if v is not None), None
+        )
+        recorded = self.settlement_value if gas else self.settlement_high
+        settled_on = explicit if explicit is not None else recorded
+        if settled_on is None or self.settlement_outcome is None:
             return False
-        expected = "yes" if settles_yes(self.bracket_spec(), high) else "no"
+
+        if gas:
+            from src.data.gas_settlement import expected_result
+
+            expected = expected_result(self.gas_spec(), settled_on)
+        else:
+            from src.core.bracket_payoff import settles_yes
+
+            expected = "yes" if settles_yes(self.bracket_spec(), settled_on) else "no"
         return expected == str(self.settlement_outcome).strip().lower()
 
 
