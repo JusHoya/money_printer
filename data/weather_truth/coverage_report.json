@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-07-25T16:43:39Z",
+  "start_date": "2025-12-28",
+  "end_date": "2026-07-25",
+  "requested_days": 210,
+  "min_days": 180,
+  "combined_csv": "data/weather_truth/cli_daily_high_all.csv",
+  "combined_rows": 835,
+  "stations": [
+    {
+      "station": "KNYC",
+      "series_ticker": "KXHIGHNY",
+      "city": "New York",
+      "csv_path": "data/weather_truth/cli_daily_high_KNYC.csv",
+      "rows_in_file": 209,
+      "rows_stored": 209,
+      "requested_days": 210,
+      "first_date": "2025-12-28",
+      "last_date": "2026-07-24",
+      "missing_count": 1,
+      "gap_dates": [
+        "2026-07-25"
+      ],
+      "null_high_dates": [],
+      "nws_filled_dates": [],
+      "by_source": {
+        "iem_cli": 209
+      }
+    },
+    {
+      "station": "KMDW",
+      "series_ticker": "KXHIGHCHI",
+      "city": "Chicago",
+      "csv_path": "data/weather_truth/cli_daily_high_KMDW.csv",
+      "rows_in_file": 209,
+      "rows_stored": 209,
+      "requested_days": 210,
+      "first_date": "2025-12-28",
+      "last_date": "2026-07-24",
+      "missing_count": 1,
+      "gap_dates": [
+        "2026-07-25"
+      ],
+      "null_high_dates": [],
+      "nws_filled_dates": [],
+      "by_source": {
+        "iem_cli": 209
+      }
+    },
+    {
+      "station": "KLAX",
+      "series_ticker": "KXHIGHLAX",
+      "city": "Los Angeles",
+      "csv_path": "data/weather_truth/cli_daily_high_KLAX.csv",
+      "rows_in_file": 209,
+      "rows_stored": 209,
+      "requested_days": 210,
+      "first_date": "2025-12-28",
+      "last_date": "2026-07-24",
+      "missing_count": 1,
+      "gap_dates": [
+        "2026-07-25"
+      ],
+      "null_high_dates": [],
+      "nws_filled_dates": [],
+      "by_source": {
+        "iem_cli": 209
+      }
+    },
+    {
+      "station": "KMIA",
+      "series_ticker": "KXHIGHMIA",
+      "city": "Miami",
+      "csv_path": "data/weather_truth/cli_daily_high_KMIA.csv",
+      "rows_in_file": 208,
+      "rows_stored": 208,
+      "requested_days": 210,
+      "first_date": "2025-12-28",
+      "last_date": "2026-07-24",
+      "missing_count": 2,
+      "gap_dates": [
+        "2026-04-11",
+        "2026-07-25"
+      ],
+      "null_high_dates": [
+        "2026-04-11"
+      ],
+      "nws_filled_dates": [],
+      "by_source": {
+        "iem_cli": 208
+      }
+    }
+  ]
+}

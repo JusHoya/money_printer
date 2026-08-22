@@ -1,0 +1,201 @@
+"""
+Money Printer — Web Dashboard entry point.
+
+Usage:
+    python scripts/run_web_dashboard.py
+    python scripts/run_web_dashboard.py --bot weather
+    python scripts/run_web_dashboard.py --port 8050
+"""
+
+import argparse
+import atexit
+import os
+import signal
+import sys
+import threading
+import time
+import webbrowser
+
+# Make sure the project root is on the path regardless of cwd
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+from src.bots.registry import BotRegistry  # noqa: E402
+from src.utils.system_utils import prevent_sleep  # noqa: E402
+from src.utils.logger import logger, configure_root_logging  # noqa: E402
+
+# Import bots so they register themselves
+import src.bots  # noqa: F401, E402
+
+
+# ---------------------------------------------------------------------------
+# Re-use OrchestratorEngine from run_dashboard, extended with active_bots
+# ---------------------------------------------------------------------------
+from scripts.run_dashboard import OrchestratorEngine  # noqa: E402
+
+from src.web.state_manager import StateManager  # noqa: E402
+from src.web.server import create_app  # noqa: E402
+
+
+def _run_market_loop(engine: OrchestratorEngine):
+    """Background thread: mirrors the market loop in OrchestratorEngine.run()
+    but does not block the main thread (which is taken by uvicorn)."""
+    engine.market_loop()
+
+
+def main():
+    # FR-0.3: route module-level loggers (strategies, bots, mixins,
+    # providers) into the shared money_printer_*.log via the root logger.
+    # Their INFO output was previously dropped in this entrypoint — only the
+    # named "MoneyPrinter" logger had a handler. Console stays WARNING+.
+    configure_root_logging()
+
+    parser = argparse.ArgumentParser(description="Money Printer Web Dashboard")
+    parser.add_argument(
+        "--bot",
+        action="append",
+        dest="bots",
+        help=(
+            "Bot to run (can specify multiple). Default: all bots. "
+            f"Available: {BotRegistry.list_bots()}"
+        ),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        help="Port to listen on (default: 8050)",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind to (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not automatically open the browser",
+    )
+    parser.add_argument(
+        "--sim-balance",
+        type=float,
+        default=0,
+        help="Override starting balance for simulation (e.g. 3000)",
+    )
+    parser.add_argument(
+        "--auto-cycle",
+        action="store_true",
+        help="Auto-archive and restart on drawdown kill switch (no retrain — FR-0.2)",
+    )
+    args = parser.parse_args()
+
+    # ------------------------------------------------------------------ #
+    # Build orchestrator
+    # ------------------------------------------------------------------ #
+    engine = OrchestratorEngine(bot_names=args.bots)
+    engine.auto_cycle = args.auto_cycle
+    engine.sim_balance = args.sim_balance
+
+    prevent_sleep()
+    engine.dashboard.log("Web Dashboard Initializing...")
+
+    # Connect shared providers (same as OrchestratorEngine.run())
+    if engine.nws.connect():
+        engine.dashboard.log("NWS Connected")
+    else:
+        engine.dashboard.alert("NWS Connection Failed")
+
+    if engine.coinbase.connect():
+        engine.dashboard.log("Coinbase Connected")
+    else:
+        engine.dashboard.alert("Coinbase Connection Failed")
+
+    for bot in engine.bots:
+        bot.setup(kalshi=engine.kalshi, coinbase=engine.coinbase, nws=engine.nws)
+
+    if engine.kalshi:
+        try:
+            bal = engine.kalshi.get_balance()
+            engine.risk_manager.update_balance(bal)
+            engine.dashboard.log(f"Piggy Bank Initialized: ${bal:.2f}")
+        except Exception as e:
+            engine.dashboard.alert(f"Balance Sync Failed: {e}")
+
+    # Override balance for simulation / data collection
+    if args.sim_balance > 0:
+        engine.risk_manager.update_balance(args.sim_balance)
+        engine.dashboard.log(
+            f"Sim Balance Override: ${args.sim_balance:.2f} (training mode)"
+        )
+
+    # ------------------------------------------------------------------ #
+    # Graceful shutdown handlers — archive data before daemon thread dies
+    # ------------------------------------------------------------------ #
+    atexit.register(engine.shutdown)
+
+    _orig_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _handle_sigterm(sig, frame):
+        engine.shutdown()
+        # Re-invoke the original handler so uvicorn still shuts down
+        if callable(_orig_sigterm) and _orig_sigterm not in (
+            signal.SIG_DFL,
+            signal.SIG_IGN,
+        ):
+            _orig_sigterm(sig, frame)
+        else:
+            raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (OSError, ValueError):
+        pass  # Not all platforms support SIGTERM from threads
+
+    # ------------------------------------------------------------------ #
+    # Start market loop in a background thread
+    # ------------------------------------------------------------------ #
+    market_thread = threading.Thread(
+        target=_run_market_loop, args=(engine,), daemon=True
+    )
+    market_thread.start()
+    engine.dashboard.log(f"Market loop started. Bots: {[b.name for b in engine.bots]}")
+
+    # ------------------------------------------------------------------ #
+    # Build web layer
+    # ------------------------------------------------------------------ #
+    state_manager = StateManager(engine)
+    app = create_app(state_manager, engine)
+
+    # ------------------------------------------------------------------ #
+    # Open browser after a short delay
+    # ------------------------------------------------------------------ #
+    url = f"http://{args.host}:{args.port}"
+    if not args.no_browser:
+
+        def _open_browser():
+            time.sleep(1.5)
+            webbrowser.open(url)
+
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    # ------------------------------------------------------------------ #
+    # Start uvicorn (blocks main thread)
+    # ------------------------------------------------------------------ #
+    import uvicorn
+
+    logger.info(f"[Web] Starting server at {url}")
+    print(f"\n  Money Printer Web Dashboard -> {url}\n  Press Ctrl+C to stop.\n")
+
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="warning",  # keep uvicorn quiet; app logs go to logger
+    )
+
+
+if __name__ == "__main__":
+    main()

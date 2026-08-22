@@ -1,0 +1,457 @@
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from types import MappingProxyType
+from typing import Dict, List, Tuple
+
+from src.bots.base import Bot
+from src.bots.registry import BotRegistry
+from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
+from src.core.interfaces import TradeSignal
+from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
+from src.strategies.ml_weather import MLWeatherStrategy
+from src.data.nws_provider import NWSProvider
+from src.data.metar_provider import METARProvider
+from src.utils.logger import logger
+import os
+
+
+# 2026-06-03 review (LEAN config): ML Weather (-$137 net/21d, ~60% of all fees)
+# and Meteorologist V2 (-$75 net, ~14% of fees) are net-negative fee bleeders.
+# Both weather strategies are disabled from live trading. Flip this flag back
+# to True to re-enable the weather waterfall. Data/price feeds still run.
+# PRD Phase 1 is feed-only by design; trading is re-enabled in Phase 3.
+WEATHER_TRADING_ENABLED = False
+
+
+@dataclass(frozen=True)
+class WeatherCity:
+    """One tracked city: market, settlement station, local clock.
+
+    This is the single authoritative per-city record (PRD FR-1.4). It replaced
+    four overlapping maps (``STATION_MAP``, ``METAR_STATIONS``,
+    ``METAR_TO_KALSHI``, ``METAR_TO_NWS``) whose disagreement is exactly how
+    the bot ended up observing the non-settlement airports KJFK/KORD while
+    Kalshi settled on KNYC/KMDW.
+    """
+
+    key: str  # short city key used in logs and dashboard rows
+    kalshi_series: str  # Kalshi series ticker, e.g. "KXHIGHNY"
+    settlement_station: str  # the station Kalshi settles the market on
+    timezone: str  # IANA tz of the settlement station (PRD FR-3.2)
+    station_name: str  # human name, as published by api.weather.gov
+
+
+# PRD FR-1.4. Settlement stations, NOT nearby airports. The non-settlement
+# airports named below are documentation of the defect being fixed; they are
+# not station identifiers anywhere in this process:
+#   KXHIGHNY  settles on KNYC (Central Park), not the non-settlement KJFK
+#   KXHIGHCHI settles on KMDW (Midway),       not the non-settlement KORD
+# Measured 2026-07-12..07-25 from the IEM archive, the settlement station and
+# its old airport proxy differ by up to 3F (NY) and 2F (CHI) on a daily high —
+# enough to flip a 2F-wide Kalshi bracket on roughly half of all days.
+# Timezones are the ``timeZone`` field of https://api.weather.gov/stations/<id>
+# (probed 2026-07-25) and are consumed by the local-calendar-day running max
+# now, and by the Phase 3 local-time trade windows (FR-3.2) later.
+WEATHER_CITIES: Tuple[WeatherCity, ...] = (
+    WeatherCity(
+        key="NY",
+        kalshi_series="KXHIGHNY",
+        settlement_station="KNYC",
+        timezone="America/New_York",
+        station_name="New York City, Central Park",
+    ),
+    WeatherCity(
+        key="CHI",
+        kalshi_series="KXHIGHCHI",
+        settlement_station="KMDW",
+        timezone="America/Chicago",
+        station_name="Chicago, Chicago Midway Airport",
+    ),
+    WeatherCity(
+        key="LAX",
+        kalshi_series="KXHIGHLAX",
+        settlement_station="KLAX",
+        timezone="America/Los_Angeles",
+        station_name="Los Angeles, Los Angeles International Airport",
+    ),
+    WeatherCity(
+        key="MIA",
+        kalshi_series="KXHIGHMIA",
+        settlement_station="KMIA",
+        timezone="America/New_York",
+        station_name="Miami, Miami International Airport",
+    ),
+)
+
+CITY_CONFIG: Dict[str, WeatherCity] = MappingProxyType(
+    {c.key: c for c in WEATHER_CITIES}
+)
+SETTLEMENT_STATIONS: Tuple[str, ...] = tuple(
+    c.settlement_station for c in WEATHER_CITIES
+)
+STATION_TIMEZONES: Dict[str, str] = MappingProxyType(
+    {c.settlement_station: c.timezone for c in WEATHER_CITIES}
+)
+SERIES_BY_STATION: Dict[str, str] = MappingProxyType(
+    {c.settlement_station: c.kalshi_series for c in WEATHER_CITIES}
+)
+
+# Bracket-semantics fields the FR-1.1 KalshiProvider puts on every market's
+# ``extra``. They are forwarded onto the fused observation so strategies can
+# call ``parse_bracket_spec(symbol, data.extra)`` without a second fetch.
+BRACKET_FIELDS: Tuple[str, ...] = (
+    "floor_strike",
+    "cap_strike",
+    "strike_type",
+    "yes_sub_title",
+)
+
+
+@BotRegistry.register("weather")
+class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
+    """Feed-only weather bot reading Kalshi's settlement stations (FR-1.4)."""
+
+    # The authoritative city list. Instance-overridable so tests can run a
+    # single city; there is no second station map to fall out of sync with.
+    CITIES: Tuple[WeatherCity, ...] = WEATHER_CITIES
+
+    # FR-0.7 harvester cadence: orderbook depth snapshots are HOURLY only —
+    # the per-tick path must never issue per-market orderbook calls.
+    DEPTH_SNAPSHOT_INTERVAL_S = 3600
+    # Safety cap on orderbook calls per city per hourly snapshot pass.
+    MAX_DEPTH_MARKETS_PER_CITY = 30
+
+    def __init__(self):
+        Bot.__init__(self, name="Weather")
+        TickerResolverMixin.__init__(self)
+        self.kalshi = None
+        self.nws = None
+        self.metar = None
+        # Epoch of last hourly orderbook-depth snapshot (0 = snapshot on
+        # first tick so a fresh session records a baseline immediately).
+        self._last_depth_snapshot = 0.0
+
+        # ML-driven primary + V2 rule-based fallback
+        self.strategies = {
+            "ml_weather": MLWeatherStrategy(),
+            "weather": WeatherArbitrageStrategyV2(),
+        }
+
+    # ── Config accessors ────────────────────────────────────────────
+
+    @property
+    def settlement_stations(self) -> List[str]:
+        """Observation stations for the configured cities (FR-1.4)."""
+        return [c.settlement_station for c in self.CITIES]
+
+    @property
+    def station_timezones(self) -> Dict[str, str]:
+        return {c.settlement_station: c.timezone for c in self.CITIES}
+
+    # Back-compat alias: the orchestrator and older call sites referred to
+    # ``nws_stations``. It now resolves to the settlement stations.
+    @property
+    def nws_stations(self) -> List[str]:
+        return self.settlement_stations
+
+    def setup(self, kalshi, coinbase=None, nws=None, **kwargs):
+        self.kalshi = kalshi
+        if nws:
+            self.nws = nws
+        else:
+            nws_ua = os.getenv("NWS_USER_AGENT", "(MoneyPrinter, test@example.com)")
+            self.nws = NWSProvider(nws_ua, self.settlement_stations)
+            self.nws.connect()
+
+        # METAR is the primary observation source: probed 2026-07-25, the
+        # Aviation Weather Center serves all four settlement stations —
+        # including the non-airport KNYC — hourly with T-group (0.1C) precision.
+        self.metar = METARProvider(
+            self.settlement_stations, station_timezones=self.station_timezones
+        )
+        self.metar.connect()
+
+    def tick(self, risk_manager, dashboard) -> List[TradeSignal]:
+        if not self.nws:
+            return []
+
+        # FR-0.7: decide ONCE per tick whether the hourly depth snapshot is
+        # due. Timestamp is advanced after the city loop so all cities get
+        # snapshotted in the same pass.
+        depth_due = (
+            time.time() - self._last_depth_snapshot
+        ) >= self.DEPTH_SNAPSHOT_INTERVAL_S
+
+        for city in self.CITIES:
+            # PRD FR-1.4: ONE station per city — the one Kalshi settles on.
+            # Observations, the running daily max, and the forecast all come
+            # from it. There is no airport proxy anywhere in this path.
+            station = city.settlement_station
+            kalshi_ticker = city.kalshi_series
+            active_ticker = None
+
+            # --- Fetch observation data (METAR primary, NWS fallback) ---
+            obs_data = None
+            if self.metar:
+                try:
+                    metar_data = self.metar.fetch_latest(station)
+                    if metar_data:
+                        age = (
+                            time.time() - metar_data.timestamp.timestamp()
+                            if metar_data.timestamp
+                            else 0
+                        )
+                        logger.info(
+                            f"[Weather] Using METAR data for settlement station "
+                            f"{station} ({city.key}, age: {age:.0f}s)"
+                        )
+                        obs_data = metar_data
+                except Exception as e:
+                    logger.warning(f"[Weather] METAR fetch failed for {station}: {e}")
+
+            # Fallback to NWS observations at the SAME settlement station
+            nws_data = None
+            if obs_data is None:
+                nws_data = self.nws.fetch_latest(station)
+                if nws_data:
+                    logger.info(
+                        f"[Weather] Falling back to NWS observations for "
+                        f"settlement station {station} ({city.key})"
+                    )
+                    obs_data = nws_data
+
+            if not obs_data:
+                continue
+
+            # --- Merge NWS forecast into METAR observation ---
+            # Strategies expect extra["forecast"] for 7-day forecast data.
+            # METAR gives better temps; NWS gives forecasts. Both are keyed to
+            # the settlement station.
+            if nws_data is None:
+                nws_data = self.nws.fetch_latest(station)
+            if nws_data and nws_data.extra:
+                forecast = nws_data.extra.get("forecast")
+                if forecast and (
+                    not obs_data.extra or not obs_data.extra.get("forecast")
+                ):
+                    if obs_data.extra is None:
+                        obs_data.extra = {}
+                    obs_data.extra["forecast"] = forecast
+
+            # City provenance travels with the observation (FR-1.4 / FR-3.2).
+            if obs_data.extra is None:
+                obs_data.extra = {}
+            obs_data.extra["city_key"] = city.key
+            obs_data.extra["settlement_station"] = station
+            obs_data.extra["station_timezone"] = city.timezone
+            obs_data.extra["kalshi_series"] = kalshi_ticker
+
+            temp = obs_data.extra.get("temperature_f")
+
+            # --- FR-0.7 harvester: record the FULL ladder, fuse the active ---
+            # One /markets list call per city per tick supplies bid/ask/no-side/
+            # last/volume for every bracket; no per-market quote calls.
+            k_data = None
+            if self.kalshi and kalshi_ticker:
+                try:
+                    max_t = obs_data.extra.get("max_temp_today_f")
+                    ladder = self._ladder_for_city(kalshi_ticker)
+
+                    if ladder:
+                        # Active market = highest YES bid (same "sentiment"
+                        # criterion the legacy resolver used).
+                        k_data = max(ladder, key=lambda m: m.bid)
+                        active_ticker = k_data.symbol
+
+                        for m in ladder:
+                            best_price = (
+                                m.bid
+                                if m.bid > 0
+                                else (m.ask if m.ask > 0 else m.price)
+                            )
+                            m_extra = m.extra or {}
+                            kwargs = dict(
+                                bid=m.bid,
+                                ask=m.ask,
+                                no_bid=m_extra.get("no_bid", 0.0),
+                                no_ask=m_extra.get("no_ask", 0.0),
+                                last=m.price,
+                                volume=m.volume,
+                            )
+                            # FR-1.1 bracket semantics ride along with the row.
+                            # dashboard.update_price(**kwargs) stashes unknown
+                            # keys in latest_prices[...]["extra"] and writes
+                            # only its fixed columns, so this is additive.
+                            for field in BRACKET_FIELDS:
+                                kwargs[field] = m_extra.get(field)
+                            if m.symbol == active_ticker and max_t is not None:
+                                kwargs["max_temp"] = max_t
+                            dashboard.update_price(
+                                f"{m.symbol} (Market)", best_price, **kwargs
+                            )
+                    else:
+                        # Fallback: legacy single-market resolution path
+                        active_ticker = self._resolve_smart_ticker(
+                            kalshi_ticker, criteria="sentiment", kalshi=self.kalshi
+                        )
+                        if active_ticker:
+                            k_data = self.kalshi.fetch_latest(active_ticker)
+                            if k_data:
+                                best_price = (
+                                    k_data.bid
+                                    if k_data.bid > 0
+                                    else (
+                                        k_data.ask if k_data.ask > 0 else k_data.price
+                                    )
+                                )
+                                dashboard.update_price(
+                                    f"{active_ticker} (Market)",
+                                    best_price,
+                                    bid=k_data.bid,
+                                    ask=k_data.ask,
+                                    no_bid=k_data.extra.get("no_bid", 0.0)
+                                    if k_data.extra
+                                    else 0.0,
+                                    no_ask=k_data.extra.get("no_ask", 0.0)
+                                    if k_data.extra
+                                    else 0.0,
+                                    last=k_data.price,
+                                    volume=k_data.volume,
+                                    max_temp=max_t,
+                                )
+
+                    # Hourly top-3 orderbook depth snapshot (never per tick)
+                    if depth_due and ladder:
+                        self._snapshot_depth(ladder, dashboard)
+
+                    if k_data and active_ticker:
+                        # Fuse Kalshi prices into observation data
+                        obs_data.bid = k_data.bid
+                        obs_data.ask = k_data.ask
+                        obs_data.price = k_data.price
+                        obs_data.symbol = active_ticker
+
+                        # PRD FR-1.1: carry the active market's bracket
+                        # semantics so strategies can call
+                        # parse_bracket_spec(symbol, data.extra) directly.
+                        # Fields are written even when absent (as None) so a
+                        # stale bracket can never survive onto a new market —
+                        # parse_bracket_spec then raises BracketSpecError
+                        # rather than letting anything infer direction from
+                        # the ticker string. All pre-existing keys are kept.
+                        k_extra = k_data.extra or {}
+                        for field in BRACKET_FIELDS:
+                            obs_data.extra[field] = k_extra.get(field)
+                except Exception as e:
+                    logger.error(f"[Weather] Market Fetch Fail ({kalshi_ticker}): {e}")
+
+            # Use real Kalshi market price for position valuation (not raw temp)
+            kalshi_market_price = None
+            if active_ticker and obs_data.bid > 0:
+                kalshi_market_price = obs_data.bid  # fused from k_data above
+            elif active_ticker and obs_data.price > 0:
+                kalshi_market_price = obs_data.price
+
+            if temp:
+                dashboard.update_price(f"{kalshi_ticker or station} (F)", temp)
+                if active_ticker and kalshi_market_price and kalshi_market_price > 0:
+                    risk_manager.update_market_data(active_ticker, kalshi_market_price)
+                    risk_manager.exchange.update_market_price(
+                        active_ticker, kalshi_market_price
+                    )
+                elif active_ticker:
+                    risk_manager.update_market_data(active_ticker, temp)
+                else:
+                    risk_manager.update_market_data(f"TEMP_{station}", temp)
+
+            # Extract PoP for Precip
+            forecasts = obs_data.extra.get("forecast") or []
+            pop_prob = 0.0
+            for period in forecasts:
+                if period.get("isDaytime"):
+                    val = period.get("probabilityOfPrecipitation", {}).get("value", 0)
+                    if val:
+                        pop_prob = val / 100.0
+                    break
+
+            if pop_prob is not None:
+                if active_ticker:
+                    risk_manager.update_market_data(f"{active_ticker}_PRECIP", pop_prob)
+                else:
+                    risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
+
+            # Waterfall: ML Weather → V2 rule-based fallback
+            # 2026-06-03 review: weather trading disabled (fee bleed). Price/data
+            # feeds above still run for dashboard + future re-enable.
+            if WEATHER_TRADING_ENABLED:
+                traded = self._process_signals(
+                    self.strategies["ml_weather"].analyze(obs_data),
+                    strategy_name="ML Weather",
+                    risk_manager=risk_manager,
+                    dashboard=dashboard,
+                )
+                if not traded:
+                    self._process_signals(
+                        self.strategies["weather"].analyze(obs_data),
+                        strategy_name="Meteorologist V2",
+                        risk_manager=risk_manager,
+                        dashboard=dashboard,
+                    )
+
+            time.sleep(1)  # 1 sec between cities
+
+        if depth_due:
+            self._last_depth_snapshot = time.time()
+
+        return []
+
+    def _ladder_for_city(self, series_base):
+        """Full-quote ladder for a city's series, filtered to tracked dates.
+
+        One /markets list call (via ``fetch_market_ladder``) — no per-market
+        fetches. Tracked = today's and tomorrow's events, mirroring the
+        legacy sentiment resolver's date targeting; if none match, the full
+        active ladder is returned defensively.
+        """
+        if not hasattr(self.kalshi, "fetch_market_ladder"):
+            return []
+        ladder = self.kalshi.fetch_market_ladder(series_base) or []
+        if not ladder:
+            return []
+        now = datetime.now()
+        target_dates = [
+            now.strftime("%y%b%d").upper(),
+            (now + timedelta(days=1)).strftime("%y%b%d").upper(),
+        ]
+        tracked = [m for m in ladder if any(d in m.symbol for d in target_dates)]
+        return tracked or ladder
+
+    def _snapshot_depth(self, ladder, dashboard):
+        """Record hourly top-3 orderbook levels for each tracked market.
+
+        Called only when the hourly snapshot is due (see tick); throttled
+        between calls to stay well under Kalshi rate limits.
+        """
+        for m in ladder[: self.MAX_DEPTH_MARKETS_PER_CITY]:
+            try:
+                book = self.kalshi.fetch_orderbook(m.symbol, depth=3)
+                if book and (book.get("yes") or book.get("no")):
+                    m_extra = m.extra or {}
+                    # FR-1.1: a depth row carries the same bracket semantics
+                    # as its quote rows, so the hourly book is settleable
+                    # offline without joining back to a MARKET_DATA row.
+                    dashboard.record_depth(
+                        m.symbol,
+                        book,
+                        last_price=m.price,
+                        strike_type=m_extra.get("strike_type"),
+                        floor_strike=m_extra.get("floor_strike"),
+                        cap_strike=m_extra.get("cap_strike"),
+                    )
+            except Exception as e:
+                logger.warning(f"[Weather] Depth snapshot failed for {m.symbol}: {e}")
+            time.sleep(0.15)
+
+    def get_symbols(self) -> List[str]:
+        return [c.kalshi_series for c in self.CITIES]

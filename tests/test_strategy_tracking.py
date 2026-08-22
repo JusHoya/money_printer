@@ -3,8 +3,8 @@ test_strategy_tracking.py
 Tests the strategy_name propagation through:
   SimulatedExchange.open_position → position dict → _close_position → on_close callback
 """
+
 import pytest
-from datetime import datetime, timedelta
 from src.core.matching_engine import SimulatedExchange
 
 
@@ -12,26 +12,26 @@ def test_strategy_name_stored_in_position():
     """Verify strategy_name is stored in the active position dict."""
     ex = SimulatedExchange()
     ex.open_position(
-        symbol='KXHIGHNY-26FEB19-T44',
-        side='buy',
+        symbol="KXHIGHNY-26FEB19-T44",
+        side="buy",
         entry_price=0.35,
         quantity=5,
-        strategy_name='Meteorologist V1'
+        strategy_name="Meteorologist V1",
     )
     assert len(ex.positions) == 1
-    assert ex.positions[0]['strategy_name'] == 'Meteorologist V1'
+    assert ex.positions[0]["strategy_name"] == "Meteorologist V1"
 
 
 def test_strategy_name_defaults_to_unknown():
     """Verify missing strategy_name defaults to 'Unknown'."""
     ex = SimulatedExchange()
     ex.open_position(
-        symbol='KXBTC15M-TEST-T50000',
-        side='buy',
+        symbol="KXBTC15M-TEST-T50000",
+        side="buy",
         entry_price=0.50,
         quantity=3,
     )
-    assert ex.positions[0]['strategy_name'] == 'Unknown'
+    assert ex.positions[0]["strategy_name"] == "Unknown"
 
 
 def test_on_close_callback_receives_strategy_name():
@@ -42,79 +42,56 @@ def test_on_close_callback_receives_strategy_name():
         closed.append(pos)
 
     ex = SimulatedExchange(on_close=capture)
+    # 2026-07-25 (PRD FR-1.5): was KXHIGHNY-26FEB19-T44. TAKE_PROFIT is now
+    # refused on a weather bracket (held to settlement), so the reason and the
+    # symbol have to agree. strategy_name propagation is symbol-agnostic and
+    # the assertions below are unchanged; the weather families are covered by
+    # tests/test_weather_lifecycle.py and test_weather_settlement_semantics.py.
     ex.open_position(
-        symbol='KXHIGHNY-26FEB19-T44',
-        side='buy',
+        symbol="KXBTC15M-26FEB19-44",
+        side="buy",
         entry_price=0.35,
         quantity=5,
-        strategy_name='Trend Catcher V2'
+        strategy_name="Trend Catcher V2",
+        strike=64000.0,
     )
 
     # Use TAKE_PROFIT reason (non-binary settlement) — passes exit_price directly
     pos = ex.positions[0]
-    ex._close_position(pos, 0.50, reason='TAKE_PROFIT')
+    ex._close_position(pos, 0.50, reason="TAKE_PROFIT")
 
     assert len(closed) == 1, "on_close should have fired"
-    assert closed[0]['strategy_name'] == 'Trend Catcher V2', f"Got: {closed[0].get('strategy_name')}"
+    assert (
+        closed[0]["strategy_name"] == "Trend Catcher V2"
+    ), f"Got: {closed[0].get('strategy_name')}"
 
 
 def test_strategy_name_preserved_in_closed_trades():
     """Verify closed_trades record includes strategy_name for historical review."""
     ex = SimulatedExchange()
+    # 2026-07-25 (PRD FR-1.5): was KXHIGHCHI-26FEB19-T35. EARLY_SETTLEMENT
+    # invents a 1.00/0.00 outcome from a price peg, which is exactly NOT
+    # "settle via FR-1.2", so it is now refused on a weather bracket. The
+    # closed_trades bookkeeping under test is symbol-agnostic.
     ex.open_position(
-        symbol='KXHIGHCHI-26FEB19-T35',
-        side='sell',
+        symbol="KXBTC15M-26FEB19-35",
+        side="sell",
         entry_price=0.20,
         quantity=3,
-        strategy_name='LongShot Fader'
+        strategy_name="LongShot Fader",
+        strike=64000.0,
     )
     pos = ex.positions[0]
-    ex._close_position(pos, 0.01, reason='EARLY_SETTLEMENT')
+    ex._close_position(pos, 0.01, reason="EARLY_SETTLEMENT")
 
     assert len(ex.closed_trades) == 1
-    assert ex.closed_trades[0]['strategy_name'] == 'LongShot Fader'
+    assert ex.closed_trades[0]["strategy_name"] == "LongShot Fader"
 
 
-def test_fixed_cent_stop_loss_not_triggered_by_spread_noise():
-    """
-    Bug Fix validation: Old code used stop_loss_buffer=0.10, which on a $0.17 option
-    produced stop at $0.153 — close enough to be triggered by the bid/ask spread.
-    New logic uses FIXED_STOP_CENTS=$0.05, so entry=0.35 gives stop at 0.30.
-    The spread of 0.02 should NOT trigger the stop.
-    """
-    from src.strategies.crypto_strategy import Crypto15mTrendStrategyV2
-    strat = Crypto15mTrendStrategyV2()
-    # Confirm fixed stop is $0.05
-    assert strat.FIXED_STOP_CENTS == 0.05, f"Expected 0.05, got {strat.FIXED_STOP_CENTS}"
+# Phase 0 teardown (2026-07-24): the Crypto15mTrendStrategyV2 fixed-cent
+# stop-loss test and the CryptoLongShotFader price-range test were removed
+# with the deleted crypto strategies.
 
 
-def test_longshot_fader_targets_correct_price_range():
-    """LongShot Fader must only fire on [min_price, longshot_ceiling] range."""
-    from src.strategies.crypto_strategy import CryptoLongShotFader
-    from src.core.interfaces import MarketData
-    from datetime import datetime
-
-    fader = CryptoLongShotFader(longshot_ceiling=0.08, min_price=0.03)
-
-    def make_market(bid):
-        return MarketData(
-            symbol='KXBTC15M-TEST-T50000',
-            timestamp=datetime.now(),
-            price=bid,
-            volume=0.0,
-            bid=bid,
-            ask=bid + 0.01,
-        )
-
-    # Below min → no trade
-    assert fader.analyze(make_market(0.02)) == []
-    # Above ceiling → no trade
-    assert fader.analyze(make_market(0.12)) == []
-    # In range → trade
-    sigs = fader.analyze(make_market(0.06))
-    assert len(sigs) == 1
-    assert sigs[0].side == 'sell'
-
-
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

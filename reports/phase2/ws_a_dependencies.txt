@@ -1,0 +1,60 @@
+# Workstream A (ensemble provider) -- dependency request for requirements.txt
+#
+# NET NEW DEPENDENCIES: NONE. No edit to requirements.txt is required.
+#
+# src/data/ensemble_provider.py, scripts/fetch_ensemble.py and
+# tests/test_ensemble_provider.py import only the standard library plus two
+# packages that requirements.txt already pins:
+#
+#   requests    # already present (line 2) -- anonymous HTTPS to the NOAA NODD
+#               # S3 mirror: .idx sidecar reads and Range requests for single
+#               # GRIB2 records. No boto3, no credentials.
+#   numpy       # already present (ML block) -- bit unpacking and the group
+#               # integration in the in-house GRIB2 complex-packing decoder.
+#
+# Stdlib only otherwise: zoneinfo (local calendar days), struct (GRIB2 section
+# parsing), statistics.NormalDist (deterministic Gaussian quantiles on the
+# degraded path), concurrent.futures, dataclasses, json, math, logging, os.
+#
+# ---------------------------------------------------------------------------
+# GRIB2 libraries evaluated and REJECTED (recorded so this is not re-litigated)
+# ---------------------------------------------------------------------------
+# eccodes / cfgrib -- REJECTED, does not work on this machine.
+#   `pip install eccodes` resolves to eccodes-2.47.0-py3-none-any.whl, which is
+#   only the Python binding. Importing it raises:
+#       RuntimeError: Cannot find the ecCodes library
+#   because the native ecCodes shared library is not bundled. Probed for a
+#   binary distribution of that library and found none for this platform
+#   (Python 3.14, Windows 11, x86-64):
+#       pip install eccodeslib   -> ERROR: No matching distribution found
+#       pip download eccodes-lib -> ERROR: No matching distribution found
+#   Both probe installs were uninstalled again; the environment is clean.
+#
+# pygrib -- NOT PURSUED. It links the same native ecCodes library that is
+#   unavailable above, so it fails for the same reason; installing it would
+#   also require a compiler toolchain on the VM.
+#
+# Decision: decode in-house. Only one GRIB2 record and a handful of grid points
+# are ever needed, the records use a single well-specified representation
+# (grid template 3.0, data representation template 5.3), and the decoder is
+# gated by a mutation test plus a cross-check against NCEP's own geavg product
+# and against CLI settlement truth. See the module docstring and
+# reports/phase2/ws_a_report.md.
+#
+# ---------------------------------------------------------------------------
+# .gitignore -- NO CHANGE REQUESTED
+# ---------------------------------------------------------------------------
+# The regenerable download cache was placed under data/ensemble/cache/ so the
+# entry a sibling workstream already added ("data/ensemble/cache/") covers all
+# of it. Verified with git check-ignore; git status --porcelain data/ensemble
+# is empty. The evidence artifact is reports/phase2/ec1_ensemble_members.{json,md},
+# which is tracked.
+#
+# ---------------------------------------------------------------------------
+# .gitattributes -- NO CHANGE REQUESTED, but see ws_a_report.md section 10
+# ---------------------------------------------------------------------------
+# The rule "tests/fixtures/** text eol=lf" forces text treatment and would have
+# normalised 9 CRLF byte pairs out of the 431 982-byte binary GRIB2 fixture on
+# check-in. Worked around inside this workstream by storing the record
+# base64-encoded (CR-free, so the LF policy is a no-op). Flagged in the report
+# because it is a live trap for any other recorded binary fixture.

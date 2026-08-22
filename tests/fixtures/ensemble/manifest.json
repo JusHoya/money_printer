@@ -1,0 +1,73 @@
+{
+ "bucket": "https://noaa-gefs-pds.s3.amazonaws.com/",
+ "bytes": 431982,
+ "city_nodes": {
+  "CHI": {
+   "fahrenheit": 75.65,
+   "kelvin": 297.4,
+   "node": [
+    193,
+    1089
+   ]
+  },
+  "LAX": {
+   "fahrenheit": 83.03,
+   "kelvin": 301.5,
+   "node": [
+    224,
+    966
+   ]
+  },
+  "MIA": {
+   "fahrenheit": 86.27,
+   "kelvin": 303.3,
+   "node": [
+    257,
+    1119
+   ]
+  },
+  "NY": {
+   "fahrenheit": 75.47,
+   "kelvin": 297.3,
+   "node": [
+    197,
+    1144
+   ]
+  }
+ },
+ "fetched_at": "2026-07-27T03:35:30Z",
+ "field_range_k": {
+  "max": 321.1,
+  "min": 209.7
+ },
+ "grib": {
+  "discipline": 0,
+  "drs_template": 3,
+  "ensemble_size": 30,
+  "ensemble_type": 1,
+  "forecast_time": 24,
+  "interval_end": 30,
+  "interval_start": 24,
+  "parameter_category": 0,
+  "parameter_number": 4,
+  "pdt_number": 11,
+  "perturbation_number": 0,
+  "reference_time": "2026-07-25T00:00:00Z",
+  "statistical_process": 2,
+  "total_points": 1038240
+ },
+ "http_status": 206,
+ "idx_record": {
+  "field": "TMAX",
+  "forecast": "24-30 hour max fcst",
+  "level": "2 m above ground",
+  "number": 13
+ },
+ "note": "Real upstream record, fetched byte-for-byte from NOAA NODD. Values below are what this repo decodes; they are cross-validated against NCEP geavg and CLI settlement truth in reports/phase2/ec1_ensemble_members.md, and the test also asserts independent invariants (global field range, north-pole row constancy, min-packed-difference == 0).",
+ "pole_row_value_k": 273.4,
+ "range": "bytes=5296014-5727995",
+ "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gec00.t00z.pgrb2s.0p25.f030",
+ "sha256": "1bda1f1a9d986086b50a893c81cc1add40a381990fb83294290c3ceea2bec232",
+ "stored_as": "gec00.t00z.pgrb2s.0p25.f030.TMAX.grib2.b64 (base64, 76-char lines, LF)",
+ "stored_as_note": ".gitattributes declares tests/fixtures/** text eol=lf, which forces text treatment and would normalise the 9 CRLF byte pairs inside this binary record out of existence on check-in. Base64 is CR-free, so the LF policy is a no-op and the decoded bytes remain byte-identical to what NOAA served. sha256/bytes below are of the DECODED record."
+}

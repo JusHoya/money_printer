@@ -1,667 +1,1050 @@
+import fnmatch
+import shutil
 import time
 import threading
 import os
 import sys
-import re
+import argparse
 
 # Add project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.visualization.dashboard import Dashboard
-from src.data.nws_provider import NWSProvider
 from src.data.coinbase_provider import CoinbaseProvider
-from src.data.kalshi_provider import KalshiProvider
-from src.strategies.weather_strategy import WeatherArbitrageStrategy, WeatherArbitrageStrategyV2
-from src.strategies.crypto_strategy import CryptoArbitrageStrategy, CryptoHourlyStrategy, CryptoHourlyStrategyV3, Crypto15mTrendStrategy, Crypto15mTrendStrategyV2, Crypto15mTrendStrategyV3, CryptoLongShotFader, Crypto15mLateSniper
-from src.core.interfaces import TradeSignal
+from src.data.nws_provider import NWSProvider
+from src.data.kalshi_provider import KalshiProvider, is_test_symbol
 from src.core.risk_manager import RiskManager
+from src.core.matching_engine import is_held_to_settlement
+from src.bots.registry import BotRegistry
 from src.utils.system_utils import prevent_sleep
-from src.utils.logger import logger
-import os
-import copy
-from datetime import datetime, timedelta
+from src.utils.logger import logger, get_active_log_path, configure_root_logging
+from src.ml.trade_journal import TradeJournal, TradeOutcome
+from src.strategies.counter_trade import CounterTradeAnalyzer
+from src.ml.settlement_resolver import SettlementResolver
+from src.notifications.discord import send_discord_notification
+
+# Import bots to trigger registration
+import src.bots  # noqa: F401
+
 
 class OrchestratorEngine:
-    def __init__(self):
+    _TRAINING_STATE_PATH = os.path.join("data", "training_state.json")
+
+    # Phase 0 teardown (2026-07-24, PRD FR-0.2): ALL runtime retrains removed —
+    # the periodic 2h daemon retrain, the cycle-boundary in-process retrain, the
+    # startup retrain, and the on-trade-close online updater. Training modules
+    # (src/ml/, scripts/train_*.py) remain on disk and are invocable OFFLINE
+    # only; nothing in the runtime path may import-and-run training.
+
+    # Phase 0 (2026-07-24): the ".orchestrator_state" runtime marker was
+    # removed — the redesigned watchdog no longer reads it (see comments in
+    # scripts/host_watchdog.sh, scripts/watchdog_cron.sh, scripts/vm_watchdog.py).
+
+    # 2026-06-10 fix (b) — records the sim balance this process launched with so
+    # a watchdog auto-restart reuses it instead of hardcoding $3000 (which would
+    # silently override a future Phase-2 $500 run).
+    _SIM_BALANCE_MARKER_PATH = os.path.join("logs", ".sim_balance")
+
+    def __init__(self, bot_names=None):
         self.dashboard = Dashboard()
         self.running = True
-        self.risk_manager = RiskManager(starting_balance=100.0)
-        self.last_15m_trade_interval = None  # Track which 15m interval we last traded in
-        
-        # Wire the trade-close callback to the dashboard for strategy tracking
+        self.risk_manager = RiskManager(starting_balance=100.0, persist_state=True)
+
+        # Wire the trade-close callback
         self.risk_manager.exchange.on_close = self._on_trade_close
-        
-        self.strategies = {
-            "weather": WeatherArbitrageStrategyV2(), # UPGRADED TO V2
-            "crypto": Crypto15mTrendStrategyV3(),   # UPGRADED TO V3
-            "crypto_hr": CryptoHourlyStrategyV3(),  # UPGRADED TO V3
-            "longshot": CryptoLongShotFader(),      # Fade low-prob contracts
-            "late_sniper": Crypto15mLateSniper()    # Late-entry sniper
-        }
-        self.dashboard.active_strategies = list(self.strategies.keys())
-        self.ticker_cache = {} # Cache resolved tickers: { "KXHIGHNY": "KXHIGHNY-26JAN30-T20" }
-        
-        # Initialize Providers
-        # NWS
+        # Operator-visible alerts from the exchange (e.g. a weather position
+        # whose bracket semantics cannot be established, or a refused FR-1.5
+        # lifecycle close). Re-wired after every cycle-boundary Dashboard swap.
+        self.risk_manager.exchange.on_alert = self.dashboard.alert
+
+        # Initialize shared providers
+        self.coinbase = CoinbaseProvider("BTC-USD")
+
         nws_ua = os.getenv("NWS_USER_AGENT", "(MoneyPrinter, test@example.com)")
-        # Updated Stations: KNYC (Central Park), KMDW (Midway), KLAX, KMIA
         self.nws_stations = ["KNYC", "KLAX", "KMDW", "KMIA"]
         self.nws = NWSProvider(nws_ua, self.nws_stations)
-        
-        # Coinbase
-        self.coinbase = CoinbaseProvider("BTC-USD")
-        
-        # Kalshi (For Balance Sync & Live Price Discovery)
+
         k_id = os.getenv("KALSHI_KEY_ID")
         k_key = os.getenv("KALSHI_PRIVATE_KEY_PATH")
         k_url = os.getenv("KALSHI_API_URL")
         self.kalshi = None
         if k_id and k_key:
-            # SAFETY: Always force read_only=True for now
             self.kalshi = KalshiProvider(k_id, k_key, k_url, read_only=True)
 
+        # Instantiate bots
+        if bot_names:
+            self.bots = [BotRegistry.create(name) for name in bot_names]
+        else:
+            self.bots = BotRegistry.create_all()
+
+        # Track which bots are currently active (all bots active by default)
+        self.active_bots = {bot.name for bot in self.bots}
+
+        # Uptime tracking — pauses when all bots are stopped
+        self._uptime_accumulated = 0.0
+        self._uptime_resumed_at = time.time()
+
+        # Collect strategy names for dashboard
+        all_strategies = []
+        for bot in self.bots:
+            all_strategies.extend(bot.strategies.keys())
+        self.dashboard.active_strategies = all_strategies
+
+        # Auto-cycle config (set by caller)
+        self.auto_cycle = False
+        self.sim_balance = 0.0
+        self._cycle_count = 0
+        self._cycle_start_time = time.time()
+        self._profitable_since = None  # timestamp when PnL last went positive
+        self.cycle_history = []  # list of cycle result dicts
+        self._training_diagnostics = {}  # legacy training metrics (offline only)
+        self._training_history = []  # accumulated training history (max 20)
+
+        # Load persisted training state from prior runs
+        self._load_training_state()
+
+        # Trade journal — records every closed trade for offline analysis
+        self.trade_journal = TradeJournal()
+
+        # Counter-trade analyzer — LOG-ONLY mode until validated
+        self.counter_analyzer = CounterTradeAnalyzer(live=False)
+
+        # Settlement resolver — background label resolution
+        self.settlement_resolver = SettlementResolver(
+            kalshi_provider=self.kalshi,
+        )
+
+        logger.info(
+            f"[Orchestrator] Active bots: {[b.name for b in self.bots]} | "
+            f"Journal: {self.trade_journal.get_sample_count()} outcomes"
+        )
+
+    @property
+    def uptime_seconds(self) -> float:
+        """Total seconds bots have been active (pauses when all bots stopped)."""
+        if self.active_bots:
+            return self._uptime_accumulated + (time.time() - self._uptime_resumed_at)
+        return self._uptime_accumulated
+
+    def start_bot(self, name: str):
+        """Activate a bot by name so it participates in the market loop."""
+        bot_names = [b.name for b in self.bots]
+        if name not in bot_names:
+            raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        was_empty = len(self.active_bots) == 0
+        self.active_bots.add(name)
+        if was_empty:
+            self._uptime_resumed_at = time.time()
+        logger.info(f"[Orchestrator] Bot '{name}' started.")
+
+    def stop_bot(self, name: str):
+        """Deactivate a bot by name so it is skipped in the market loop."""
+        bot_names = [b.name for b in self.bots]
+        if name not in bot_names:
+            raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        was_active = name in self.active_bots
+        self.active_bots.discard(name)
+        if was_active and len(self.active_bots) == 0:
+            self._uptime_accumulated += time.time() - self._uptime_resumed_at
+        logger.info(f"[Orchestrator] Bot '{name}' stopped.")
+
     def _on_trade_close(self, position: dict):
-        """Callback from OMS when a trade is settled/closed. Reports result to dashboard."""
-        strategy_name = position.get('strategy_name', 'Unknown')
-        pnl = position.get('pnl', 0.0)
+        """Callback from OMS when a trade is settled/closed."""
+        # Delegate to RiskManager FIRST: the orchestrator overwrites
+        # exchange.on_close (at __init__ and on cycle reset), which would
+        # otherwise orphan RiskManager's win-rate recording, loss/strategy
+        # cooldowns, consecutive-loss tracking, and strategy_pnl/peak
+        # accumulation. The two callbacks touch disjoint state and
+        # RiskManager._on_trade_close reads cumulative exchange state
+        # idempotently, so chaining is safe and non-duplicative. Wrapped in
+        # try/except so a RiskManager error can never break journaling below.
+        try:
+            self.risk_manager._on_trade_close(position)
+        except Exception as exc:
+            logger.warning("[Orchestrator] RiskManager close handler failed: %s", exc)
+
+        strategy_name = position.get("strategy_name", "Unknown")
+        pnl = position.get("pnl", 0.0)
         self.dashboard.record_strategy_trade_result(strategy_name, pnl)
-        logger.info(f"[Orchestrator] 📊 Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}")
+        logger.info(
+            f"[Orchestrator] Strategy Result: {strategy_name} | PnL: ${pnl:+.2f}"
+        )
 
-        # Forward Late Sniper closes to the strategy for adaptive threshold adjustment
-        if strategy_name == "Late Sniper":
-            self.strategies["late_sniper"]._handle_position_close(position)
-
-    def _resolve_smart_ticker(self, series_base, criteria="time"):
-        """
-        Dynamically finds the best market ticker for a given series.
-        criteria="time": Finds nearest future expiration (for Crypto).
-        criteria="sentiment": Finds market with highest YES price (for Weather).
-        """
-        # Check Cache (TTL 60s)
-        cached = self.ticker_cache.get(series_base)
-        if cached and (time.time() - cached['time'] < 60):
-            return cached['ticker']
-
-        if not self.kalshi: return None
-        
-        # --- SPECIAL CASE: KXBTCHOURLY (V1 Discovery) ---
-        if series_base == "KXBTCHOURLY":
-             try:
-                 # Use the special V1 probe method we added to KalshiProvider
-                 v1_markets = self.kalshi.fetch_btc_hourly_markets()
-                 if v1_markets:
-                     # 1. Group by Expiration (Find Soonest)
-                     # Sort by close_time (ISO string)
-                     # Filter out any that might have slipped through (just to be safe)
-                     future_markets = v1_markets # Already filtered by provider
-                     
-                     if not future_markets: return None
-                     
-                     # Sort by time first
-                     future_markets.sort(key=lambda x: x.extra.get('close_time', '9999'))
-                     
-                     # Get the soonest close time
-                     soonest_time = future_markets[0].extra.get('close_time')
-                     
-                     # Filter for only this hour's markets
-                     this_hour_markets = [m for m in future_markets if m.extra.get('close_time') == soonest_time]
-                     
-                     # 2. Find ATM Strike
-                     # Get current Spot Price
-                     spot_price = 50000.0 # Fallback
-                     try:
-                         cb_data = self.coinbase.fetch_latest()
-                         if cb_data: spot_price = cb_data.price
-                     except: pass
-                     
-                     def get_strike_diff(m):
-                         try:
-                             # Format: ...-T60999.99
-                             strike_part = m.symbol.split('-')[-1]
-                             strike_val = float(re.sub(r'[A-Za-z]', '', strike_part))
-                             return abs(strike_val - spot_price)
-                         except:
-                             return 999999.0
-                             
-                     # Sort by proximity to spot
-                     this_hour_markets.sort(key=get_strike_diff)
-                     
-                     best = this_hour_markets[0].symbol
-                     
-                     # Cache slightly longer since we did a heavy V1 scan? 
-                     # Actually V1 scan is expensive (12 requests). We should cache this for maybe 5 mins?
-                     # Existing cache is 60s. That's OK.
-                     
-                     self.ticker_cache[series_base] = {'ticker': best, 'time': time.time()}
-                     logger.info(f"[Dashboard] Smart Resolve {series_base} -> {best} (ATM Strike @ {spot_price})")
-                     return best
-             except Exception as e:
-                 logger.error(f"V1 Discovery Failed: {e}")
-                 pass
-        
+        # Record to trade journal for offline analysis
         try:
-            # 1. Fetch markets with PAGINATION (Kalshi API does NOT support status filtering)
-            # High-volume series like KXBTC15M have 2000+ markets. The active one(s)
-            # can be on any page. We paginate until we find active markets or exhaust pages.
-            active_markets = []
-            cursor = None
-            for _ in range(5):  # Max 5 pages (~1000 markets) to prevent runaway
-                params = {"series_ticker": series_base, "limit": 200}
-                if cursor:
-                    params["cursor"] = cursor
-                resp = self.kalshi.session.get(f"{self.kalshi.api_url}/markets", params=params)
-                if resp.status_code != 200: break
-                data = resp.json()
-                page_markets = data.get('markets', [])
-                active_markets.extend([m for m in page_markets if m.get('status') == 'active'])
-                cursor = data.get('cursor')
-                if not cursor or not page_markets:
-                    break
-                if active_markets:
-                    break  # Found active markets, no need to keep paginating
-            
-            if not active_markets: return None
+            outcome = TradeOutcome.from_position(position)
+            self.trade_journal.record(outcome)
+        except Exception as exc:
+            logger.warning("[Orchestrator] Journal record failed: %s", exc)
 
-            best_ticker = None
-            
-            if criteria == "time":
-                # Sort by expiration_time (soonest first)
-                # Filter for active (already done)
-                active_markets.sort(key=lambda x: x.get('expiration_time', '9999'))
-                if active_markets:
-                    best_ticker = active_markets[0].get('ticker')
+        # NOTE (FR-0.2): the online-model-update trigger that used to run here
+        # (a full in-runtime retrain on the closing thread) was removed in the
+        # Phase 0 teardown. Training is offline-only now.
 
-            elif criteria == "sentiment":
-                # Weather: Find highest YES price (Implied Probability)
-                # Filter for TODAY or TOMORROW first to stay relevant
-                now = datetime.now()
-                target_dates = [now.strftime("%y%b%d").upper(), (now + timedelta(days=1)).strftime("%y%b%d").upper()]
-                
-                candidates = []
-                for m in active_markets:
-                    tick = m.get('ticker', '')
-                    if any(d in tick for d in target_dates):
-                        candidates.append(tick)
-                
-                # If no date match, check all (fallback)
-                if not candidates: candidates = [m.get('ticker') for m in active_markets]
-                
-                highest_bid = -1.0
-                winner = None
-                
-                # Find Highest Sentiment by fetching latest price for candidates
-                # Rate limit safety: Limit to top 5 candidates? 
-                # For now, we assume candidates list is small (usually ~5-10 strikes per day)
-                for ticker in candidates:
-                    data = self.kalshi.fetch_latest(ticker)
-                    if data and data.bid > highest_bid:
-                        highest_bid = data.bid
-                        winner = ticker
-                        
-                best_ticker = winner
+        # Forward Late Sniper closes for adaptive threshold
+        for bot in self.bots:
+            if strategy_name == "Late Sniper" and "late_sniper" in bot.strategies:
+                bot.strategies["late_sniper"]._handle_position_close(position)
 
-            if best_ticker:
-                logger.info(f"[Dashboard] Smart Resolve {series_base} -> {best_ticker} ({criteria})")
-                self.ticker_cache[series_base] = {'ticker': best_ticker, 'time': time.time()}
-                return best_ticker
-                
-            return None
-            
-        except Exception as e:
-            logger.error(f"Resolution Error ({series_base}): {e}")
-            return None
+    # ------------------------------------------------------------------
+    # Runtime state markers (2026-06-10 fix b) — best-effort, never raise
+    # ------------------------------------------------------------------
 
-    def _resolve_btc_ladder(self):
-        """
-        Resolves the 'Ladder' of BTC Hourly markets:
-        1. Center (Closest to Spot)
-        2. Lower (Center - $250)
-        3. Upper (Center + $250)
-        Returns a list of tickers, with Center first.
-        """
-        if not self.kalshi: return []
-        
+    def _write_sim_balance_marker(self) -> None:
+        """Persist the sim balance this process launched with so a watchdog
+        auto-restart reuses it (instead of hardcoding $3000). Best-effort."""
         try:
-            # 1. Fetch V1 Markets
-            markets = self.kalshi.fetch_btc_hourly_markets()
-            if not markets:
-                logger.warning("[Dashboard] No V1 BTC Markets found.")
-                return []
-            
-            # 2. Filter for Soonest Expiration
-            markets.sort(key=lambda x: x.extra.get('close_time', '9999'))
-            soonest_time = markets[0].extra.get('close_time')
-            this_hour_markets = [m for m in markets if m.extra.get('close_time') == soonest_time]
-            
-            if not this_hour_markets:
-                logger.warning(f"[Dashboard] No markets found for soonest hour: {soonest_time}")
-                return []
-            
-            # 3. Get Spot Price
+            bal = self.sim_balance if self.sim_balance > 0 else 3000.0
+            os.makedirs("logs", exist_ok=True)
+            with open(self._SIM_BALANCE_MARKER_PATH, "w", encoding="utf-8") as f:
+                f.write(f"{bal:.2f}\n")
+        except Exception:
+            pass
 
-            spot_price = 50000.0
-            try:
-                cb_data = self.coinbase.fetch_latest()
-                if cb_data: spot_price = cb_data.price
-            except: pass
-            
-            # 4. Find Center (Closest to Spot)
-            def get_strike(m):
+    # FR-0.3: files in logs/ that NO cleanup pass may ever remove — watchdog
+    # state/timestamp files, watchdog logs (the Phase-0 watchdog redesign
+    # depends on these surviving the startup and cycle sweeps), and the
+    # restart-balance marker. fnmatch patterns so timestamped variants match.
+    _PRESERVED_LOG_PATTERNS = (
+        "host_watchdog*.ts",
+        "watchdog_cron_endpoint_fail.ts",
+        "watchdog_last_alert.ts",
+        ".sim_balance",
+        "host_watchdog.log",
+        "watchdog_*.log",
+        "watchdog.log",  # legacy name, kept from the 2026-06-10 fix (c)
+    )
+
+    @classmethod
+    def _is_preserved_log(cls, filename: str) -> bool:
+        return any(
+            fnmatch.fnmatch(filename, pattern)
+            for pattern in cls._PRESERVED_LOG_PATTERNS
+        )
+
+    def _protected_log_paths(self) -> set:
+        """Absolute paths the sweeps must never remove (FR-0.3): the current
+        dashboard session files plus this process's own active
+        money_printer_*.log (the 2026-07-24 review found the startup sweep
+        deleting the log the process was actively writing to)."""
+        protected = set()
+        dashboard = getattr(self, "dashboard", None)
+        if dashboard is not None:
+            for attr in ("data_log_path", "session_log_path", "portfolio_log_path"):
+                path = getattr(dashboard, attr, None)
+                if path:
+                    protected.add(os.path.abspath(path))
+        active_log = get_active_log_path()
+        if active_log:
+            protected.add(os.path.abspath(active_log))
+        return protected
+
+    # ------------------------------------------------------------------
+    # Training state persistence
+    # ------------------------------------------------------------------
+
+    def _load_training_state(self):
+        """Load persisted training history from prior process runs."""
+        import json as _json
+
+        try:
+            if os.path.exists(self._TRAINING_STATE_PATH):
+                with open(self._TRAINING_STATE_PATH, "r") as f:
+                    state = _json.load(f)
+                self._cycle_count = state.get("cycle_count", 0)
+                self.cycle_history = state.get("cycle_history", [])
+                self._training_history = state.get("training_history", [])
+                self._training_diagnostics = state.get("training_diagnostics", {})
+                logger.info(
+                    "[State] Loaded training state: %d cycles, %d history entries, "
+                    "%d last samples",
+                    self._cycle_count,
+                    len(self._training_history),
+                    self._training_diagnostics.get("training_samples", 0),
+                )
+        except Exception as exc:
+            logger.warning("[State] Could not load training state: %s", exc)
+
+    def _save_training_state(self):
+        """Persist training history and cycle history to disk."""
+        import json as _json
+
+        state = {
+            "cycle_count": self._cycle_count,
+            "cycle_history": self.cycle_history[-20:],
+            "training_history": self._training_history[-20:],
+            "training_diagnostics": self._training_diagnostics,
+        }
+        try:
+            os.makedirs(os.path.dirname(self._TRAINING_STATE_PATH), exist_ok=True)
+            with open(self._TRAINING_STATE_PATH, "w") as f:
+                _json.dump(state, f, indent=2)
+        except Exception as exc:
+            logger.warning("[State] Could not save training state: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Graceful shutdown
+    # ------------------------------------------------------------------
+
+    def shutdown(self):
+        """Graceful shutdown: archive current session data and save state.
+
+        Safe to call multiple times (idempotent).
+        """
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
+        self.running = False
+
+        logger.info("[Shutdown] Graceful shutdown initiated...")
+
+        # 1. Archive current CSV/log files (COPY to archive — startup will clean logs/)
+        try:
+            files_to_archive = []
+            if os.path.isdir("logs"):
+                for f in os.listdir("logs"):
+                    fpath = os.path.join("logs", f)
+                    if os.path.isfile(fpath) and (
+                        f.endswith(".csv") or f.endswith(".log")
+                    ):
+                        files_to_archive.append((f, fpath))
+
+            if files_to_archive:
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                archive_dir = os.path.join("logs", "_archive", f"shutdown_{ts}")
+                os.makedirs(archive_dir, exist_ok=True)
+
+                archived = 0
+                for f, fpath in files_to_archive:
+                    try:
+                        shutil.copy2(fpath, os.path.join(archive_dir, f))
+                        archived += 1
+                    except Exception:
+                        pass
+
+                logger.info("[Shutdown] Archived %d files to %s", archived, archive_dir)
+        except Exception as exc:
+            logger.error("[Shutdown] Archive failed: %s", exc)
+
+        # 2. Save training state
+        try:
+            self._save_training_state()
+            logger.info("[Shutdown] Training state saved.")
+        except Exception as exc:
+            logger.error("[Shutdown] Could not save training state: %s", exc)
+
+        # 2b. Save win rates
+        try:
+            self.risk_manager._save_win_rates()
+            logger.info("[Shutdown] Win rates saved.")
+        except Exception as exc:
+            logger.error("[Shutdown] Could not save win rates: %s", exc)
+
+        # 3. Log final data inventory
+        try:
+            self._log_data_inventory("SHUTDOWN")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Data inventory (debugging aid)
+    # ------------------------------------------------------------------
+
+    def _log_data_inventory(self, context: str = "INVENTORY"):
+        """Log a summary of all persisted data for debugging data-loss issues."""
+        from pathlib import Path
+
+        archive_dir = Path("logs/_archive")
+        journal_path = Path("data/trade_journal.jsonl")
+        state_path = Path(self._TRAINING_STATE_PATH)
+
+        # Count archive subdirectories and CSV files
+        archive_dirs = 0
+        archive_csvs = 0
+        total_csv_bytes = 0
+        if archive_dir.exists():
+            for d in archive_dir.iterdir():
+                if d.is_dir():
+                    archive_dirs += 1
+                    for f in d.glob("data_*.csv"):
+                        archive_csvs += 1
+                        try:
+                            total_csv_bytes += f.stat().st_size
+                        except OSError:
+                            pass
+
+        # Count live CSV files in logs/
+        live_csvs = 0
+        live_csv_bytes = 0
+        logs_dir = Path("logs")
+        if logs_dir.exists():
+            for f in logs_dir.glob("data_*.csv"):
+                live_csvs += 1
                 try:
-                    # KXBTCD-YYMMMDDHH-Txxxxx
-                    parts = m.symbol.split('-')
-                    strike_part = parts[-1]
-                    return float(re.sub(r'[A-Za-z]', '', strike_part))
-                except Exception as e:
-                    logger.error(f"Strike Parse Error ({m.symbol}): {e}")
-                    return -1.0
-            
-            # Parse all valid markets
-            valid_markets = [] # (strike, market_obj)
-            for m in this_hour_markets:
-                s = get_strike(m)
-                if s > 0: 
-                    valid_markets.append((s, m))
-                else:
-                    logger.debug(f"Failed to parse strike for: {m.symbol}")
-                
-            if not valid_markets:
-                logger.warning(f"[Dashboard] No valid strikes parsed from {len(this_hour_markets)} markets. Sample: {this_hour_markets[0].symbol}")
-                return []
-            
-            # Sort by distance to spot
+                    live_csv_bytes += f.stat().st_size
+                except OSError:
+                    pass
 
-            valid_markets.sort(key=lambda x: abs(x[0] - spot_price))
-            
-            center_strike, center_market = valid_markets[0]
-            
-            # 5. Find Neighbors (+/- 250)
-            ladder_tickers = [center_market.symbol]
-            
-            # We want specific targets: Center - 250, Center + 250
-            targets = [center_strike - 250, center_strike + 250]
-            
-            for t in targets:
-                # Find best match for this target (within small epsilon, e.g. 5.0)
-                # re-using valid_markets
-                match = next((m for s, m in valid_markets if abs(s - t) < 5.0), None)
-                if match:
-                    ladder_tickers.append(match.symbol)
-            
-            return ladder_tickers
-            
-        except Exception as e:
-            logger.error(f"[Dashboard] Ladder Resolve Failed: {e}")
-            return []
+        # Trade journal
+        journal_lines = 0
+        journal_bytes = 0
+        if journal_path.exists():
+            try:
+                journal_bytes = journal_path.stat().st_size
+                with open(journal_path) as jf:
+                    journal_lines = sum(1 for line in jf if line.strip())
+            except OSError:
+                pass
+
+        # Training state
+        state_exists = state_path.exists()
+        prev_samples = self._training_diagnostics.get("training_samples", 0)
+
+        logger.info(
+            "[%s] Data inventory: "
+            "%d archive dirs | %d archived CSVs (%.1f MB) | "
+            "%d live CSVs (%.1f MB) | "
+            "%d journal entries (%.1f KB) | "
+            "training_state=%s | last_samples=%d",
+            context,
+            archive_dirs,
+            archive_csvs,
+            total_csv_bytes / 1024 / 1024,
+            live_csvs,
+            live_csv_bytes / 1024 / 1024,
+            journal_lines,
+            journal_bytes / 1024,
+            "exists" if state_exists else "MISSING",
+            prev_samples,
+        )
+
+    # ------------------------------------------------------------------
+    # Startup archive
+    # ------------------------------------------------------------------
+
+    def _startup_archive(self):
+        """Archive stale CSVs from previous sessions.
+
+        FR-0.2: the startup retrain that used to follow the archive pass was
+        removed in the Phase 0 teardown — training is offline-only now.
+        """
+        # Log data inventory BEFORE archiving to see what survived from last run
+        self._log_data_inventory("STARTUP-BEFORE")
+
+        # Archive any leftover CSVs from logs/ that aren't the current session.
+        # FR-0.3: the protected set includes this process's own active
+        # money_printer_*.log — the old whitelist held only the dashboard's
+        # three files, so the sweep deleted the log it was writing to.
+        active_files = self._protected_log_paths()
+
+        stale_files = []
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if not os.path.isfile(fpath):
+                continue
+            if not (f.endswith(".csv") or f.endswith(".log")):
+                continue
+            if os.path.abspath(fpath) in active_files:
+                continue
+            if self._is_preserved_log(f):  # FR-0.3: keep watchdog state/logs
+                continue
+            stale_files.append((f, fpath))
+
+        if stale_files:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            archive_dir = os.path.join("logs", "_archive", f"startup_{ts}")
+            os.makedirs(archive_dir, exist_ok=True)
+
+            archived = 0
+            for f, fpath in stale_files:
+                try:
+                    shutil.copy2(fpath, os.path.join(archive_dir, f))
+                    os.remove(fpath)
+                    archived += 1
+                except Exception as exc:
+                    logger.warning("[Startup] Could not archive %s: %s", f, exc)
+
+            logger.info(
+                "[Startup] Archived %d stale files from previous session(s)",
+                archived,
+            )
+
+        # Log data inventory AFTER archiving for comparison
+        self._log_data_inventory("STARTUP-AFTER")
+
+    def _cycle_archive_and_clean(self, archive_dir):
+        """Copy session CSV/log files into ``archive_dir``, then remove the
+        old ones from logs/ in a single pass.
+
+        Called AFTER the new Dashboard exists (FR-0.5) so the removal pass
+        can protect the new session files. Never removes (FR-0.3):
+          - the current dashboard session files,
+          - this process's own active money_printer_*.log,
+          - watchdog state/log files (_PRESERVED_LOG_PATTERNS).
+        """
+        # COPY only NEW files — use a manifest to prevent re-archiving.
+        manifest_path = os.path.join("logs", "_archive", "_archived_files.json")
+        archived_set = set()
+        try:
+            if os.path.exists(manifest_path):
+                import json as _mj
+
+                with open(manifest_path, encoding="utf-8") as _mf:
+                    archived_set = set(_mj.load(_mf))
+        except Exception:
+            pass
+
+        protected = self._protected_log_paths()
+
+        newly_archived = []
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if os.path.isfile(fpath) and (f.endswith(".csv") or f.endswith(".log")):
+                try:
+                    shutil.copy2(fpath, os.path.join(archive_dir, f))
+                    newly_archived.append(f)
+                except Exception as exc:
+                    logger.warning("[Cycle] Could not copy %s: %s", f, exc)
+
+        # Update manifest with all known archived filenames
+        archived_set.update(newly_archived)
+        try:
+            import json as _mj
+
+            with open(manifest_path, "w", encoding="utf-8") as _mf:
+                _mj.dump(sorted(archived_set), _mf, indent=2)
+        except Exception:
+            pass
+
+        # Remove archived files from logs/ — except protected + preserved.
+        for f in os.listdir("logs"):
+            fpath = os.path.join("logs", f)
+            if not os.path.isfile(fpath):
+                continue
+            if not (f.endswith(".csv") or f.endswith(".log")):
+                continue
+            if os.path.abspath(fpath) in protected:
+                continue  # FR-0.3: active session files + own process log
+            if self._is_preserved_log(f):
+                continue  # FR-0.3: watchdog state/logs
+            try:
+                os.remove(fpath)
+            except Exception as exc:
+                logger.warning("[Cycle] Could not remove old file %s: %s", f, exc)
+
+    # ------------------------------------------------------------------
+    # FR-0.4: per-bot status for cycle summaries
+    # ------------------------------------------------------------------
+
+    def _bot_status(self, bot) -> str:
+        """TRADING / FEED-ONLY / DISABLED for one bot.
+
+        DISABLED: the bot is deactivated in the orchestrator (not ticking).
+        FEED-ONLY: ticking (feeds/prices run) but trading is switched off.
+        Trading state is derived generically: a ``trading_enabled`` attribute
+        on the bot wins; otherwise any boolean ``*TRADING_ENABLED`` constant
+        in the bot's module is read (weather_bot.py gates its waterfall on
+        module-level WEATHER_TRADING_ENABLED and exposes no attribute).
+        """
+        if bot.name not in self.active_bots:
+            return "DISABLED"
+
+        enabled = getattr(bot, "trading_enabled", None)
+        if enabled is None:
+            module = sys.modules.get(type(bot).__module__)
+            if module is not None:
+                flags = [
+                    value
+                    for name, value in vars(module).items()
+                    if name.endswith("TRADING_ENABLED") and isinstance(value, bool)
+                ]
+                if flags:
+                    enabled = all(flags)
+        if enabled is None:
+            enabled = True
+        return "TRADING" if enabled else "FEED-ONLY"
+
+    def _bot_status_summary(self) -> str:
+        """One line listing every registered bot with its status,
+        e.g. ``Weather=FEED-ONLY`` (FR-0.4)."""
+        if not self.bots:
+            return "(no bots registered)"
+        return ", ".join(f"{bot.name}={self._bot_status(bot)}" for bot in self.bots)
+
+    def _rollover_positions(self):
+        """Liquidate the book at a cycle boundary, holding settling positions.
+
+        PRD FR-1.5: weather positions are EXEMPT from cycle-reset liquidation.
+        They are binary daily-high contracts that settle against the NWS
+        Climatological Report at expiry (FR-1.2), so a cycle boundary — an
+        internal drawdown-management event with no market meaning — must not
+        crystallize them. Everything else is liquidated exactly as before.
+
+        PRD FR-4.4 (Phase 4) puts AAA gas in the same class, so the carve-out
+        tests the shared ``matching_engine.is_held_to_settlement`` predicate
+        rather than ``is_weather_symbol``. This is not cosmetic: widening only
+        the exchange's close guard would make ``_close_position`` REFUSE the
+        CYCLE_RESET below while the ``survivors`` filter still excluded the gas
+        position, and the ``positions[:] = survivors`` assignment would then
+        drop it from the open book with no closed row and no PnL — a silently
+        vanished position, strictly worse than the wrongful close. Weather
+        behaviour is unchanged: the predicate returns exactly
+        ``is_weather_symbol`` for every ``KXHIGH*`` ticker.
+
+        Split out of ``_run_drawdown_cycle`` so the boundary behaviour can be
+        exercised directly (Phase 1 exit criterion 5) without standing up log
+        archiving, Discord and a new Dashboard.
+
+        PER-CYCLE ACCOUNTING OF A SURVIVOR (measured 2026-07-25, documented not
+        fixed — see the return value and the cycle record's
+        ``carried_weather_*`` keys)
+        ---------------------------------------------------------------------
+        ``_run_drawdown_cycle`` calls ``risk_manager.update_balance(new_bal)``
+        BEFORE this method, while the survivor is still open. That resets
+        ``starting_balance_day`` to the configured sim balance and zeroes
+        ``daily_pnl``/``exchange.realized_pnl``, so a survivor's economics
+        SPLIT across two cycle records:
+
+          * the opening cycle is charged the ENTRY FEE only (the entry cost
+            itself is never booked to PnL — it is held as ``exposure``, a live
+            view of currently-open collateral);
+          * the settling cycle is credited the FULL settlement PnL
+            ``(exit - entry) * qty - exit_fee``;
+          * the survivor's collateral is re-deducted from ``balance`` as
+            exposure against each new cycle's fresh ``starting_balance_day``,
+            which is correct — that capital really is still deployed — but it
+            means cycle N+1 starts with less headroom than its nominal base.
+
+        Measured on a $0.40x10 weather survivor settling YES: cycle N reports
+        -$0.05, cycle N+1 reports +$6.00, and the two sum to the cumulative
+        ledger's +$5.95 exactly. So nothing is double-charged or lost; the
+        artifact is ATTRIBUTION, not arithmetic.
+
+        Not fixed, deliberately: (1) the sum over cycles is exact, so no gate
+        that reads the cumulative ledger or the settled-trade journal is
+        affected — and the Phase 3 gate is specified to be settlement-true over
+        >=50 settled trades, which is attribution-independent; (2) a fix would
+        have to move ``starting_balance_day``/``update_balance`` semantics in
+        ``risk_manager.py``, changing the daily-drawdown baseline for every
+        strategy, to buy nothing the cumulative ledger does not already give.
+        The consequence an operator MUST know is that a survivor's whole
+        settlement outcome lands as one realized hit in the cycle it settles
+        (it cannot move the daily-drawdown breaker while unrealized), so the
+        carried exposure is logged here and stamped on the cycle record.
+        """
+        exchange = self.risk_manager.exchange
+        for p in list(exchange.positions):
+            if is_held_to_settlement(p.get("symbol", "")):
+                continue
+            exchange._close_position(p, p["entry_price"], reason="CYCLE_RESET")
+        # A position outside the held-to-settlement families whose close failed
+        # is still dropped from the open book, exactly as the legacy
+        # positions.clear() did; weather and gas positions survive with their
+        # id, quantity and entry price intact.
+        survivors = [
+            p for p in exchange.positions if is_held_to_settlement(p.get("symbol", ""))
+        ]
+        dropped = len(exchange.positions) - len(survivors)
+        if dropped:
+            logger.warning(
+                "[Cycle] Dropped %d position(s) that failed to close",
+                dropped,
+            )
+        exchange.positions[:] = survivors
+        # Ids must not be reissued while their owners are still open, so the
+        # counter restarts above the highest surviving id rather than at 1.
+        exchange._bump_next_id()
+        self.risk_manager.active_positions = len(survivors)
+        if survivors:
+            # Same formula as RiskManager.get_current_exposure (short YES locks
+            # (1-price)*qty), computed locally so the boundary code needs only
+            # the exchange.
+            carried = sum(
+                (1.0 - p["entry_price"]) * p["quantity"]
+                if p.get("side") == "sell" and p.get("contract_side", "YES") == "YES"
+                else p["entry_price"] * p["quantity"]
+                for p in survivors
+            )
+            logger.info(
+                "[Cycle] %d weather position(s) held across the boundary "
+                "(FR-1.5), carrying $%.2f of collateral and their unsettled "
+                "PnL into the next cycle: %s",
+                len(survivors),
+                carried,
+                ", ".join(f"id={p.get('id')} {p.get('symbol')}" for p in survivors),
+            )
+        # Persist immediately so a restart right after rollover restores the
+        # survivors rather than the pre-rollover book.
+        exchange._save_state()
+        return survivors
+
+    def _run_drawdown_cycle(self):
+        """Archive logs and reset state for next cycle (no retrain — FR-0.2)."""
+        from datetime import datetime as _dt
+
+        # Immediately clear the flag to prevent re-triggering
+        self.risk_manager.drawdown_kill_triggered = False
+
+        # Record cycle metrics BEFORE reset
+        cycle_duration_s = time.time() - self._cycle_start_time
+        cycle_duration_m = cycle_duration_s / 60
+        cycle_pnl = self.risk_manager.daily_pnl
+        cycle_wins = sum(
+            s.get("wins", 0) for s in self.dashboard.strategy_stats.values()
+        )
+        cycle_losses = sum(
+            s.get("losses", 0) for s in self.dashboard.strategy_stats.values()
+        )
+        cycle_trades = cycle_wins + cycle_losses
+
+        self._cycle_count += 1
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        archive_name = f"cycle_{ts}_dd{self._cycle_count}"
+        archive_dir = os.path.join("logs", "_archive", archive_name)
+        os.makedirs(archive_dir, exist_ok=True)
+
+        self.dashboard.log(
+            f"[Cycle] Drawdown hit after {cycle_duration_m:.0f}min "
+            f"({cycle_trades} trades, {cycle_wins}W/{cycle_losses}L, "
+            f"PnL=${cycle_pnl:.2f}). Archiving..."
+        )
+        logger.info("[Cycle] Archiving session data to %s", archive_dir)
+
+        # FR-0.2 (Phase 0 teardown): the cycle-boundary retrain that used to
+        # run here (in-process or via the 2h daemon) was removed. Cycle records
+        # no longer carry training metrics.
+
+        # Save cycle record
+        cycle_record = {
+            "cycle": self._cycle_count,
+            "timestamp": ts,
+            "duration_min": round(cycle_duration_m, 1),
+            "pnl": round(cycle_pnl, 2),
+            "trades": cycle_trades,
+            "wins": cycle_wins,
+            "losses": cycle_losses,
+            "win_rate": round(cycle_wins / max(1, cycle_wins + cycle_losses) * 100, 1),
+        }
+        self.cycle_history.append(cycle_record)
+
+        # Persist win rates before cycle reset (they survive across cycles)
+        self.risk_manager._save_win_rates()
+
+        # Reset risk manager for new cycle. Position closes below still record
+        # against the OLD dashboard/session (self.dashboard is swapped after).
+        new_bal = self.sim_balance if self.sim_balance > 0 else 3000.0
+        self.risk_manager.update_balance(new_bal)
+        self.risk_manager.daily_pnl = 0.0
+        self.risk_manager.strategy_pnl = {}
+        self.risk_manager.loss_cooldown = {}
+        self.risk_manager.last_trade_time = _dt.min
+        survivors = self._rollover_positions()
+
+        # FR-1.5 accounting provenance (see _rollover_positions' docstring):
+        # this cycle's ``pnl`` above excludes the survivors entirely — their
+        # settlement PnL will be reported by whichever cycle they settle in.
+        # Record how much is in flight so a per-cycle PnL reader can see it.
+        cycle_record["carried_weather_positions"] = len(survivors)
+        cycle_record["carried_weather_exposure"] = round(
+            sum(
+                (1.0 - p["entry_price"]) * p["quantity"]
+                if p.get("side") == "sell" and p.get("contract_side", "YES") == "YES"
+                else p["entry_price"] * p["quantity"]
+                for p in survivors
+            ),
+            2,
+        )
+
+        # FR-0.5: create the NEW session log files BEFORE archiving/removing
+        # the old ones, so there is never a zero-session-log window at
+        # rollover (the watchdog reads session-log freshness; the old order
+        # archived first and left a gap until the new Dashboard appeared).
+        # Dashboard.__init__ writes the SESSION STARTED line immediately, so
+        # the new session log exists on disk from this point on. The
+        # dashboard opens its files per write (no held handles), so the old
+        # files can be archived and removed right away.
+        prev_alerts = list(self.dashboard.alerts) if self.dashboard else []
+        self.dashboard = Dashboard()
+        self.dashboard.alerts = prev_alerts
+        self.risk_manager.exchange.on_close = self._on_trade_close
+        self.risk_manager.exchange.on_alert = self.dashboard.alert
+        self._cycle_start_time = time.time()
+
+        # Archive + clean in a single pass, now that the new session files
+        # exist and are protected (FR-0.3/FR-0.5).
+        self._cycle_archive_and_clean(archive_dir)
+        self._profitable_since = None
+
+        # FR-0.4: cycle summary lists EVERY registered bot with its status.
+        bot_status_line = self._bot_status_summary()
+        cycle_record["bot_status"] = bot_status_line
+        logger.info("[Cycle] Bot status: %s", bot_status_line)
+        self.dashboard.alert(f"BOTS | {bot_status_line}")
+
+        # Post diagnostics to ALERTS (persistent, visible anytime)
+        cr = cycle_record
+        self.dashboard.alert(
+            f"CYCLE #{cr['cycle']} COMPLETE | "
+            f"{cr['duration_min']:.0f}min | {cr['trades']} trades | "
+            f"{cr['wins']}W/{cr['losses']}L ({cr['win_rate']:.0f}%) | "
+            f"PnL=${cr['pnl']:.0f}"
+        )
+
+        # Show trend vs previous cycle
+        if len(self.cycle_history) >= 2:
+            prev = self.cycle_history[-2]
+            dur_d = cr["duration_min"] - prev["duration_min"]
+            wr_d = cr["win_rate"] - prev["win_rate"]
+            trend_parts = []
+            if dur_d != 0:
+                trend_parts.append(f"duration {dur_d:+.0f}min")
+            if wr_d != 0:
+                trend_parts.append(f"winrate {wr_d:+.1f}%")
+            if trend_parts:
+                self.dashboard.alert(f"TREND | {' | '.join(trend_parts)}")
+
+        # Show running sample count from trade journal
+        journal_count = self.trade_journal.get_sample_count()
+        self.dashboard.alert(f"JOURNAL | {journal_count} total trade outcomes recorded")
+
+        # Loss analysis from trade journal
+        try:
+            analysis = self.trade_journal.analyze_losses(n=50)
+            if analysis.get("summary"):
+                self.dashboard.alert(f"LOSS ANALYSIS | {analysis['summary']}")
+        except Exception as exc:
+            logger.warning("[Cycle] Loss analysis failed: %s", exc)
+
+        # Resolve pending settlements in background
+        try:
+            pending = self.settlement_resolver.get_pending_count()
+            if pending > 0:
+                resolved = self.settlement_resolver.resolve_batch(max_queries=30)
+                if resolved:
+                    self.dashboard.alert(
+                        f"SETTLEMENT | Resolved {resolved} ambiguous contracts"
+                    )
+        except Exception as exc:
+            logger.warning("[Cycle] Settlement resolution failed: %s", exc)
+
+        # Reset counter-trade tracker for new cycle
+        self.counter_analyzer.reset_cycle()
+
+        # Persist training state to disk (survives process restarts)
+        self._save_training_state()
+
+        # Log for file record
+        self.dashboard.log(
+            f"[Cycle] #{self._cycle_count} reset to ${new_bal:.2f}. "
+            f"History: {len(self.cycle_history)} cycles. "
+            f"Journal: {journal_count} outcomes."
+        )
+        logger.info("[Cycle] Reset complete. Cycle #%d", self._cycle_count)
+
+        # Discord cycle notification — the dashboard's own in-process webhook
+        # post (NOT the Hermes Agent cron). Gated on DISCORD_WEBHOOK_URL so it
+        # is a silent no-op when unconfigured. send_discord_notification is
+        # fire-and-forget (posts in a daemon thread).
+        discord_url = os.getenv("DISCORD_WEBHOOK_URL")
+        if discord_url:
+            try:
+                send_discord_notification(discord_url, cycle_record, journal_count)
+            except Exception as exc:
+                logger.warning("[Cycle] Discord notification failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # FakeEngine guard — defense in depth against silent fixture-only mode
+    # (2026-04-16 incident: 2-week silent run on synthetic KX-TEST-* data)
+    # ------------------------------------------------------------------
+
+    _FAKE_ENGINE_RECHECK_INTERVAL = 900  # 15 minutes
+
+    def _check_fake_engine(self, context: str = "startup") -> bool:
+        """Return True if Kalshi market discovery is healthy (real symbols visible).
+
+        Returns False (and logs ERROR) if discovery returns empty or only
+        test/fixture symbols — signal of FakeEngine fallback / lost API connection.
+        Skipped (returns True) if no Kalshi provider is configured.
+        """
+        if not self.kalshi:
+            return True
+        try:
+            result = self.kalshi.search_markets(limit=200)
+            markets = result[0] if isinstance(result, tuple) else (result or [])
+        except Exception as exc:
+            logger.error(
+                "[FakeEngineGuard] Discovery probe failed (%s): %s", context, exc
+            )
+            return False
+
+        real = [m for m in markets if not is_test_symbol(m.get("ticker", ""))]
+        test_count = len(markets) - len(real)
+
+        if not real:
+            logger.error(
+                "FakeEngine detected: market discovery returned only test/fixture "
+                "symbols. Real Kalshi connection lost. Refusing to start trading. "
+                "Investigate auth, env vars, provider status. (context=%s, "
+                "total=%d, test=%d)",
+                context,
+                len(markets),
+                test_count,
+            )
+            try:
+                self.dashboard.alert(
+                    "FAKE ENGINE DETECTED — market discovery returned no real symbols. "
+                    "Trading halted."
+                )
+            except Exception:
+                pass
+            return False
+
+        if test_count:
+            logger.warning(
+                "[FakeEngineGuard] %s probe saw %d test symbol(s) alongside %d real",
+                context,
+                test_count,
+                len(real),
+            )
+        return True
 
     def market_loop(self):
-        """Background thread to fetch data and run strategies."""
-        ticks = 0
+        """Background thread: position updates + bot ticks."""
         last_heartbeat = time.time()
-        
+        last_fake_engine_check = time.time()
+
+        # 2026-06-10 fix (b): publish the launch balance so a watchdog
+        # auto-restart reuses it. (The ".orchestrator_state" marker write that
+        # used to accompany this was removed in Phase 0 — the redesigned
+        # watchdog no longer reads it.)
+        self._write_sim_balance_marker()
+
+        # Layer 2: refuse to start the trading loop if discovery is fixture-only
+        if not self._check_fake_engine(context="startup"):
+            self.running = False
+            sys.exit(1)
+
+        # Startup: archive stale CSVs from previous sessions (fast — the
+        # startup retrain was removed per FR-0.2).
+        try:
+            self._startup_archive()
+        except Exception as exc:
+            logger.error("[Startup] Archive failed: %s", exc)
+
         while self.running:
             try:
-                # Heartbeat (Every 60s)
+                # Heartbeat
                 if time.time() - last_heartbeat > 60:
                     self.dashboard.log("[System] Heartbeat: Market Loop is Alive.")
                     last_heartbeat = time.time()
-                    
-                # 0. Update Active Positions (PnL & Expiry)
+
+                # Layer 3: re-check that discovery still returns real symbols
+                if (
+                    time.time() - last_fake_engine_check
+                    > self._FAKE_ENGINE_RECHECK_INTERVAL
+                ):
+                    if not self._check_fake_engine(context="recheck"):
+                        self.running = False
+                        sys.exit(1)
+                    last_fake_engine_check = time.time()
+
+                # Update active positions (cross-bot)
                 if self.risk_manager and self.kalshi:
-                    # Snapshot positions to avoid modification during iteration issues
                     active_positions = list(self.risk_manager.exchange.positions)
                     for pos in active_positions:
-                        symbol = pos['symbol']
-                        
-                        # Optimization: If we just fetched this symbol in the main loop, skip?
-                        # For safety, let's just re-fetch or use cache if implemented.
-                        # NWS/Crypto loops update market data, but we need to ensure ALL positions are covered.
-                        
-                        # If it's a Kalshi market
+                        symbol = pos["symbol"]
                         if "KX" in symbol:
                             try:
                                 k_data = self.kalshi.fetch_latest(symbol)
                                 if k_data:
-                                    # Cache real Kalshi price on the position for accurate exits
-                                    real_price = k_data.bid if k_data.bid > 0 else k_data.ask
+                                    real_price = (
+                                        k_data.bid if k_data.bid > 0 else k_data.ask
+                                    )
                                     if real_price > 0:
-                                        self.risk_manager.exchange.update_market_price(symbol, real_price)
-                                    # Update Price & PnL in Risk Manager
-                                    # This triggers 'update_market' in SimulatedExchange, which checks stops/expiry
-                                    self.risk_manager.update_market_data(symbol, k_data.price)
+                                        self.risk_manager.exchange.update_market_price(
+                                            symbol, real_price
+                                        )
+                                    self.risk_manager.update_market_data(
+                                        symbol, k_data.price
+                                    )
                             except Exception:
                                 pass
-                                
-                # 1. Fetch Crypto
-                btc_data = self.coinbase.fetch_latest()
-                if btc_data:
-                    # Clear stale tickers from Dashboard to keep it clean (Basic Rotation)
-                    # We'll just rely on the dashboard to overwrite if key matches, 
-                    # but if ticker NAME changes (e.g. 15m expires), old one stays.
-                    # TODO: Implement a clean sweep in Dashboard class.
-                    
-                    self.dashboard.update_price("BTC-USD (Coinbase)", btc_data.price)
 
-                    # Feed raw spot price to hourly strategy for price history accumulation
-                    spot_feed = copy.deepcopy(btc_data)
-                    spot_feed.symbol = "BTC-USD (Coinbase)"
-                    if spot_feed.extra is None:
-                        spot_feed.extra = {}
-                    spot_feed.extra['source'] = 'live_coinbase'
-                    self.strategies['crypto_hr'].analyze(spot_feed)
+                # Counter-trade analysis on losing positions (LOG-ONLY by default)
+                for pos in list(self.risk_manager.exchange.positions):
+                    if pos.get("pnl", 0) >= 0:
+                        continue  # only check losers
+                    try:
+                        mkt_price = pos.get("last_market_price", 0)
+                        if mkt_price > 0:
+                            self.counter_analyzer.should_counter(pos, mkt_price)
+                    except Exception:
+                        pass
 
-                    # Try to fetch Live Kalshi BTC Price (High Frequency 15M)
-                    btc_15m_resolved = False
-                    if self.kalshi:
-                        try:
-                            # A. Resolve 15M Ticker (TIME priority)
-                            btc_15m = self._resolve_smart_ticker("KXBTC15M", criteria="time")
-                            if btc_15m:
-                                k_data_15 = self.kalshi.fetch_latest(btc_15m)
-                                if k_data_15:
-                                    self.dashboard.update_price(f"{btc_15m} (15m)", k_data_15.bid)
-                                    # FUSE DATA for 15M Strategy
-                                    original_spot = btc_data.price  # Save before overwriting
-                                    btc_data.bid = k_data_15.bid
-                                    btc_data.ask = k_data_15.ask
-                                    btc_data.symbol = btc_15m
-                                    # Inject spot price so TrendV2 RSI runs on real BTC prices
-                                    if btc_data.extra is None:
-                                        btc_data.extra = {}
-                                    btc_data.extra['spot_price'] = original_spot
-                                    self.risk_manager.update_market_data(btc_15m, btc_data.price)
-                                    btc_15m_resolved = True
-                            else:
-                                # Ghost Ticker: No active KXBTC15M markets on Kalshi
-                                if ticks % 60 == 0:  # Log every ~5 min to avoid spam
-                                    logger.warning("[Dashboard] Ghost Ticker: No active KXBTC15M markets found. 15M strategy SKIPPED.")
-                            
-                            # B. Resolve HOURLY Ladder (Spot, -250, +250) - LIVE FEED
-                            ladder = self._resolve_btc_ladder()
-                            
-                            if ladder:
-                                # Update Dashboard with ALL 3 (or however many found)
-                                for ticker in ladder:
-                                    k_data_ladder = self.kalshi.fetch_latest(ticker)
-                                    if k_data_ladder:
-                                        self.dashboard.update_price(f"{ticker} (1h)", k_data_ladder.bid)
-                                
-                                # Use the CENTER one (First in list) for Strategy
-                                center_ticker = ladder[0]
-                                k_data_center = self.kalshi.fetch_latest(center_ticker)
-                                
-                                if k_data_center:
-                                    btc_data_hr = copy.deepcopy(btc_data)
-                                    btc_data_hr.bid = k_data_center.bid
-                                    btc_data_hr.ask = k_data_center.ask
-                                    btc_data_hr.symbol = center_ticker
-                                    # Inject hourly-specific extra fields for strategy
-                                    if k_data_center.extra:
-                                        if btc_data_hr.extra is None:
-                                            btc_data_hr.extra = {}
-                                        btc_data_hr.extra['no_bid'] = k_data_center.extra.get('no_bid', 0.0)
-                                        btc_data_hr.extra['no_ask'] = k_data_center.extra.get('no_ask', 0.0)
-                                        btc_data_hr.extra['close_time'] = k_data_center.extra.get('close_time')
-
-                                    # Run Hourly Strategy
-                                    hr_signals = self.strategies['crypto_hr'].analyze(btc_data_hr)
-                                    self._process_signals(hr_signals, strategy_name="Crypto Hourly")
-
-                            else:
-                                if ticks % 10 == 0:
-                                    logger.warning("[Dashboard] Ghost Ticker: No active BTC Hourly ladder found.")
-                        
-                        except Exception as e:
-                            logger.error(f"Market Fetch Fail (BTC): {e}")
-                    
-                    # GATE: Only run 15M strategy if we have fused Kalshi option data
-                    # Without this, the strategy receives raw BTC spot ($69k) and compares against 0.55
-                    if btc_15m_resolved:
-                        now = datetime.now()
-                        current_interval_id = now.hour * 4 + now.minute // 15
-                        minute_in_interval = now.minute % 15
-                        can_trade_15m = (minute_in_interval >= 7 and
-                                        current_interval_id != self.last_15m_trade_interval)
-
-                        if can_trade_15m:
-                            signals = self.strategies['crypto'].analyze(btc_data)
-                            traded = self._process_signals(signals, strategy_name="Trend Catcher V3")
-                            if not traded:
-                                # LongShot Fader: also check the 15m option for longshot pricing
-                                ls_signals = self.strategies['longshot'].analyze(btc_data)
-                                traded = self._process_signals(ls_signals, strategy_name="LongShot Fader")
-                            if not traded:
-                                # Late Sniper: enter in last 5 minutes of cycle
-                                sniper_signals = self.strategies['late_sniper'].analyze(btc_data)
-                                traded = self._process_signals(sniper_signals, strategy_name="Late Sniper")
-                            if traded:
-                                self.last_15m_trade_interval = current_interval_id
-                        elif minute_in_interval < 7 and ticks % 30 == 0:
-                            logger.debug(f"[15m Gate] Waiting for minute 7 of interval (currently min {minute_in_interval})")
-                else:
-                    # Log failure occasionally
-                    if ticks % 10 == 0:
-                        self.dashboard.log("[System] ⚠️ Coinbase Fetch Failed (Network/Timeout)")
-
-                # 2. Fetch Weather (Iterate all stations)
-                # Map NWS Station -> Kalshi Series Ticker
-                station_map = {
-                    "KNYC": "KXHIGHNY",
-                    "KLAX": "KXHIGHLAX",
-                    "KMDW": "KXHIGHCHI",
-                    "KMIA": "KXHIGHMIA"
-                }
-
-                for station in self.nws_stations:
-                    nws_data = self.nws.fetch_latest(station)
-                    if nws_data:
-                        temp = nws_data.extra.get('temperature_f')
-                        kalshi_ticker = station_map.get(station)
-                        
-                        # FETCH LIVE KALSHI PRICE
-                        if self.kalshi and kalshi_ticker:
-                            try:
-                                # Resolve dynamic ticker (SENTIMENT priority)
-                                active_ticker = self._resolve_smart_ticker(kalshi_ticker, criteria="sentiment")
-                                
-                                if active_ticker:
-                                    k_data = self.kalshi.fetch_latest(active_ticker)
-                                    if k_data:
-                                        # Pass Max Temp to Dashboard
-                                        max_t = nws_data.extra.get('max_temp_today_f')
-                                        self.dashboard.update_price(f"{active_ticker} (Market)", k_data.bid, max_temp=max_t)
-                                        
-                                        # FUSE DATA: Inject price into NWS object for Strategy
-                                        nws_data.bid = k_data.bid
-                                        nws_data.ask = k_data.ask
-                                        nws_data.price = k_data.price
-                                        nws_data.symbol = active_ticker
-                            except Exception as e:
-                                logger.error(f"Market Fetch Fail ({kalshi_ticker}): {e}")
-                        
-                        if temp:
-                            self.dashboard.update_price(f"{kalshi_ticker or station} (F)", temp)
-                            # FEED OMS for Weather Exits (Use resolved ticker for PnL tracking)
-                            if active_ticker:
-                                self.risk_manager.update_market_data(active_ticker, temp)
-                            else:
-                                self.risk_manager.update_market_data(f"TEMP_{station}", temp)
-                        
-                        # Extract PoP for Precip Updates
-                        forecasts = nws_data.extra.get('forecast') or []
-                        pop_prob = 0.0
-                        for period in forecasts:
-                             if period.get('isDaytime'):
-                                 val = period.get('probabilityOfPrecipitation', {}).get('value', 0)
-                                 if val: pop_prob = val / 100.0
-                                 break
-                        
-                        if pop_prob is not None:
-                            # Use resolved ticker for PnL tracking if possible
-                            if active_ticker:
-                                self.risk_manager.update_market_data(f"{active_ticker}_PRECIP", pop_prob)
-                            else:
-                                self.risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
-                        
-                        signals = self.strategies['weather'].analyze(nws_data)
-                        self._process_signals(signals, strategy_name="Meteorologist V1")
-                    time.sleep(1) # 1 sec between cities
-
-                time.sleep(5) # 5 second tick
-                ticks += 1
-                
-            except Exception as e:
-                self.dashboard.log(f"Error in loop: {str(e)}")
-                time.sleep(5)
-
-    def _is_weather_slot_full(self, symbol):
-        """
-        Checks if we already have an active trade for this City + Type.
-        Limit: 1 active trade per City per Type (Temp/Precip).
-        """
-        city = "UNKNOWN"
-        type_ = "TEMP"
-        
-        if "PRECIP" in symbol: type_ = "PRECIP"
-        
-        # Map Symbol to City
-        if "NY" in symbol or "JFK" in symbol: city = "NY"
-        elif "CHI" in symbol or "ORD" in symbol: city = "CHI"
-        elif "LAX" in symbol: city = "LAX"
-        elif "MIA" in symbol: city = "MIA"
-        
-        slot_key = f"{city}_{type_}"
-        
-        # Count active positions matching this slot
-        count = 0
-        if self.risk_manager and self.risk_manager.exchange:
-            for pos in self.risk_manager.exchange.positions:
-                p_sym = pos['symbol']
-                p_city = "UNKNOWN"
-                p_type = "TEMP"
-                
-                if "PRECIP" in p_sym: p_type = "PRECIP"
-                
-                if "NY" in p_sym or "JFK" in p_sym: p_city = "NY"
-                elif "CHI" in p_sym or "ORD" in p_sym: p_city = "CHI"
-                elif "LAX" in p_sym: p_city = "LAX"
-                elif "MIA" in p_sym: p_city = "MIA"
-                
-                p_key = f"{p_city}_{p_type}"
-                
-                if p_key == slot_key:
-                    count += 1
-                    
-        return count >= 1
-
-    def _process_signals(self, signals, strategy_name=None):
-        if not signals: return False
-        if not isinstance(signals, list): signals = [signals]
-        traded = False
-        
-        for sig in signals:
-            # Determine Category
-            category = "general"
-            if "BTC" in sig.symbol or "ETH" in sig.symbol: category = "crypto"
-            elif "HIGH" in sig.symbol or "PRECIP" in sig.symbol or "TEMP" in sig.symbol: category = "weather"
-
-            # WEATHER SLOT LIMIT CHECK
-            if category == 'weather':
-                if self._is_weather_slot_full(sig.symbol):
+                # Auto-cycle: detect drawdown kill switch
+                if self.auto_cycle and self.risk_manager.drawdown_kill_triggered:
+                    self._run_drawdown_cycle()
+                    last_heartbeat = time.time()
                     continue
 
+                # Auto-cycle: wall-clock fallback (~4h). Sprint 6's 40-trades/day
+                # cap made the 50% drawdown trigger geometrically unreachable, so
+                # without this fallback the auto-training loop is silently dead.
+                _CYCLE_MAX_SECONDS = 4 * 3600
+                if (
+                    self.auto_cycle
+                    and (time.time() - self._cycle_start_time) > _CYCLE_MAX_SECONDS
+                ):
+                    logger.info(
+                        "[Cycle] Wall-clock fallback fired after %.1fh — completing cycle",
+                        (time.time() - self._cycle_start_time) / 3600,
+                    )
+                    self.risk_manager.drawdown_kill_triggered = (
+                        True  # reuse existing path
+                    )
+                    self._run_drawdown_cycle()
+                    last_heartbeat = time.time()
+                    continue
 
-            # DYNAMIC SIZING (FRACTIONAL KELLY)
-            if sig.limit_price > 0:
-                # Default confidence if not provided
-                conf = getattr(sig, 'confidence', 0.55)
-                if conf <= 0: conf = 0.55
-                
-                # Calculate optimal size (Risk Manager handles caps)
-                kelly_qty = self.risk_manager.calculate_kelly_size(conf, sig.limit_price)
-                
-                # Respect Signal's requested quantity if it's explicitly LOWER than Kelly (e.g. exit signal)
-                # But for entry, usually signal.qty is just a placeholder or max
-                final_qty = kelly_qty
-                
-                # Update signal
-                sig.quantity = final_qty
+                # NOTE (FR-0.2): the "graduation" check and the 2h periodic
+                # retrain trigger that used to run here were removed in the
+                # Phase 0 teardown — no training runs in the runtime process.
 
-            # Skip zero-quantity signals
-            if sig.quantity < 1:
-                logger.debug(f"[Process] Skipping qty=0 signal for {sig.symbol}")
-                continue
+                # Tick all active bots (skip deactivated ones)
+                for bot in self.bots:
+                    if bot.name not in self.active_bots:
+                        continue
+                    try:
+                        bot.tick(self.risk_manager, self.dashboard)
+                    except Exception as e:
+                        logger.error(f"[{bot.name}] Tick error: {e}")
 
-            # Calculate Cost / Collateral
-            # For sells (short YES), collateral is (1-price)*qty, not price*qty
-            if sig.side == 'sell' and getattr(sig, 'contract_side', 'YES') == 'YES':
-                est_cost = (1.0 - sig.limit_price) * sig.quantity
-            else:
-                est_cost = sig.limit_price * sig.quantity
-            
-            ex = getattr(sig, 'expiration_time', None)
-            
-            # Counter-trade bypass: temporarily clear rate-limit and loss cooldown
-            is_counter = getattr(sig, 'is_counter_trade', False)
-            if is_counter:
-                saved_last_trade = self.risk_manager.last_trade_time
-                saved_cooldowns = dict(self.risk_manager.loss_cooldown)
-                self.risk_manager.last_trade_time = datetime.min
-                self.risk_manager.loss_cooldown.clear()
+                time.sleep(2)
 
-            # RISK CHECK
-            is_safe = self.risk_manager.check_order(est_cost, category=category, strategy_name=strategy_name, expiration_time=ex)
-
-            # Restore if counter-trade
-            if is_counter and not is_safe:
-                self.risk_manager.last_trade_time = saved_last_trade
-                self.risk_manager.loss_cooldown = saved_cooldowns
-
-            if is_safe:
-                # SAFE: Execute and Record
-                # Notional is now same as Cost/Risk per user definition
-                notional = sig.limit_price * sig.quantity
-                cs_label = getattr(sig, 'contract_side', 'YES')
-                self.dashboard.log(f"EXEC: {sig.side.upper()} {cs_label} {sig.quantity}x {sig.symbol} @ {sig.limit_price} | Debit: ${est_cost:.2f}")
-                self.dashboard.record_signal(sig, status="EXECUTED", strategy_name=strategy_name)
-                
-                # Extract Risk Rules (Attached by Strategy)
-                sl = getattr(sig, 'stop_loss', 0.0)
-                tr = getattr(sig, 'trailing_rules', None)
-                ex = getattr(sig, 'expiration_time', None)
-                
-                cs = getattr(sig, 'contract_side', 'YES')
-                dpt = getattr(sig, 'disable_profit_targets', False)
-                self.risk_manager.record_execution(est_cost, sig.symbol, sig.side, sig.quantity, sig.limit_price, stop_loss=sl, trailing_rules=tr, expiration_time=ex, strategy_name=strategy_name, contract_side=cs, disable_profit_targets=dpt)
-                traded = True
-
-            else:
-                # RISKY:
-                # In Live Trading, we would block this.
-                # In Data Harvest (Simulation), we WANT to record it to see if it would have won.
-                # We log it differently but still save to CSV.
-                self.dashboard.log(f"⚠️ HARVEST: {sig.symbol} (Risky but Recorded)")
-                self.dashboard.record_signal(sig, status="HARVEST_ONLY", strategy_name=strategy_name)
-                # We do NOT deduct balance in Risk Manager to avoid 'bust' simulation stopping the harvest
-
-        return traded
+            except Exception as e:
+                self.dashboard.log(f"Error in loop: {str(e)}")
+                time.sleep(2)
 
     def run(self):
         prevent_sleep()
         self.dashboard.log("System Initializing...")
-        
-        # Connect Providers
+
+        # Connect shared providers
         if self.nws.connect():
             self.dashboard.log("NWS Connected")
         else:
             self.dashboard.alert("NWS Connection Failed")
-            
+
         if self.coinbase.connect():
             self.dashboard.log("Coinbase Connected")
         else:
-             self.dashboard.alert("Coinbase Connection Failed")
+            self.dashboard.alert("Coinbase Connection Failed")
 
-        # Initial Balance Sync (Piggy Bank Mode)
+        # Setup all bots with shared providers
+        for bot in self.bots:
+            bot.setup(kalshi=self.kalshi, coinbase=self.coinbase, nws=self.nws)
+
+        # Balance sync
         if self.kalshi:
             try:
                 bal = self.kalshi.get_balance()
@@ -670,33 +1053,46 @@ class OrchestratorEngine:
             except Exception as e:
                 self.dashboard.alert(f"Balance Sync Failed: {e}")
 
-        # Start Market Thread
+        # Start market thread
         t = threading.Thread(target=self.market_loop)
         t.daemon = True
         t.start()
 
-        self.dashboard.log("Trading Engine STARTED.")
+        self.dashboard.log(
+            f"Trading Engine STARTED. Bots: {[b.name for b in self.bots]}"
+        )
 
-        # Main UI Loop
+        # UI loop
         while self.running:
             self.dashboard.render(self.risk_manager)
-            
-            # Simple input handling (blocking) is tough with render loop
-            # We use a non-blocking check or just slow refresh
-            
-            # For this demo, we just sleep and re-render
-            # In a real CLI app we'd use 'curses' or 'prompt_toolkit'
             time.sleep(1)
-            
-            # Only way to exit cleanly without keyboard lib on some terminals is Ctrl+C
-            # But let's look for a file-based signal or just Ctrl+C exception
-            
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
+
     load_dotenv(override=True)
-    
-    engine = OrchestratorEngine()
+
+    # FR-0.3: route module-level loggers (strategies, bots, mixins,
+    # providers) into the shared money_printer_*.log via the root logger.
+    # Console output stays WARNING+ so the terminal UI is not flooded.
+    configure_root_logging()
+
+    parser = argparse.ArgumentParser(description="Money Printer Trading Dashboard")
+    parser.add_argument(
+        "--bot",
+        action="append",
+        dest="bots",
+        help="Bot to run (can specify multiple). Default: all bots. "
+        f"Available: {BotRegistry.list_bots()}",
+    )
+
+    args = parser.parse_args()
+
+    engine = OrchestratorEngine(bot_names=args.bots)
     try:
         engine.run()
     except KeyboardInterrupt:
         print("\n[System] Shutdown Signal Received.")
+    finally:
+        engine.shutdown()

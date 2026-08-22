@@ -3,14 +3,33 @@
 > "Because why earn money when you can print it? (Legally, via algorithmic prediction markets, obviously. Put the counterfeiting press away, monkey.)"
 
 ## Overview
-**Money Printer** is a high-precision algorithmic trading tool designed for the **Kalshi** prediction market. 
+**Money Printer** is a high-precision algorithmic trading tool designed for the **Kalshi** prediction market.
 
-**The Mission:** Turn a meager **$100** seed into a **$100,000** empire. 
+**The Mission:** Turn a meager **$100** seed into a **$100,000** empire.
 **The Method:** Cold, hard, data-driven logic. No feelings, just profit.
+
+## Bot Architecture 🤖
+
+Money Printer runs as a fleet of independent **bots**, each responsible for a specific market and timeframe. Every bot bundles its own data provider, strategies, and tick loop.
+
+| Bot | Market | Timeframe | Strategies |
+|-----|--------|-----------|------------|
+| **btc_15m** | KXBTC (15-min Bitcoin) | 15-minute brackets | Trend V3 → LongShot Fader → Late Sniper |
+| **btc_hourly** | KXBTCHOURLY (Hourly Bitcoin) | Hourly brackets | Trend V3 → LongShot Fader → Late Sniper |
+| **weather** | KXTEMP (Temperature) | Daily high/low | Weather V2 with bias correction |
+
+Each bot implements the `Bot` ABC (`setup()`, `tick()`, `get_symbols()`) and is registered in the bot registry for CLI selection.
 
 ## Current Strategies (Alpha)
 
-### 1. The Meteorologist 🌦️ (V1 & V2)
+### The Waterfall Pattern 🌊 (Crypto Bots)
+Crypto bots run a **strategy waterfall** on each tick — the first strategy to produce a signal wins:
+
+1. **Trend V3** — Primary momentum strategy with RSI/MACD confirmation and trailing stops
+2. **LongShot Fader** — Fades extreme prices (cheap YES/NO contracts) when Trend passes
+3. **Late Sniper** — Catches late-cycle moves near expiration when the first two pass
+
+### The Meteorologist 🌦️ (V1 & V2)
 *Targeting Weather Markets*
 - **Logic:** Cross-references National Weather Service (NWS) data to predict temperature outcomes.
 - **V2 Enhancements:**
@@ -18,19 +37,7 @@
     - **Temperature Velocity:** Tracks heating/cooling rate for intraday signals
     - **CLI Timing Awareness:** Accounts for NWS settlement timing (LST vs DST)
 
-### 2. The Trend Catcher 📈 (V1 & V2)
-*Targeting Crypto Markets*
-- **Logic:** 15-Minute Momentum Breakout with Trend Confirmation.
-- **V2 Enhancements:**
-    - **RSI/MACD Confirmation:** Technical indicators filter false breakouts
-    - **Mean Reversion Mode:** Trades ranging markets when price is between 0.45-0.55
-    - **Dynamic Position Sizing:** Scales 5-10 contracts based on signal strength
-- **Key Features (Both Versions):**
-    - **120s Delay:** Waits 2 minutes at cycle start to filter fake-outs
-    - **Dynamic Stops:** Trailing Stop Loss activates when profitable
-    - **Early Settlement:** Auto-closes if price hits 0.99/0.01 for >10 minutes
-
-### 3. The Condor 🦅 (NEW)
+### The Condor 🦅 (Bracket Strategy)
 *Iron Condor Strategy for Range-Bound Markets*
 - **Targets:** Fed Rates, Treasury Yields, EUR/USD, Weather Brackets
 - **Logic:** Sells outer-strike contracts for premium when outcome expected within range
@@ -70,7 +77,14 @@ The government gives this away for free. Let's take it.
 ### 1. The Command Center (Live Dashboard) 🖥️
 Run the real-time monitoring dashboard to see the bots in action.
 ```bash
+# Run all bots
 python scripts/run_dashboard.py
+
+# Run a single bot
+python scripts/run_dashboard.py --bot btc_15m
+
+# Run specific bots
+python scripts/run_dashboard.py --bot btc_15m --bot weather
 ```
 *   **Features:** Real-time PnL tracking, live market feeds (BTC/Weather), and strategy signal logs.
 *   **Safety:** Press `Ctrl+C` for an immediate emergency stop.
@@ -79,14 +93,40 @@ python scripts/run_dashboard.py
 ### 2. Simulation & Training 🏋️
 Before risking real capital, run simulations using live or mock data.
 ```bash
-# Run a 30-step simulation for the Crypto strategy using LIVE data
-python scripts/simulate.py --strategy crypto --days 30 --live
+# Run a 30-step simulation for a specific bot using LIVE data
+python scripts/simulate.py --bot btc_15m --days 30 --live
 
 # Run a mock Weather simulation for 10 steps
-python scripts/simulate.py --strategy weather --days 10
+python scripts/simulate.py --bot weather --days 10
+```
+
+### 3. The Lab 🔬
+Replay harvested logs through the Lab to verify strategy performance.
+```bash
+# Single strategy audit
+$env:PYTHONPATH = "."; python scripts/lab.py --audit
+
+# V1 vs V2 head-to-head comparison
+$env:PYTHONPATH = "."; python scripts/lab.py --compare
+
+# Parameter optimization (grid search)
+$env:PYTHONPATH = "."; python scripts/lab.py --optimize
 ```
 
 ## Strategy Guide 📚
+
+### Crypto Strategies (V1 → V2 → V3)
+| Version | Approach |
+|---------|----------|
+| V1 | Momentum breakout (price crosses 0.55/0.45) |
+| V2 | + RSI/MACD confirmation, mean reversion fallback |
+| V3 | + Waterfall pattern (Trend → LongShot → Late Sniper), trailing rules, BUY NO for bear signals |
+
+- **Triggers:**
+    - **Buy YES:** Price > $0.55 (V3: requires RSI < 75 AND MACD bullish)
+    - **Buy NO:** Price < $0.45 (V3: BUY NO instead of SELL YES for bear signals)
+    - **LongShot Fader:** Fades extreme contracts with tight stop at 0.20
+- **Risk Management:** Dynamic stop loss, trailing stops, 120s confirmation delay, Kelly sizing
 
 ### The Meteorologist 🌦️ (V1 → V2)
 | Version | Approach |
@@ -97,22 +137,37 @@ python scripts/simulate.py --strategy weather --days 10
 - **Triggers:** Buy YES if forecast > strike + buffer, Sell YES if forecast < strike - buffer
 - **V2 Bias Table:** NYC (-0.5°F), Chicago (+0.8°F), LAX (+0.2°F), Miami (-0.3°F), DFW (+1.0°F)
 
-### The Trend Catcher 📈 (V1 → V2)
-| Version | Approach |
-|---------|----------|
-| V1 | Momentum breakout (price crosses 0.55/0.45) |
-| V2 | + RSI/MACD confirmation, mean reversion fallback |
-
-- **Triggers:**
-    - **Buy YES:** Price > $0.55 (V2: requires RSI < 75 AND MACD bullish)
-    - **Sell YES:** Price < $0.45 (V2: requires RSI > 25 AND MACD bearish)
-    - **Mean Reversion (V2 only):** Trade against extremes when price is 0.45-0.55
-- **Risk Management:** 10% Stop Loss, Trailing Stops, 120s confirmation delay
-
-### The Condor 🦅 (NEW - Bracket Strategy)
+### The Condor 🦅 (Bracket Strategy)
 - **Targets:** Fed Rates (±0.50 bps), Treasury 10Y (±0.25%), EUR/USD (±0.015), Weather (±3°F)
 - **Logic:** Sell contracts at outer strikes when price expected to stay within range
 - **Position Sizing:** Max 5% portfolio exposure per bracket
+
+## Project Structure
+```
+money_printer/
+├── src/
+│   ├── bots/              # Bot implementations (base, registry, mixins)
+│   │   ├── base.py        # Bot ABC
+│   │   ├── registry.py    # Bot registry for CLI selection
+│   │   ├── mixins.py      # SignalProcessorMixin, shared bot logic
+│   │   ├── btc_15m.py     # BTC 15-minute bot
+│   │   ├── btc_hourly.py  # BTC hourly bot
+│   │   └── weather.py     # Weather bot
+│   ├── core/              # Risk manager, matching engine, interfaces
+│   ├── data/              # Data providers (Kalshi, Coinbase, NWS)
+│   ├── strategies/        # Trading strategies (crypto, weather, bracket)
+│   └── visualization/     # Dashboard
+├── scripts/
+│   ├── run_dashboard.py   # Main entry point (orchestrator)
+│   ├── simulate.py        # Simulation runner
+│   ├── lab.py             # Strategy audit/compare/optimize
+│   └── debug/             # Debug & API probing utilities
+├── tests/
+│   ├── fixtures/          # JSON test fixtures (API response dumps)
+│   └── ...                # Test files
+├── logs/                  # Runtime logs
+└── agent_space/           # Gemini agent framework (separate)
+```
 
 ## The Scientific Method Pipeline 🧪
 
@@ -127,18 +182,11 @@ We do not deploy until we have empirical proof of profitability.
 2.  **The Audit (Simulation)** 🔬
     Replay harvested logs through the **Lab** to verify strategy performance.
     ```bash
-    # Single strategy audit
     $env:PYTHONPATH = "."; python scripts/lab.py --audit
-    
-    # V1 vs V2 head-to-head comparison
-    $env:PYTHONPATH = "."; python scripts/lab.py --compare
-    
-    # Parameter optimization (grid search)
-    $env:PYTHONPATH = "."; python scripts/lab.py --optimize
     ```
 
 3.  **The Refinement (Optimization)** 🧬
-    If Win Rate < 95%, manually adjust strategy parameters (e.g., Trailing Trigger, Confirmation Delay) in `src/strategies/crypto_strategy.py` and re-run the Audit.
+    If Win Rate < 95%, manually adjust strategy parameters in `src/strategies/` and re-run the Audit.
     *Future: Automated parameter swarms.*
 
 4.  **Deployment** 🚀

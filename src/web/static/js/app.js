@@ -1,0 +1,882 @@
+/**
+ * app.js — Money Printer Web Dashboard
+ *
+ * Vanilla JS. No frameworks.
+ *
+ * Responsibilities:
+ *   - WebSocket client with exponential-backoff reconnect
+ *   - Section updaters for every snapshot key
+ *   - Chart.js PnL equity curve
+ *   - Bot start/stop controls (POST to REST API)
+ *   - Plugin registry for extensible section rendering
+ */
+
+"use strict";
+
+/* ========================================================================== */
+/* Convenience selector                                                         */
+/* ========================================================================== */
+
+const $ = id => document.getElementById(id);
+
+/* ========================================================================== */
+/* Formatting helpers                                                           */
+/* ========================================================================== */
+
+function formatCurrency(n) {
+  if (n == null || isNaN(Number(n))) return { text: '--', cls: 'neu' };
+  const v = Number(n);
+  const abs = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const text = `${v < 0 ? '-' : ''}$${abs}`;
+  const cls = v > 0.001 ? 'pos' : v < -0.001 ? 'neg' : 'neu';
+  return { text, cls };
+}
+
+function formatPercent(n) {
+  if (n == null || isNaN(Number(n))) return '--';
+  return `${Number(n).toFixed(1)}%`;
+}
+
+function formatTime(ts) {
+  if (!ts) return '--';
+  const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  return d.toLocaleTimeString('en-US', { hour12: false });
+}
+
+function winPctNum(w, l) {
+  const t = (w || 0) + (l || 0);
+  return t > 0 ? Math.round((w / t) * 100) : 0;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function fmtAge(sec) {
+  if (sec >= 3600) return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  if (sec >= 60)   return `${Math.floor(sec / 60)}m`;
+  return `${sec}s`;
+}
+
+/* ========================================================================== */
+/* Plugin registry                                                              */
+/* ========================================================================== */
+
+const sectionPlugins = {};
+
+function registerSection(key, renderFn) {
+  sectionPlugins[key] = renderFn;
+}
+
+/* ========================================================================== */
+/* PnL Chart (Chart.js)                                                         */
+/* ========================================================================== */
+
+let pnlChart = null;
+let _lastChartTs = -1;
+
+function initChart() {
+  const canvas = $('pnl-chart');
+  if (!canvas || typeof Chart === 'undefined') {
+    setTimeout(initChart, 200);
+    return;
+  }
+  const ctx = canvas.getContext('2d');
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height || 120);
+  gradient.addColorStop(0, 'rgba(88, 166, 255, 0.35)');
+  gradient.addColorStop(1, 'rgba(63, 185, 80, 0.05)');
+
+  pnlChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Equity',
+        data: [],
+        borderColor: '#58a6ff',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: true,
+        backgroundColor: gradient,
+      }],
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#161a22',
+          borderColor: '#252b38',
+          borderWidth: 1,
+          titleColor: '#6e7681',
+          bodyColor: '#c9d1d9',
+          callbacks: {
+            label: ctx => formatCurrency(ctx.parsed.y).text,
+          },
+        },
+      },
+      scales: {
+        x: {
+          display: false,
+          grid: { color: '#1e242f' },
+          ticks: {
+            color: '#6e7681',
+            maxTicksLimit: 8,
+            font: { family: '"JetBrains Mono", "Fira Code", monospace', size: 10 },
+          },
+        },
+        y: {
+          display: true,
+          grid: { color: '#1e242f' },
+          ticks: {
+            color: '#6e7681',
+            font: { family: '"JetBrains Mono", "Fira Code", monospace', size: 10 },
+            callback: v => formatCurrency(v).text,
+          },
+        },
+      },
+    },
+  });
+}
+
+function updatePnLChart(history) {
+  if (!pnlChart || !Array.isArray(history) || history.length === 0) return;
+
+  const newerPoints = history.filter(p => p.ts > _lastChartTs);
+  if (newerPoints.length === 0) return;
+
+  const MAX_POINTS = 500;
+  const ds = pnlChart.data;
+
+  newerPoints.forEach(p => {
+    ds.labels.push(formatTime(p.ts));
+    ds.datasets[0].data.push(p.equity);
+  });
+
+  if (ds.labels.length > MAX_POINTS) {
+    const excess = ds.labels.length - MAX_POINTS;
+    ds.labels.splice(0, excess);
+    ds.datasets[0].data.splice(0, excess);
+  }
+
+  _lastChartTs = newerPoints[newerPoints.length - 1].ts;
+
+  const data = ds.datasets[0].data;
+  if (data.length >= 2) {
+    const trending = data[data.length - 1] >= data[0];
+    ds.datasets[0].borderColor = trending ? '#3fb950' : '#f85149';
+  }
+
+  pnlChart.update('none');
+}
+
+/* ========================================================================== */
+/* Disconnected overlay                                                          */
+/* ========================================================================== */
+
+let _overlayEl = null;
+
+function _getOrCreateOverlay() {
+  if (_overlayEl) return _overlayEl;
+  _overlayEl = document.createElement('div');
+  _overlayEl.id = 'disconnect-overlay';
+  Object.assign(_overlayEl.style, {
+    position:       'fixed',
+    inset:          '0',
+    background:     'rgba(13,15,20,0.82)',
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'center',
+    zIndex:         '9999',
+    fontFamily:     '"JetBrains Mono","Fira Code",monospace',
+    fontSize:       '14px',
+    color:          '#f85149',
+    letterSpacing:  '1px',
+    pointerEvents:  'none',
+  });
+  _overlayEl.textContent = 'DISCONNECTED — reconnecting…';
+  document.body.appendChild(_overlayEl);
+  return _overlayEl;
+}
+
+function showDisconnectedOverlay() {
+  _getOrCreateOverlay().style.display = 'flex';
+}
+
+function hideDisconnectedOverlay() {
+  _getOrCreateOverlay().style.display = 'none';
+}
+
+/* ========================================================================== */
+/* Section updaters                                                              */
+/* ========================================================================== */
+
+/**
+ * Update mode pill. state_manager sends snapshot.mode = 'sandbox' | 'live'.
+ * HTML: <span id="mode-pill" class="sandbox"> ... <span id="mode-text">SANDBOX</span>
+ */
+function updateMode(mode) {
+  const pill = $('mode-pill');
+  const text = $('mode-text');
+  const m = (mode || 'sandbox').toLowerCase();
+  if (pill) pill.className = m;   // CSS: #mode-pill.sandbox / #mode-pill.live
+  if (text) text.textContent = m.toUpperCase();
+}
+
+/**
+ * Update uptime clock.
+ */
+function updateUptime(uptime) {
+  const el = $('uptime');
+  if (el) el.textContent = uptime || '--:--:--';
+}
+
+/**
+ * Update portfolio bar cards.
+ * HTML IDs: pf-equity, pf-cash, pf-exposure, pf-realized, pf-unrealized
+ * CSS classes on .pf-value: pos / neg / neu
+ */
+function updatePortfolio(pf) {
+  if (!pf) return;
+
+  const fields = [
+    ['pf-equity',     pf.equity],
+    ['pf-cash',       pf.cash],
+    ['pf-exposure',   pf.exposure],
+    ['pf-realized',   pf.realized_pnl],
+    ['pf-unrealized', pf.unrealized_pnl],
+  ];
+
+  fields.forEach(([id, v]) => {
+    const el = $(id);
+    if (!el) return;
+    const { text, cls } = formatCurrency(v);
+    const prev = el.dataset.prev;
+    el.textContent = text;
+    // CSS selector is .pf-value.pos/.pf-value.neg/.pf-value.neu
+    el.className = `pf-value ${cls}`;
+    if (prev != null && Number(v) !== Number(prev)) {
+      el.classList.remove('flash-up', 'flash-down');
+      void el.offsetWidth; // force reflow to restart animation
+      el.classList.add(Number(v) > Number(prev) ? 'flash-up' : 'flash-down');
+    }
+    el.dataset.prev = v;
+  });
+
+  // Exposure % appears in two places in the HTML
+  const pct = formatPercent(pf.exposure_pct);
+  const expPct  = $('pf-exposure-pct');
+  const expPct2 = $('pf-exposure-pct2');
+  if (expPct)  expPct.textContent  = pct;
+  if (expPct2) expPct2.textContent = pct;
+}
+
+/**
+ * Update market data feed rows.
+ * HTML: <div id="market-list"> inside <div id="market-list-wrap">
+ * CSS: .mkt-row, .mkt-sym, .mkt-price, .mkt-bid, .mkt-ask
+ */
+function updateMarketData(items) {
+  const el    = $('market-list');
+  const count = $('market-count');
+  if (count) count.textContent = (items || []).length;
+  if (!el) return;
+
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="empty-state">No feeds</div>';
+    return;
+  }
+
+  el.innerHTML = items.map(m => {
+    const yesBid = Number(m.bid || 0);
+    const yesAsk = Number(m.ask || 0);
+    const noBid  = Number(m.no_bid || 0);
+    const noAsk  = Number(m.no_ask || 0);
+    const hasContract = yesBid > 0 || yesAsk > 0 || noBid > 0 || noAsk > 0;
+    const priceStr = Number(m.price).toFixed(2);
+    const fmtP = v => v > 0 ? v.toFixed(2) : '-';
+    if (hasContract) {
+      return `<div class="mkt-row mkt-row-contract">` +
+        `<span class="mkt-sym" title="${escHtml(m.symbol)}">${escHtml(m.symbol)}</span>` +
+        `<span class="mkt-price">${priceStr}</span>` +
+        `<span class="mkt-yes-bid">${fmtP(yesBid)}</span>` +
+        `<span class="mkt-yes-ask">${fmtP(yesAsk)}</span>` +
+        `<span class="mkt-no-bid">${fmtP(noBid)}</span>` +
+        `<span class="mkt-no-ask">${fmtP(noAsk)}</span>` +
+        `</div>`;
+    }
+    return `<div class="mkt-row">` +
+      `<span class="mkt-sym" title="${escHtml(m.symbol)}">${escHtml(m.symbol)}</span>` +
+      `<span class="mkt-price" style="grid-column:2/-1">${priceStr}</span>` +
+      `</div>`;
+  }).join('');
+}
+
+/* Log/alert state — accumulated client-side */
+let _lastAlertCount = 0;
+let _lastLogCount   = 0;
+
+/**
+ * Update alerts panel.
+ * HTML: <div id="alerts-list">
+ * CSS: .alert-item, .alert-icon
+ */
+function updateAlerts(alerts) {
+  const el    = $('alerts-list');
+  const count = $('alerts-count');
+  if (count) count.textContent = (alerts || []).length;
+  if (!el) return;
+
+  if (!alerts || alerts.length === 0) {
+    el.innerHTML = '<div class="empty-state">No alerts</div>';
+    _lastAlertCount = 0;
+    return;
+  }
+
+  el.innerHTML = alerts.map(a =>
+    `<div class="alert-item"><span class="alert-icon">&#9888;</span><span>${escHtml(a)}</span></div>`
+  ).join('');
+}
+
+/**
+ * Update system log panel.
+ * HTML: <div id="log-list">
+ * CSS: .log-line, .log-line.log-alert  (note: CSS uses "log-alert" not "alert-line")
+ */
+function updateLogs(logs) {
+  const el = $('log-list');
+  if (!el || !Array.isArray(logs)) return;
+  if (logs.length === 0) { el.innerHTML = ''; return; }
+
+  el.innerHTML = logs.map(l =>
+    `<div class="log-line">${escHtml(l)}</div>`
+  ).join('');
+
+  el.scrollTop = el.scrollHeight;
+}
+
+/**
+ * Update strategy performance table.
+ * HTML: <tbody id="strategy-tbody"> inside <table id="strategy-table">
+ * Columns: Strategy | Signals | Wins | Losses | Win Rate | PnL | Active
+ */
+function updateStrategyStats(stats) {
+  const tbody = $('strategy-tbody');
+  const count = $('strategy-count');
+  const entries = Object.keys(stats || {}).map(k => [k, stats[k]]);
+  if (count) count.textContent = entries.length;
+  if (!tbody) return;
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No signals yet</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = entries
+    .sort(([, a], [, b]) => (b.pnl || 0) - (a.pnl || 0))
+    .map(([name, s]) => {
+      const { text: pnlText, cls: pnlCls } = formatCurrency(s.pnl);
+      const pct   = winPctNum(s.wins, s.losses);
+      const color = pct >= 60 ? 'var(--green)' : pct >= 40 ? 'var(--yellow)' : 'var(--red)';
+      return `<tr>` +
+        `<td class="col-strat" title="${escHtml(name)}">${escHtml(name)}</td>` +
+        `<td class="col-num">${s.signals || 0}</td>` +
+        `<td class="col-num" style="color:var(--green)">${s.wins || 0}</td>` +
+        `<td class="col-num" style="color:var(--red)">${s.losses || 0}</td>` +
+        `<td><div class="winrate-cell"><div class="winrate-bar-bg"><div class="winrate-bar-fill" style="width:${pct}%;background:${color}"></div></div><span class="winrate-pct" style="color:${color}">${pct}%</span></div></td>` +
+        `<td class="col-pnl ${pnlCls}">${pnlText}</td>` +
+        `<td class="col-num">${s.active || 0}</td>` +
+        `</tr>`;
+    }).join('');
+}
+
+/**
+ * Update open positions table.
+ * HTML: <tbody id="positions-tbody"> inside <table id="positions-table">
+ * Columns: ID | Symbol | Side | Contract | Qty | Entry | Current | PnL | Strategy | Age
+ */
+function updatePositions(positions) {
+  const tbody = $('positions-tbody');
+  const count = $('positions-count');
+  if (count) count.textContent = (positions || []).length;
+  if (!tbody) return;
+
+  if (!positions || positions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No open positions</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = positions.map(p => {
+    const { text: pnlText, cls: pnlCls } = formatCurrency(p.pnl);
+    const sideCls = (p.side === 'buy' || p.side === 'BUY') ? 'buy' : 'sell';
+    return `<tr>` +
+      `<td class="col-id">${escHtml(String(p.id || ''))}</td>` +
+      `<td class="col-symbol" title="${escHtml(p.symbol)}">${escHtml(p.symbol)}</td>` +
+      `<td class="col-side ${sideCls}">${escHtml((p.side || '').toUpperCase())}</td>` +
+      `<td class="col-contract">${escHtml(p.contract_side || 'YES')}</td>` +
+      `<td class="col-num">${p.quantity}x</td>` +
+      `<td class="col-num">${Number(p.entry).toFixed(2)}</td>` +
+      `<td class="col-num">${Number(p.current).toFixed(2)}</td>` +
+      `<td class="col-pnl ${pnlCls}">${pnlText}</td>` +
+      `<td class="col-strat" title="${escHtml(p.strategy)}">${escHtml(p.strategy)}</td>` +
+      `<td class="col-age">${fmtAge(p.age || 0)}</td>` +
+      `</tr>`;
+  }).join('');
+}
+
+/**
+ * Update bot chips and dropdown.
+ * HTML: <div id="bot-chips">, <div id="bot-dropdown-menu">
+ * CSS: .bot-chip.active / .bot-chip.inactive, .chip-dot
+ */
+function updateBots(bots) {
+  _syncSelectedBotsWithActive(bots);
+  _updateBotChips(bots);
+  _rebuildBotDropdownIfChanged(bots);
+}
+
+let _knownBotNames = '';
+let _pendingBots = {};
+
+function _updateBotChips(bots) {
+  const el = $('bot-chips');
+  if (!el) return;
+  if (!bots || bots.length === 0) { el.innerHTML = ''; return; }
+
+  // Clear pending state for bots whose status has changed
+  bots.forEach(b => { delete _pendingBots[b.name]; });
+
+  el.innerHTML = bots.map(b => {
+    const cls = b.active ? 'active' : 'inactive';
+    const pending = _pendingBots[b.name] ? ' pending' : '';
+    return `<span class="bot-chip ${cls}${pending}" data-bot-chip="${escHtml(b.name)}"><span class="chip-dot"></span>${escHtml(b.name)}</span>`;
+  }).join('');
+}
+
+function _syncSelectedBotsWithActive(bots) {
+  if (!bots) return;
+  bots.forEach(b => { _selectedBots[b.name] = b.active; });
+  _updateDropdownLabel();
+}
+
+function _rebuildBotDropdownIfChanged(bots) {
+  // Only rebuild when bot *names* change, not active status
+  const names = (bots || []).map(b => b.name).sort().join(',');
+  if (names === _knownBotNames) {
+    // Names unchanged — just update checkbox state without rebuilding DOM
+    _syncCheckboxStates(bots);
+    return;
+  }
+  _knownBotNames = names;
+
+  const menu = $('bot-dropdown-menu');
+  if (!menu) return;
+
+  if (!bots || bots.length === 0) {
+    menu.innerHTML = '<div class="bot-option" style="color:var(--text-dim);cursor:default;font-size:11px;">No bots registered</div>';
+    return;
+  }
+
+  menu.innerHTML = bots.map(b => {
+    const checked = _selectedBots[b.name] ? 'checked' : '';
+    return `<label class="bot-option"><input type="checkbox" value="${escHtml(b.name)}" ${checked} onchange="onBotCheckChange(this)" />${escHtml(b.name)}</label>`;
+  }).join('');
+
+  _updateDropdownLabel();
+}
+
+function _syncCheckboxStates(bots) {
+  const menu = $('bot-dropdown-menu');
+  if (!menu || !bots) return;
+  const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
+  checkboxes.forEach(cb => {
+    cb.checked = !!_selectedBots[cb.value];
+  });
+}
+
+/**
+ * Update mascot state chip and canvas animation.
+ * HTML: <span id="mascot-state">
+ * mascot.js exposes: window.setMascotState(state)
+ */
+function updateMascotState(state) {
+  const el = $('mascot-state');
+  if (el) el.textContent = (state || 'IDLE').toUpperCase();
+  if (typeof window.setMascotState === 'function') {
+    window.setMascotState(state || 'IDLE');
+  }
+}
+
+/* ========================================================================== */
+/* Bot dropdown (multi-select) — global functions called from HTML onclick      */
+/* ========================================================================== */
+
+var _selectedBots = {};
+
+function toggleBotDropdown() {
+  const btn  = $('bot-dropdown-btn');
+  const menu = $('bot-dropdown-menu');
+  if (btn)  btn.classList.toggle('open');
+  if (menu) menu.classList.toggle('open');
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.querySelector('.bot-dropdown-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    const btn  = $('bot-dropdown-btn');
+    const menu = $('bot-dropdown-menu');
+    if (btn)  btn.classList.remove('open');
+    if (menu) menu.classList.remove('open');
+  }
+});
+
+function onBotCheckChange(cb) {
+  _selectedBots[cb.value] = cb.checked;
+  _updateDropdownLabel();
+}
+
+function _updateDropdownLabel() {
+  const selected = Object.keys(_selectedBots).filter(k => _selectedBots[k]);
+  const lbl = $('bot-dropdown-label');
+  if (!lbl) return;
+  if (selected.length === 0)      lbl.textContent = 'Select Bots';
+  else if (selected.length === 1) lbl.textContent = selected[0];
+  else                            lbl.textContent = `${selected.length} bots selected`;
+}
+
+function startSelected() {
+  Object.keys(_selectedBots).forEach(name => {
+    if (_selectedBots[name]) botAction(name, 'start');
+  });
+}
+
+function stopSelected() {
+  Object.keys(_selectedBots).forEach(name => {
+    if (_selectedBots[name]) botAction(name, 'stop');
+  });
+}
+
+/* ========================================================================== */
+/* Bot control — REST API                                                        */
+/* ========================================================================== */
+
+/**
+ * POST to /api/bots/{name}/start or /api/bots/{name}/stop
+ * server.py routes: POST /api/bots/{name}/start  and  POST /api/bots/{name}/stop
+ */
+async function botAction(name, action) {
+  const url = `/api/bots/${encodeURIComponent(name)}/${action}`;
+  try {
+    const resp = await fetch(url, { method: 'POST' });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      console.warn(`[bots] ${action} ${name} failed:`, body.detail || resp.status);
+    }
+  } catch (err) {
+    console.error('[bots] fetch error:', err);
+  }
+}
+
+// Delegate click events for bot chips — click to toggle start/stop
+document.addEventListener('click', e => {
+  const chip = e.target.closest('[data-bot-chip]');
+  if (!chip) return;
+  const name = chip.dataset.botChip;
+  const isActive = chip.classList.contains('active');
+  const action = isActive ? 'stop' : 'start';
+  _pendingBots[name] = true;
+  chip.classList.add('pending');
+  botAction(name, action);
+});
+
+// Delegate click events for inline start/stop buttons (future bots panel extension)
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const name   = btn.dataset.bot;
+  if ((action === 'start' || action === 'stop') && name) {
+    btn.disabled = true;
+    btn.style.opacity = '0.4';
+    botAction(name, action);
+  }
+});
+
+/* ========================================================================== */
+/* WebSocket client                                                              */
+/* ========================================================================== */
+
+// ws-dot: HTML id="ws-dot", CSS: #ws-dot and #ws-dot.connected
+const WS_INDICATOR = $('ws-dot');
+let _ws           = null;
+let _reconnDelay  = 1000;
+const WS_DELAY_MAX = 10000;
+
+function _wsConnect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url   = `${proto}://${location.host}/ws`;
+
+  _ws = new WebSocket(url);
+
+  _ws.onopen = () => {
+    if (WS_INDICATOR) WS_INDICATOR.classList.add('connected');
+    hideDisconnectedOverlay();
+    _reconnDelay = 1000;
+    console.info('[ws] connected');
+  };
+
+  _ws.onclose = () => {
+    if (WS_INDICATOR) WS_INDICATOR.classList.remove('connected');
+    showDisconnectedOverlay();
+    console.info(`[ws] closed — reconnecting in ${_reconnDelay}ms`);
+    setTimeout(_wsConnect, _reconnDelay);
+    _reconnDelay = Math.min(_reconnDelay * 2, WS_DELAY_MAX);
+  };
+
+  _ws.onerror = () => {
+    _ws.close();
+  };
+
+  _ws.onmessage = ev => {
+    let snap;
+    try { snap = JSON.parse(ev.data); }
+    catch (e) { return; }
+    _dispatchSnapshot(snap);
+  };
+}
+
+/* ========================================================================== */
+/* Snapshot dispatch                                                             */
+/* ========================================================================== */
+
+function _dispatchSnapshot(snap) {
+  for (const [key, fn] of Object.entries(sectionPlugins)) {
+    if (key in snap) {
+      try { fn(snap[key]); }
+      catch (err) { console.error(`[section:${key}]`, err); }
+    }
+  }
+}
+
+/* ========================================================================== */
+/* Data Log updater                                                              */
+/* ========================================================================== */
+
+/**
+ * Update data log panel.
+ * HTML: <div id="datalog-list">
+ * CSS: .datalog-row, .datalog-ts, .datalog-sym, .datalog-price, .datalog-type
+ */
+function updateDataLog(entries) {
+  const el    = $('datalog-list');
+  const count = $('datalog-count');
+  if (count) count.textContent = (entries || []).length;
+  if (!el) return;
+
+  if (!entries || entries.length === 0) {
+    el.innerHTML = '<div class="empty-state">No data log entries</div>';
+    return;
+  }
+
+  el.innerHTML = entries.map(e => {
+    const ts = (e.Timestamp || '').split('T')[1] || e.Timestamp || '';
+    const tsShort = ts.length > 8 ? ts.substring(0, 8) : ts;
+    return `<div class="datalog-row">` +
+      `<span class="datalog-ts">${escHtml(tsShort)}</span>` +
+      `<span class="datalog-sym">${escHtml(e.Symbol || '')}</span>` +
+      `<span class="datalog-price">${escHtml(e.Price || '')}</span>` +
+      `<span class="datalog-type">${escHtml(e.Type || '')}</span>` +
+      `</div>`;
+  }).join('');
+
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ========================================================================== */
+/* Training History updater                                                      */
+/* ========================================================================== */
+
+/**
+ * Update training history panel.
+ * HTML: <div id="training-history-list"> inside <div id="training-history-card">
+ * CSS: .th-entry, .th-entry-latest, .th-badge, .th-metric, .th-metric.good, .th-metric.bad
+ *
+ * Each entry in `history` is:
+ *   { timestamp, cycle, diagnostics: {...}, cycle_record: {...} }
+ */
+function updateTrainingHistory(history) {
+  const card  = $('training-history-card');
+  const el    = $('training-history-list');
+  const count = $('training-history-count');
+
+  if (!history || history.length === 0) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+
+  if (card) card.style.display = '';
+  if (count) count.textContent = history.length;
+  if (!el) return;
+
+  // Render newest-first
+  const reversed = history.slice().reverse();
+
+  el.innerHTML = reversed.map((entry, idx) => {
+    const cr = entry.cycle_record || {};
+    const diag = entry.diagnostics || {};
+    const isLatest = idx === 0;
+    const entryCls = isLatest ? 'th-entry th-entry-latest' : 'th-entry';
+
+    // Format timestamp to time only
+    let tsDisplay = '--';
+    if (entry.timestamp) {
+      const d = new Date(entry.timestamp);
+      if (!isNaN(d.getTime())) {
+        tsDisplay = d.toLocaleTimeString('en-US', { hour12: false });
+      } else {
+        tsDisplay = entry.timestamp;
+      }
+    }
+
+    // Win rate color
+    const wr = cr.win_rate || 0;
+    const wrCls = wr >= 60 ? 'good' : wr < 40 ? 'bad' : '';
+
+    // PnL color
+    const pnl = cr.pnl || 0;
+    const pnlCls = pnl > 0 ? 'good' : pnl < 0 ? 'bad' : '';
+
+    // AUC color (>= 0.60 good, < 0.50 bad)
+    const auc = cr.train_val_auc || 0;
+    const aucCls = auc >= 0.60 ? 'good' : auc > 0 && auc < 0.50 ? 'bad' : '';
+
+    // Build ML metrics line if available
+    let mlLine = '';
+    if (auc > 0 || cr.train_samples > 0) {
+      const parts = [];
+      if (auc > 0) parts.push(`<span class="th-metric ${aucCls}">AUC ${auc.toFixed(4)}</span>`);
+      if (cr.train_samples > 0) parts.push(`<span class="th-metric">${cr.train_samples} samples</span>`);
+      if (cr.train_contracts > 0) parts.push(`<span class="th-metric">${cr.train_contracts} contracts</span>`);
+      mlLine = `<div class="th-ml">${parts.join('<span class="th-sep">|</span>')}</div>`;
+    }
+
+    const latestBadge = isLatest ? '<span class="th-badge">LATEST</span>' : '';
+
+    return `<div class="${entryCls}">` +
+      `<div class="th-header">` +
+        `<span class="th-cycle">Cycle #${cr.cycle || entry.cycle || '?'}</span>` +
+        `${latestBadge}` +
+        `<span class="th-ts">${escHtml(tsDisplay)}</span>` +
+      `</div>` +
+      `<div class="th-metrics">` +
+        `<span class="th-metric">${cr.trades || 0} trades</span>` +
+        `<span class="th-sep">|</span>` +
+        `<span class="th-metric ${wrCls}">${cr.wins || 0}W/${cr.losses || 0}L (${wr.toFixed(0)}%)</span>` +
+        `<span class="th-sep">|</span>` +
+        `<span class="th-metric ${pnlCls}">$${pnl.toFixed(2)}</span>` +
+        `<span class="th-sep">|</span>` +
+        `<span class="th-metric">${cr.duration_min || 0}min</span>` +
+      `</div>` +
+      `${mlLine}` +
+    `</div>`;
+  }).join('');
+}
+
+/* ========================================================================== */
+/* Register built-in section updaters                                           */
+/* ========================================================================== */
+
+// Keys match exactly what state_manager.py's snapshot() returns:
+//   mode, uptime, portfolio, market_data, alerts, logs,
+//   strategy_stats, positions, pnl_history, bots, mascot_state
+registerSection('mode',           updateMode);
+registerSection('uptime',         updateUptime);
+registerSection('portfolio',      updatePortfolio);
+registerSection('market_data',    updateMarketData);
+registerSection('alerts',         updateAlerts);
+registerSection('logs',           updateLogs);
+registerSection('strategy_stats', updateStrategyStats);
+registerSection('positions',      updatePositions);
+registerSection('bots',           updateBots);
+registerSection('mascot_state',   updateMascotState);
+registerSection('pnl_history',       updatePnLChart);
+registerSection('data_log',          updateDataLog);
+registerSection('training_history',  updateTrainingHistory);
+
+/* ========================================================================== */
+/* Grid column resizer                                                         */
+/* ========================================================================== */
+
+function initGridResizer() {
+  const resizer = document.getElementById('grid-resizer');
+  const grid = document.getElementById('main-grid');
+  if (!resizer || !grid) return;
+
+  // Restore saved width
+  const saved = localStorage.getItem('mp-grid-left');
+  if (saved) {
+    grid.style.setProperty('--left-col-width', saved);
+    const pct = parseFloat(saved);
+    if (!isNaN(pct)) grid.style.setProperty('--right-col-width', (100 - pct - 1) + '%');
+  }
+
+  let startX, startLeftWidth;
+
+  resizer.addEventListener('mousedown', (e) => {
+    startX = e.clientX;
+    startLeftWidth = document.getElementById('left-col').getBoundingClientRect().width;
+    resizer.classList.add('dragging');
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    e.preventDefault();
+  });
+
+  function onMouseMove(e) {
+    const gridWidth = grid.getBoundingClientRect().width;
+    const newLeftWidth = startLeftWidth + (e.clientX - startX);
+    const pct = Math.max(30, Math.min(80, (newLeftWidth / gridWidth) * 100));
+    grid.style.setProperty('--left-col-width', pct + '%');
+    grid.style.setProperty('--right-col-width', (100 - pct - 1) + '%');
+  }
+
+  function onMouseUp() {
+    resizer.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    const leftW = grid.style.getPropertyValue('--left-col-width');
+    if (leftW) localStorage.setItem('mp-grid-left', leftW);
+  }
+}
+
+/* ========================================================================== */
+/* Boot                                                                          */
+/* ========================================================================== */
+
+document.addEventListener('DOMContentLoaded', () => {
+  showDisconnectedOverlay();
+  initChart();
+  initGridResizer();
+  _wsConnect();
+});
+
+/* ========================================================================== */
+/* Public API                                                                   */
+/* ========================================================================== */
+
+window.MoneyPrinter = {
+  registerSection,
+  formatCurrency,
+  formatPercent,
+  formatTime,
+  botAction,
+};

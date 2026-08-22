@@ -1,10 +1,10 @@
 """Tests for WS3: Profit-taking / partial exits."""
-from datetime import datetime
+
 from src.core.matching_engine import SimulatedExchange
 
 
 def test_partial_exit_at_first_target():
-    """At +$0.05 move, 33% of position should be closed."""
+    """At +$0.15 move, 50% of position should be closed (Alt A: 1/2 + 1/2)."""
     closed = []
     ex = SimulatedExchange(on_close=lambda p: closed.append(p))
 
@@ -18,19 +18,19 @@ def test_partial_exit_at_first_target():
     )
 
     pos = ex.positions[0]
-    pos['last_market_price'] = 0.55  # +0.05 move
+    pos["last_market_price"] = 0.65  # +0.15 move (first target)
 
     # Manually trigger profit target check
-    result = ex._check_profit_targets(pos, 0.55)
+    ex._check_profit_targets(pos, 0.65)
 
     assert len(closed) == 1
-    assert closed[0]['quantity'] == 9  # 33% of 30 = ~10, int(30*0.33)=9
-    assert closed[0]['pnl'] > 0
-    assert pos['quantity'] == 21  # 30 - 9
+    assert closed[0]["quantity"] == 15  # 50% of 30 = 15
+    assert closed[0]["pnl"] > 0
+    assert pos["quantity"] == 15  # 30 - 15
 
 
 def test_partial_exit_at_second_target():
-    """At +$0.10 move, 50% of remaining should be closed."""
+    """At +$0.30 move, 100% of remaining should be closed (Alt A: ladder fully exits)."""
     closed = []
     ex = SimulatedExchange(on_close=lambda p: closed.append(p))
 
@@ -45,15 +45,15 @@ def test_partial_exit_at_second_target():
 
     pos = ex.positions[0]
 
-    # Hit first target
-    ex._check_profit_targets(pos, 0.55)
-    assert pos['quantity'] == 21
+    # Hit first target (+0.15)
+    ex._check_profit_targets(pos, 0.65)
+    assert pos["quantity"] == 15
 
-    # Hit second target
-    ex._check_profit_targets(pos, 0.60)
+    # Hit second target (+0.30) — exits 100% of remaining, no residual
+    ex._check_profit_targets(pos, 0.80)
     assert len(closed) == 2
-    assert closed[1]['quantity'] == 10  # 50% of 21 = 10
-    assert pos['quantity'] == 11
+    assert closed[1]["quantity"] == 15  # 100% of 15 = 15
+    assert pos["quantity"] == 0
 
 
 def test_profit_targets_on_sell_side():
@@ -73,9 +73,9 @@ def test_profit_targets_on_sell_side():
     pos = ex.positions[0]
 
     # For sell, profit = entry - current, so price drop = profit
-    ex._check_profit_targets(pos, 0.45)  # +0.05 move in our favor
+    ex._check_profit_targets(pos, 0.35)  # +0.15 move in our favor (first target)
     assert len(closed) == 1
-    assert closed[0]['pnl'] > 0
+    assert closed[0]["pnl"] > 0
 
 
 def test_position_fields_initialized():
@@ -83,8 +83,11 @@ def test_position_fields_initialized():
     ex = SimulatedExchange()
     ex.open_position("TEST", "buy", 0.50, 10)
     pos = ex.positions[0]
-    assert 'profit_targets' in pos
-    assert 'original_quantity' in pos
-    assert pos['original_quantity'] == 10
-    assert pos['last_market_price'] == 0.50
-    assert pos['contract_side'] == 'YES'
+    assert "profit_targets" in pos
+    assert "original_quantity" in pos
+    assert pos["original_quantity"] == 10
+    # last_market_price is initialized to 0 as a sentinel meaning "no real
+    # market price yet" — matching_engine relies on `lmp > 0` to detect when
+    # a real Kalshi orderbook price has been observed (see lines 533, 628).
+    assert pos["last_market_price"] == 0
+    assert pos["contract_side"] == "YES"

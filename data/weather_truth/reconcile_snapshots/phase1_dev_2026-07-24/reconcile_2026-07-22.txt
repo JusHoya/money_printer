@@ -1,0 +1,19 @@
+==============================================================================
+WEATHER SETTLEMENT RECONCILIATION REPORT (PRD FR-1.3)
+==============================================================================
+  Generated         : 2026-07-25T16:43:48Z
+  Dates             : 2026-07-22
+  Stations          : KNYC, KMDW, KLAX, KMIA
+  Markets checked   : 24
+  Matched           : 24
+  Explained (no breach) : 0
+  UNEXPLAINED       : 0  (threshold 0)
+
+  Per city/date:
+    DATE        STN    CLI SRC        MKTS   OK  EXPL  BAD
+    ------------------------------------------------------------
+    2026-07-22  KNYC    85 iem_cli       6    6     0    0
+    2026-07-22  KMDW    73 iem_cli       6    6     0    0
+    2026-07-22  KLAX    77 iem_cli       6    6     0    0
+    2026-07-22  KMIA    92 iem_cli       6    6     0    0
+==============================================================================

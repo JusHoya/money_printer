@@ -27,3 +27,92 @@ Skippy_demo.txt
 kalshi_priv.key
 Kalshi_priv_key_1_readOnly.key
 
+# Data artifacts (V2)
+data/historical/*.parquet
+data/features/*.parquet
+data/historical/btc_15m/*.parquet
+data/historical/btc_hourly/*.parquet
+data/historical/weather/*.parquet
+data/historical/weather_KXHIGHCHI/*.parquet
+data/historical/weather_KXHIGHLAX/*.parquet
+data/historical/weather_KXHIGHMIA/*.parquet
+data/models/*.joblib
+data/models/*.pt
+data/models/*.json
+data/backtest_results/*.html
+data/*.db
+data/sandbox_logs/
+
+# ML artifacts
+*.onnx
+__pycache__/
+*.pyc
+
+# Mutable runtime state — must NOT be version-controlled (a deploy `git pull`
+# could otherwise clobber the VM's live learning). Untracked via `git rm --cached`
+# in the 2026-06-03 review-fix commit. See docs/host_watchdog.md / review notes.
+data/exchange_state.json
+data/strategy_win_rates.json
+data/training_state.json
+data/trade_journal.jsonl
+*.bak
+
+# Phase 1 (FR-1.3): rewritten by the reconcile_weather.py cron on every run
+# (scripts/reconcile_weather.py:839,1032). Tracking them makes the VM's next
+# `git pull` abort with "local changes would be overwritten". EC-3 closure
+# evidence is captured by committing a dated snapshot deliberately, not by
+# tracking the live path. The cli_daily_high_*.csv files beside these stay
+# tracked — those are the immutable FR-1.6 ground-truth record.
+data/weather_truth/settlement_cache.json
+data/weather_truth/reconcile/
+
+# Phase 4 (FR-4.4): the same split, for the same reason — reconcile_gas.py
+# rewrites these on every cron run, so tracking them makes the VM's next
+# `git pull` abort. The aaa_daily_national.csv / eia_weekly_regular.csv /
+# rbob_daily.csv series beside them stay tracked: those are the provenance-
+# bearing ground-truth record, and the reconcile job reads them rather than
+# writing them (a job that validated against its own output would shadow any
+# later correction to the AAA series).
+data/gas_truth/settlement_cache.json
+data/gas_truth/reconcile/
+# Per-ET-day scrape-failure record (FR-4.1 / EC-1): written by the live recorder
+# when a fetch fails and cleared on a same-day live success. Pure runtime state,
+# rewritten on the VM, and tracking it would abort the VM's next `git pull` for
+# the same reason as the two paths above.
+data/gas_truth/scrape_failures.json
+
+# Review/audit artifacts (large pulled VM data dumps). Globbed 2026-07-27:
+# review_2026_06_09/, _06_26/ and _07_24/ total ~430 MB locally and one of
+# them holds a 372 MiB file that GitHub would reject outright.
+review_2026_*/
+
+# Claude Code scheduler lock (machine-local)
+.claude/scheduled_tasks.lock
+
+
+
+# Playwright
+test-results/
+
+# Phase 1 (FR-1.6): the IEM CLI response cache is a regenerable HTTP cache with
+# per-fetch timestamps; the derived daily-high CSVs beside it ARE the committed
+# ground-truth record and stay tracked.
+data/weather_truth/cache/
+
+# Phase 2 (FR-2.2): re-fetchable IEM MOS run cache (434 files / 30 MB). The
+# normalized forecast_series_*.csv beside it is the committed artifact.
+data/forecast_archive/cache/
+
+# Phase 2 (FR-2.1): decoded GEFS member cache — regenerable from NOAA NODD.
+data/ensemble/cache/
+
+# VM decommission snapshot (2026-08-22): 197 MB of compressed archives pulled off
+# the GCE instance money-printer-preschool-20260322 before it was stopped. The
+# payload is deliberately untracked (too large for git history); the committed
+# record of what it contains, where each piece came from, and its SHA-256 lives
+# in vm_snapshot_2026_08_22/MANIFEST.md.
+vm_snapshot_2026_08_22/archive/
+# Working extraction of the VM snapshot archives — regenerable by untarring
+# archive/*.tgz. The 27 daily reconcile runs are the one irreplaceable piece and
+# are committed separately under vm_snapshot_2026_08_22/reconcile_record/.
+vm_snapshot_2026_08_22/extracted/

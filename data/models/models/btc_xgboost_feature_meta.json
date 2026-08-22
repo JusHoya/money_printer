@@ -1,0 +1,43 @@
+{
+  "feature_names": [
+    "feat_price_distance",
+    "feat_price_distance_pct",
+    "feat_contract_price",
+    "feat_tanh_prob",
+    "feat_market_vs_analytical",
+    "feat_time_to_expiry",
+    "feat_normalized_tte",
+    "feat_btc_return_1m",
+    "feat_btc_return_5m",
+    "feat_btc_return_10m",
+    "feat_btc_vol_1m",
+    "feat_btc_vol_5m",
+    "feat_btc_range",
+    "feat_contract_slope",
+    "feat_hour_of_day",
+    "feat_minute_in_interval"
+  ],
+  "training_samples": 5139,
+  "contracts_labeled": 348,
+  "label_distribution": {
+    "yes": 191,
+    "no": 157
+  },
+  "results": {
+    "train": {
+      "auc": 0.827042052648521,
+      "accuracy": 0.6211482322413234,
+      "n": 3083
+    },
+    "val": {
+      "auc": 0.7294293478260869,
+      "accuracy": 0.19455252918287938,
+      "n": 1028
+    },
+    "test": {
+      "auc": 0.7180532329988851,
+      "accuracy": 0.08949416342412451,
+      "n": 1028
+    }
+  }
+}
