@@ -135,7 +135,7 @@ Longer-form versions of several of these live in the user's cross-project brain
 ## 4. The data you inherit
 
 The GCE instance was archived and stopped on 2026-08-22. Everything of value is in
-`vm_snapshot_2026_08_22/` — **read its `MANIFEST.md`**, which records provenance,
+`vm_snapshot_2026_08_22/` — **read its `RESTORE.md` to get the data back, and its `MANIFEST.md`**, which records provenance,
 exclusions, and the checksum verification.
 
 | asset | scale | where |
