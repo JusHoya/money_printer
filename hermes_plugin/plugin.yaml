@@ -23,4 +23,4 @@ provides_hooks: []
 requires_env:
   - MONEY_PRINTER_URL
 python_dependencies:
-  - requests
+  - requests>=2.31,<3

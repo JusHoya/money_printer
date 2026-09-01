@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Money Printer is an algorithmic trading system for the **Kalshi** prediction market. It fetches live data (weather forecasts, market orderbooks), runs trading strategies against that data, and manages simulated/demo positions with full risk management. The goal is paper-trading validation before any real capital deployment.
 
-**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/`) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. The weather bot is the only registered bot and runs **feed-only** (data harvesting, no trading) until the Phase 1-3 weather rebuild proves an edge. `PRD.md` drives all pivot work.
+**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/` — gitignored, no longer on disk; conclusions survive in PRD/HANDOFF/reports) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. TWO feed-only bots are registered post-Phase-4: `weather` and `gas` (both gated off trading by module-level flags). `PRD.md` drives all pivot work; `deploy/README.md` describes the 2026-09 split deployment onto the Pleiades home cluster (sandbox on maia/Pi 4, Hermes agent + offline lab on alcyone/DGX Spark).
 
 ## Commands
 
@@ -62,7 +62,7 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`src/bots/`** — Bot implementations:
 - `base.py`: Bot ABC defining `setup()`, `tick()`, `get_symbols()`
-- `registry.py`: Bot registry for CLI `--bot` selection — registers ONLY `weather` post-teardown
+- `registry.py`: Bot registry for CLI `--bot` selection — registers `weather` and `gas` (both feed-only) post-teardown
 - `mixins.py`: `SignalProcessorMixin` — shared signal processing logic (risk check → execution)
 - `weather_bot.py`: The only concrete bot. Feed-only: `WEATHER_TRADING_ENABLED = False` gates the strategy waterfall; price/data feeds still run. (Crypto bots deleted 2026-07-24, PRD FR-0.1.)
 
