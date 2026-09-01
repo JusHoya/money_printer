@@ -23,3 +23,9 @@ pyarrow>=23.0
 # Data infrastructure
 aiohttp>=3.13
 websocket-client>=1.9
+
+# Imported at module load by src/ml/features.py via the strategy chain
+# (src.bots -> ml_weather -> predictor -> features). Pure-python, small.
+# Model FILES (xgboost/joblib) are not shipped; if a cleared strategy ever
+# needs on-Pi inference, add xgboost+joblib here deliberately.
+ta>=0.11
