@@ -548,14 +548,14 @@ TOOLS = {
     "mp_start_bot": {
         "schema": {
             "name": "mp_start_bot",
-            "description": "Activate a trading bot so it participates in the market loop. Confirm with the user before executing. Available: btc_15m, btc_hourly, weather.",
+            "description": "Activate a trading bot so it participates in the market loop. Confirm with the user before executing. Available: weather (crypto bots were deleted in the Phase 0 teardown).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bot_name": {
                         "type": "string",
                         "description": "Bot to activate",
-                        "enum": ["btc_15m", "btc_hourly", "weather"],
+                        "enum": ["weather"],
                     }
                 },
                 "required": ["bot_name"],
@@ -566,14 +566,14 @@ TOOLS = {
     "mp_stop_bot": {
         "schema": {
             "name": "mp_stop_bot",
-            "description": "Deactivate a trading bot (it stops ticking but stays registered). Confirm with the user before executing. Available: btc_15m, btc_hourly, weather.",
+            "description": "Deactivate a trading bot (it stops ticking but stays registered). Confirm with the user before executing. Available: weather (crypto bots were deleted in the Phase 0 teardown).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bot_name": {
                         "type": "string",
                         "description": "Bot to deactivate",
-                        "enum": ["btc_15m", "btc_hourly", "weather"],
+                        "enum": ["weather"],
                     }
                 },
                 "required": ["bot_name"],
