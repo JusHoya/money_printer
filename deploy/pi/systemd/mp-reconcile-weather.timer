@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily weather reconcile at 13:30 UTC (same cadence as the GCE VM cron)
+
+[Timer]
+OnCalendar=*-*-* 13:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

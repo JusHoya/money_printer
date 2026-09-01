@@ -1,0 +1,22 @@
+# Full-fat analysis image for alcyone (DGX Spark, linux/arm64).
+# Carries the offline ML stack (FR-0.2: training NEVER runs in the runtime
+# process — it runs here, against the mounted tape).
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    TZ=UTC \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libgomp1 tzdata git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt /tmp/requirements.txt
+# playwright/pre-commit/keyboard are dev-host tooling, not lab compute; torch
+# arm64 wheels are large but available. Trim what the lab never uses.
+RUN grep -vE '^(playwright|pre-commit|keyboard)' /tmp/requirements.txt > /tmp/req-lab.txt \
+    && pip install -r /tmp/req-lab.txt
+
+ENV PYTHONPATH=/app

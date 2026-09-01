@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily settlement reconcile at 06:00 UTC (same cadence as the GCE VM cron)
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

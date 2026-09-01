@@ -1,0 +1,25 @@
+# Runtime slice of requirements.txt for the maia (Pi 4) sandbox container.
+# The full file carries the offline ML training stack (torch, xgboost,
+# lightgbm, shap, optuna, playwright...) which never runs in the runtime
+# process (PRD FR-0.2) and has no place on a Pi. Verified 2026-08-31: the
+# runtime import graph (run_web_dashboard/run_sandbox -> bots, strategies,
+# core, data, web, calibration) touches none of the training libraries.
+
+# Core runtime
+requests
+python-dotenv
+cryptography
+
+# Web dashboard (the surface Hermes monitors)
+fastapi
+uvicorn[standard]
+websockets
+
+# Data handling — harvester writes parquet via pyarrow
+pandas
+numpy
+pyarrow>=23.0
+
+# Data infrastructure
+aiohttp>=3.13
+websocket-client>=1.9

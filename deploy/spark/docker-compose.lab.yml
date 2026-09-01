@@ -1,0 +1,33 @@
+# Offline lab on alcyone (DGX Spark): backtests, calibration builds, and
+# model training against the harvested tape — Docker-isolated so Money
+# Printer's Python stack never collides with other projects on the Spark.
+#
+#   docker compose -f deploy/spark/docker-compose.lab.yml build
+#   docker compose -f deploy/spark/docker-compose.lab.yml run --rm lab \
+#       python scripts/gas_backtest.py --help
+#
+# The archive payload (market tape etc.) is mounted read-only from
+# ~/mp_archive/extracted once it has been copied to the Spark and verified
+# against vm_snapshot_2026_08_22/meta/archive_sha256.txt.
+
+name: money-printer-lab
+
+services:
+  lab:
+    build:
+      context: ../..
+      dockerfile: deploy/spark/Dockerfile.lab
+    image: money-printer-lab:latest
+    environment:
+      TZ: UTC
+      PYTHONPATH: /app
+    volumes:
+      - ../..:/app
+      - ~/mp_archive/extracted:/archive:ro
+      - lab-venv-cache:/root/.cache/pip
+    working_dir: /app
+    # No ports. No network services. This container only crunches data.
+    command: ["python", "-c", "print('mp-lab ready — use docker compose run')"]
+
+volumes:
+  lab-venv-cache:

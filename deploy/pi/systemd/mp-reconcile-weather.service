@@ -1,0 +1,8 @@
+[Unit]
+Description=Money Printer daily weather settlement reconcile (runs in the sandbox container)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec mp-sandbox python scripts/reconcile_weather.py --days 2

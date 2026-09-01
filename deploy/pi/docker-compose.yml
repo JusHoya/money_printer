@@ -1,0 +1,44 @@
+# Money Printer sandbox on maia (Pi 4). Run from the repo root ON maia:
+#   docker compose -f deploy/pi/docker-compose.yml up -d --build
+#
+# State lives OUTSIDE the SD card: bind-mounts under /srv/money_printer,
+# which bootstrap_maia.sh places on USB-SSD storage when one is present.
+# The container is feed-only until a strategy clears its sandbox gate —
+# the same posture the GCE VM held for its entire 152-day life.
+
+name: money-printer
+
+services:
+  sandbox:
+    build:
+      context: ../..
+      dockerfile: deploy/pi/Dockerfile
+    image: money-printer-sandbox:latest
+    container_name: mp-sandbox
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    env_file:
+      - /srv/money_printer/.env
+    ports:
+      # LAN-only exposure is enforced at the router/firewall level; Hermes on
+      # alcyone reaches this at http://maia.local:8050 (mp_* plugin tools).
+      - "8050:8050"
+    volumes:
+      - /srv/money_printer/data:/app/data
+      - /srv/money_printer/logs:/app/logs
+      - /srv/money_printer/kalshi_priv.key:/app/kalshi_priv.key:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8050/api/status"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    # Pi 4 headroom: leave RAM for the OS; the VM ran this workload in <8GB.
+    mem_limit: 2500m
+    cpus: 3.0

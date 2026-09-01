@@ -1,0 +1,16 @@
+# Keep images small and state out of build contexts.
+.git
+data/
+logs/
+reports/
+review_2026_07_24/
+vm_snapshot_2026_08_22/
+agent_space/
+.agent/
+.claude/
+.gemini/
+.env
+*.key
+__pycache__/
+*.pyc
+.pytest_cache/
