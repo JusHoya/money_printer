@@ -23,8 +23,12 @@ RUN pip install -r /tmp/requirements-runtime.txt
 # vm_snapshot out of the build context.
 COPY . /app
 
-# Non-root user; data/ and logs/ are volume-mounted and chowned by compose
-RUN useradd --create-home --uid 1000 --shell /bin/bash mp || true
+# Non-root user. data/ and logs/ are bind-mounted in compose, but the image
+# must also run bare: the logger mkdirs logs/ at import time, so both dirs
+# must exist and be writable by the runtime UID.
+RUN useradd --create-home --uid 1000 --shell /bin/bash mp || true \
+    && mkdir -p /app/data /app/logs \
+    && chown -R 1000:1000 /app/data /app/logs
 USER 1000:1000
 
 ENV PYTHONPATH=/app
