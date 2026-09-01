@@ -5,6 +5,7 @@ SignalProcessorMixin.
 """
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock
 
 import pytest
@@ -72,7 +73,10 @@ def make_weather_market(
     was trying to express. No assertion in this file changed.
     """
     if timestamp is None:
-        timestamp = datetime(2026, 3, 19, 12, 0, 0)
+        # Aware ET noon: MLWeather's window check reads NAIVE stamps as UTC
+        # (tape provenance — see _window_time_et), so synthetic in-window
+        # fixtures must be explicit about being ET.
+        timestamp = datetime(2026, 3, 19, 12, 0, 0, tzinfo=ZoneInfo("America/New_York"))
     return MarketData(
         symbol=symbol,
         timestamp=timestamp,
@@ -166,7 +170,9 @@ class TestMLWeatherStrategy:
 
     def test_outside_trading_hours(self):
         strat, _ = self._make_strategy()
-        md = make_weather_market(timestamp=datetime(2026, 3, 19, 8, 0, 0))
+        md = make_weather_market(
+            timestamp=datetime(2026, 3, 19, 8, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+        )
         assert strat.analyze(md) == []
 
 

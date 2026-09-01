@@ -9,8 +9,9 @@ Sprint 3, Task 3.3 of Money Printer V2.
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from src.core.bracket_payoff import (
     BracketSpecError,
@@ -27,6 +28,27 @@ logger = logging.getLogger(__name__)
 # FR-0.4 reason code, shared with weather_strategy: the API did not give us
 # this market's bracket semantics, so we skip it loudly instead of silently.
 REJECT_NO_BRACKET_SPEC = "BRACKET_SPEC_UNAVAILABLE"
+
+# The trading window and ticker dates are ET-anchored (see the ET constant in
+# weather_strategy.py for the UTC-container failure this guards against).
+ET = ZoneInfo("America/New_York")
+
+
+def _window_time_et(ts: Optional[datetime]) -> datetime:
+    """The instant to window-check, expressed in ET.
+
+    - ``None`` (live tick without a stamp): the wall clock, in ET.
+    - tz-aware (frozen-clock tests, future providers): converted to ET.
+    - naive (harvested-tape replays): interpreted as UTC — both the VM-era
+      and maia harvesters run TZ=UTC, so naive tape stamps are UTC wall
+      clock. A naive stamp from a non-UTC dev host will be misread; pass
+      aware stamps for local experiments.
+    """
+    if ts is None:
+        return datetime.now(ET)
+    if ts.tzinfo is not None:
+        return ts.astimezone(ET)
+    return ts.replace(tzinfo=timezone.utc).astimezone(ET)
 
 # City configuration (aligned with weather_strategy.py)
 CITY_CONFIG = {
@@ -73,7 +95,7 @@ class MLWeatherStrategy(Strategy):
         return None
 
     def _hours_until_settlement(self, symbol: str, now: datetime = None) -> float:
-        now = now or datetime.now()
+        now = now or datetime.now(ET)
         today_str = now.strftime("%y%b%d").upper()
         if today_str in symbol:
             settlement = now.replace(hour=23, minute=59, second=0)
@@ -109,8 +131,8 @@ class MLWeatherStrategy(Strategy):
         return attach_spec_to_signals(self._analyze(market_data), market_data)
 
     def _analyze(self, market_data: MarketData) -> List[TradeSignal]:
-        # Only trade 10 AM – 2 PM (use data timestamp when available)
-        check_time = market_data.timestamp or datetime.now()
+        # Only trade 10:00-13:59 ET (data timestamp when available, else now)
+        check_time = _window_time_et(market_data.timestamp)
         if not (10 <= check_time.hour < 14):
             return []
 

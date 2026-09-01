@@ -1,6 +1,7 @@
 import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from src.core.bracket_payoff import (
     BracketSpecError,
@@ -16,6 +17,14 @@ from src.utils.logger import logger
 # semantics". A silent ``return []`` here is exactly the failure mode Phase 0
 # was built to eliminate, so the skip is always logged once, at INFO.
 REJECT_NO_BRACKET_SPEC = "BRACKET_SPEC_UNAVAILABLE"
+
+# Kalshi weather tickers, settlement, and the trading window are ET-anchored.
+# The window/date checks below must NOT use the host's naive wall clock: the
+# sandbox container is pinned TZ=UTC, where a naive "10 <= hour < 14" check
+# silently becomes 06:00-09:59 ET and the strategy never trades (found
+# 2026-09-01, first day the check was live — same failure class as the
+# HANDOFF timezone warning).
+ET = ZoneInfo("America/New_York")
 
 
 def distance_to_yes_band(value: float, lo: float, hi: float) -> float:
@@ -170,13 +179,13 @@ class WeatherArbitrageStrategyV2(Strategy):
         NWS CLI records from 12:00 AM to 11:59 PM LST (Local Standard Time).
         During DST, this means settlement is at 1:00 AM local DAYLIGHT time.
         """
-        now = datetime.now()
+        now = datetime.now(ET)
 
-        # Check if symbol is for today
+        # Check if symbol is for today (ticker dates are ET)
         today_str = now.strftime("%y%b%d").upper()
         if today_str in symbol:
             # Settlement at midnight LST = 1AM during DST
-            # Simplified: assume settlement at 11:59 PM local
+            # Simplified: assume settlement at 11:59 PM ET
             settlement = now.replace(hour=23, minute=59, second=0, microsecond=0)
             delta = settlement - now
             return max(0.0, delta.total_seconds() / 3600)
@@ -233,8 +242,9 @@ class WeatherArbitrageStrategyV2(Strategy):
         return attach_spec_to_signals(self._analyze(market_data), market_data)
 
     def _analyze(self, market_data: MarketData) -> List[TradeSignal]:
-        # 0. Warmup Period (Don't trade before 10 AM)
-        if not (10 <= datetime.now().hour < 14):
+        # 0. Warmup Period: trade only 10:00-13:59 ET (exchange time — never
+        # the host clock; see the ET constant's comment).
+        if not (10 <= datetime.now(ET).hour < 14):
             return []
 
         signals = []
@@ -293,7 +303,7 @@ class WeatherArbitrageStrategyV2(Strategy):
             return []
 
         band_lo, band_hi = yes_bounds(spec)
-        today_str = datetime.now().strftime("%y%b%d").upper()
+        today_str = datetime.now(ET).strftime("%y%b%d").upper()
         is_today = today_str in symbol
 
         # 4. Calculate Confidence and Timing

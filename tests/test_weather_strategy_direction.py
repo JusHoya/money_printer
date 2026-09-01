@@ -49,6 +49,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -60,10 +61,12 @@ from src.core.interfaces import MarketData  # noqa: E402
 from src.strategies.ml_weather import MLWeatherStrategy  # noqa: E402
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2  # noqa: E402
 
-# 11:30 local on 2026-07-25 — inside both strategies' 10:00-14:00 trade window,
+# 11:30 ET on 2026-07-25 — inside both strategies' 10:00-13:59 ET trade window
+# (the window is exchange-time since the 2026-09-01 UTC-container fix; a naive
+# instant here would be misread as UTC by ml_weather's tape-stamp handling),
 # and the date the live contracts below expire on, so ``is_today`` is true and
 # the winner/lost guards are exercised rather than skipped.
-FROZEN_NOW = datetime(2026, 7, 25, 11, 30, 0)
+FROZEN_NOW = datetime(2026, 7, 25, 11, 30, 0, tzinfo=ZoneInfo("America/New_York"))
 DATE_CODE = FROZEN_NOW.strftime("%y%b%d").upper()  # "26JUL25"
 
 
