@@ -81,6 +81,21 @@ def _read_json_file(path):
         return json.dumps({"ok": False, "error": str(e)})
 
 
+def _api_get_json(path):
+    """GET a dashboard API path and return the parsed body, or None.
+
+    Remote-deployment fallback: when the sandbox runs on another host
+    (MONEY_PRINTER_URL=http://maia.local:8050), its data files are not on
+    this filesystem, but the dashboard serves them — see src/web/server.py.
+    """
+    try:
+        r = requests.get(f"{DASHBOARD_URL}{path}", timeout=TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+
 # ── Tool implementations ─────────────────────────────────────────
 
 
@@ -119,6 +134,10 @@ def get_data_log(params):
 
 def get_training_state(params):
     """ML training state: cycle count, cycle history, diagnostics."""
+    if not os.path.exists(TRAINING_STATE_PATH):
+        body = _api_get_json("/api/training")
+        if body is not None:
+            return json.dumps(body)
     return _read_json_file(TRAINING_STATE_PATH)
 
 
@@ -141,12 +160,16 @@ def get_win_rates(params):
         with open(WIN_RATES_PATH) as f:
             raw = json.load(f)
     except FileNotFoundError:
-        return json.dumps(
-            {
-                "ok": False,
-                "error": f"File not found: {os.path.basename(WIN_RATES_PATH)}",
-            }
-        )
+        body = _api_get_json("/api/win_rates")
+        if body is not None and body.get("ok") and isinstance(body.get("data"), dict):
+            raw = body["data"]
+        else:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": f"File not found: {os.path.basename(WIN_RATES_PATH)}",
+                }
+            )
     except Exception as e:
         return json.dumps({"ok": False, "error": str(e)})
 
@@ -223,6 +246,12 @@ def read_trade_journal(params):
         trades = trades[-last_n:]
         return json.dumps({"ok": True, "count": len(trades), "trades": trades})
     except FileNotFoundError:
+        query = f"/api/journal?last_n={last_n}"
+        if strategy:
+            query += f"&strategy={strategy}"
+        body = _api_get_json(query)
+        if body is not None:
+            return json.dumps(body)
         return json.dumps({"ok": False, "error": "trade_journal.jsonl not found"})
     except Exception as e:
         return json.dumps({"ok": False, "error": str(e)})
@@ -254,6 +283,9 @@ def compute_rolling_stats(params):
                     if dt > cutoff:
                         trades.append(t)
         except FileNotFoundError:
+            body = _api_get_json(f"/api/stats/rolling?hours={hours}")
+            if body is not None:
+                return json.dumps(body)
             return json.dumps(
                 {
                     "ok": True,
@@ -353,6 +385,9 @@ def read_log_tail(params):
             reverse=True,
         )
         if not matches:
+            body = _api_get_json(f"/api/logs/tail?pattern={pattern}&lines={n_lines}")
+            if body is not None:
+                return json.dumps(body)
             return json.dumps(
                 {"ok": False, "error": f"No files matching '{pattern}' in logs/"}
             )
