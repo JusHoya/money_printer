@@ -29,3 +29,7 @@ websocket-client>=1.9
 # Model FILES (xgboost/joblib) are not shipped; if a cleared strategy ever
 # needs on-Pi inference, add xgboost+joblib here deliberately.
 ta>=0.11
+
+# run_web_dashboard -> run_dashboard -> visualization.dashboard -> mascot
+# sprite chain imports PIL at module load.
+pillow
