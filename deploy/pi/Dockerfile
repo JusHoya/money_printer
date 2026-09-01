@@ -34,7 +34,7 @@ USER 1000:1000
 ENV PYTHONPATH=/app
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# Feed-only harvester + dashboard, same workload the VM ran 24/7.
-# Swap the command to scripts/run_sandbox.py when a strategy is cleared for
-# paper trading (see deploy/pi/docker-compose.yml comments).
+# Bare-image default only: deploy/pi/docker-compose.yml overrides this with
+# the same command using ${SIM_BALANCE:-3000}, so balance changes need no
+# rebuild. Keep the two in sync.
 CMD ["python", "scripts/run_web_dashboard.py", "--auto-cycle", "--sim-balance", "3000", "--no-browser", "--host", "0.0.0.0"]

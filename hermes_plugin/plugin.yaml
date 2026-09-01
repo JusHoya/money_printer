@@ -1,10 +1,13 @@
 name: money-printer
-version: 2.0.0
+version: 2.1.0
 description: >
   Monitor and control the Money Printer Kalshi trading sandbox: portfolio
   snapshots, trade journal, rolling stats, win rates, logs, and bot
-  start/stop. Works co-located or against a remote sandbox via
-  MONEY_PRINTER_URL (file-reading tools fall back to the dashboard HTTP API).
+  start/stop (weather, gas, mention, crypto_annual). Works co-located or
+  against a remote sandbox via MONEY_PRINTER_URL (file-reading tools fall
+  back to the dashboard HTTP API). If the sandbox sets MP_CONTROL_TOKEN,
+  set the same value in this agent's environment — the two POST control
+  tools send it as X-MP-Token (optional; GET tools never need it).
 provides_tools:
   - mp_status
   - mp_bots

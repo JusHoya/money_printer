@@ -69,6 +69,7 @@ class RejectReason:
     MAX_POSITIONS = "MAX_POSITIONS"
     CORRELATION_LIMIT = "CORRELATION_LIMIT"
     WEATHER_ALLOCATION = "WEATHER_ALLOCATION"
+    MENTION_ALLOCATION = "MENTION_ALLOCATION"
 
 
 def log_rejection(reason: str, strategy: str = "", symbol: str = "", **context):
@@ -505,13 +506,24 @@ class RiskManager:
         total = 0.0
         for p in self.exchange.positions:
             sym = p["symbol"].upper()
-            is_crypto = "BTC" in sym or "ETH" in sym
-            is_weather = "HIGH" in sym or "PRECIP" in sym or "TEMP" in sym
+            # Mention is decided FIRST and excludes the others: the last ticker
+            # segment of a KX*MENTION market is an arbitrary word
+            # (KXTRUMPMENTION-26AUG27-ETHEREUM), so a word-suffix collision
+            # with "ETH"/"TEMP" must not misfile the position. KXBTCY/KXETHY
+            # annual ladders land in crypto via the existing "BTC"/"ETH"
+            # substrings.
+            is_mention = "MENTION" in sym
+            is_crypto = not is_mention and ("BTC" in sym or "ETH" in sym)
+            is_weather = not is_mention and (
+                "HIGH" in sym or "PRECIP" in sym or "TEMP" in sym
+            )
 
             match = False
             if category == "crypto" and is_crypto:
                 match = True
             elif category == "weather" and is_weather:
+                match = True
+            elif category == "mention" and is_mention:
                 match = True
             elif category is None:
                 match = True
@@ -759,6 +771,25 @@ class RiskManager:
                     exposure=current_weather,
                     cost=proposed_cost,
                     max=max_weather,
+                    **sig_ctx,
+                )
+                return False
+
+        # 5.5 Mention bucket (20%) — mirrors the weather bucket, sized smaller
+        # because the mention engine is unproven (no backtest artifact exists).
+        # Wired ahead of any MENTION_TRADING_ENABLED flip so activation is
+        # already risk-bounded on day one, not bounded retroactively.
+        if category == "mention":
+            max_mention = self.balance * 0.20
+            current_mention = self.get_current_exposure(category="mention")
+            if (current_mention + proposed_cost) > max_mention:
+                log_rejection(
+                    RejectReason.MENTION_ALLOCATION,
+                    strat,
+                    symbol,
+                    exposure=current_mention,
+                    cost=proposed_cost,
+                    max=max_mention,
                     **sig_ctx,
                 )
                 return False

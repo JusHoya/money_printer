@@ -5,6 +5,7 @@ the TUI Dashboard (for alerts/logs/strategy stats), bypassing the TUI render pat
 """
 
 import csv
+import glob
 import os
 import time
 from collections import deque
@@ -24,10 +25,21 @@ def _fmt_uptime(start_time: datetime) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def _detect_mode() -> str:
-    """Return 'sandbox' if demo API, else 'live'."""
+def _detect_mode(orchestrator) -> str:
+    """Runtime mode shown in the dashboard header.
+
+    'paper'   — the Kalshi provider is read-only (always true today: the
+                orchestrator constructs KalshiProvider with read_only=True and
+                place_order raises), regardless of which API URL it reads from.
+    'sandbox' — read-only AND the demo API URL is configured.
+    'live'    — ONLY if a provider with read_only=False exists. Structurally
+                impossible in this codebase; kept so a regression is visible.
+    """
+    kalshi = getattr(orchestrator, "kalshi", None)
+    if kalshi is not None and getattr(kalshi, "read_only", True) is False:
+        return "live"
     api_url = os.getenv("KALSHI_API_URL", "")
-    return "sandbox" if "demo" in api_url.lower() else "live"
+    return "sandbox" if "demo" in api_url.lower() else "paper"
 
 
 class StateManager:
@@ -39,7 +51,9 @@ class StateManager:
     def __init__(self, orchestrator):
         self._orch = orchestrator
         self._pnl_history: deque = deque(maxlen=500)
-        self._mode = _detect_mode()
+        self._mode = _detect_mode(orchestrator)
+        self._last_known_pnl = 0.0
+        self._seed_pnl_history()
 
     # ------------------------------------------------------------------
     # Public API
@@ -55,9 +69,12 @@ class StateManager:
         equity = portfolio.get("equity", 0.0)
         self._pnl_history.append({"ts": time.time(), "equity": equity})
 
-        # Log portfolio CSV (normally done by TUI render loop)
-        if dashboard and rm:
-            dashboard.log_portfolio(rm)
+        # Drive the mascot exactly as the TUI render path does — the web
+        # entrypoint never calls Dashboard.render(), so without this the
+        # browser mascot is permanently IDLE. set_state owns the 2s cooldown.
+        # (The portfolio CSV write that used to happen here moved to the
+        # market loop: snapshot() must be side-effect free on disk.)
+        self._update_mascot(dashboard, rm)
 
         return {
             "mode": self._mode,
@@ -205,6 +222,23 @@ class StateManager:
         except Exception:
             return []
 
+    def _update_mascot(self, dashboard, rm) -> None:
+        """Feed the mascot the same inputs Dashboard.render() computes:
+        daily PnL, PnL change since the last snapshot, open-position count."""
+        if dashboard is None or rm is None:
+            return
+        mascot = getattr(dashboard, "mascot", None)
+        if mascot is None:
+            return
+        try:
+            current_pnl = rm.daily_pnl
+            pnl_change = current_pnl - self._last_known_pnl
+            self._last_known_pnl = current_pnl
+            has_open = len(rm.exchange.positions) > 0
+            mascot.set_state(pnl_change, current_pnl, has_open_trades=has_open)
+        except Exception:
+            pass  # a mascot glitch must never break the snapshot
+
     def _mascot_state(self, dashboard) -> str:
         if dashboard is None:
             return "IDLE"
@@ -212,3 +246,54 @@ class StateManager:
         if mascot is None:
             return "IDLE"
         return getattr(mascot, "state", "IDLE")
+
+    def _seed_pnl_history(self) -> None:
+        """Rehydrate the equity chart from prior sessions' portfolio CSVs so
+        the card is not empty after a restart. The startup/cycle/shutdown
+        sweeps move those CSVs into <log_dir>/_archive/<...>/, so the archive
+        is globbed too, deduped by basename (the live log_dir copy wins, and
+        a session duplicated across archive subdirs counts once). Rows are
+        written by the market loop at a fixed cadence; newest files win,
+        capped at the deque maxlen. Best-effort: any unreadable file or row
+        is skipped silently."""
+        dashboard = getattr(self._orch, "dashboard", None)
+        log_dir = getattr(dashboard, "log_dir", None) if dashboard else None
+        if not isinstance(log_dir, str):
+            return
+        try:
+            by_name = {}
+            for path in sorted(
+                glob.glob(
+                    os.path.join(log_dir, "_archive", "**", "portfolio_*.csv"),
+                    recursive=True,
+                )
+            ):
+                by_name[os.path.basename(path)] = path
+            for path in glob.glob(os.path.join(log_dir, "portfolio_*.csv")):
+                by_name[os.path.basename(path)] = path
+            paths = sorted(
+                by_name.values(),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+        except Exception:
+            return
+        maxlen = self._pnl_history.maxlen or 500
+        rows = []
+        for path in paths:
+            if len(rows) >= maxlen:
+                break
+            try:
+                with open(path, "r", encoding="utf-8", newline="") as f:
+                    for r in csv.DictReader(f):
+                        try:
+                            ts = datetime.fromisoformat(r["Timestamp"]).timestamp()
+                            rows.append({"ts": ts, "equity": float(r["Equity"])})
+                        except (KeyError, TypeError, ValueError):
+                            continue
+            except Exception:
+                continue
+        if not rows:
+            return
+        rows.sort(key=lambda x: x["ts"])
+        self._pnl_history.extend(rows[-maxlen:])

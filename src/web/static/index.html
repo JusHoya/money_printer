@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Money Printer Dashboard</title>
+  <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css" />
   <link rel="stylesheet" href="/static/css/dashboard.css" />
 </head>
 <body>
@@ -15,8 +16,10 @@
   <header id="header-bar">
     <div class="header-left">
       <span id="app-title">Money Printer</span>
-      <canvas id="mascot-canvas" width="32" height="32" title="Mr. Krabs"></canvas>
-      <span id="mascot-state">IDLE</span>
+      <div id="mascot-wrap">
+        <canvas id="mascot-canvas" width="32" height="32" title="Mr. Krabs"></canvas>
+      </div>
+      <span id="mascot-state" class="state-idle">IDLE</span>
     </div>
 
     <div class="header-center">
@@ -25,6 +28,7 @@
     </div>
 
     <div class="header-right">
+      <button id="theme-toggle" title="Toggle light/dark theme" onclick="toggleTheme()">LIGHT</button>
       <div id="ws-dot" title="WebSocket connection"></div>
       <span id="mode-pill" class="sandbox">
         <span class="pill-dot"></span>
@@ -98,10 +102,19 @@
       <div class="card" id="chart-card">
         <div class="card-header">
           <span class="card-title">Equity Curve</span>
-          <span class="card-badge" id="chart-range">Live</span>
+          <div class="chart-header-right">
+            <span id="chart-status"></span>
+            <div class="range-tabs" id="chart-range-tabs">
+              <button class="range-tab active" data-range="live">LIVE</button>
+              <button class="range-tab" data-range="1">1H</button>
+              <button class="range-tab" data-range="24">24H</button>
+              <button class="range-tab" data-range="168">7D</button>
+              <button class="range-tab" data-range="all">ALL</button>
+            </div>
+          </div>
         </div>
         <div class="card-body">
-          <canvas id="pnl-chart"></canvas>
+          <div id="pnl-chart"></div>
         </div>
       </div>
 
@@ -157,6 +170,53 @@
               <tr><td colspan="7" class="empty-state">No signals yet</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Rolling Stats (GET /api/stats/rolling) -->
+      <div class="card" id="rolling-card">
+        <div class="card-header">
+          <span class="card-title">Rolling Stats</span>
+          <div class="range-tabs" id="rolling-range-tabs">
+            <button class="range-tab active" data-hours="24">24H</button>
+            <button class="range-tab" data-hours="168">7D</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="stat-tiles" id="rolling-tiles">
+            <div class="stat-tile">
+              <div class="stat-label">Total PnL</div>
+              <div class="stat-value neu" id="rs-pnl">--</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Win Rate</div>
+              <div class="stat-value neu" id="rs-winrate">--</div>
+              <div class="stat-sub" id="rs-wl">0W / 0L</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Trades</div>
+              <div class="stat-value neu" id="rs-trades">--</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Avg EV / Trade</div>
+              <div class="stat-value neu" id="rs-ev">--</div>
+            </div>
+          </div>
+          <div id="rolling-strat-wrap">
+            <table class="data-table data-table-slim" id="rolling-table">
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th class="col-num">Trades</th>
+                  <th>Win Rate</th>
+                  <th class="col-num">PnL</th>
+                </tr>
+              </thead>
+              <tbody id="rolling-strat-tbody">
+                <tr><td colspan="4" class="empty-state">No trades in window</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -235,23 +295,77 @@
   </main><!-- /#main-grid -->
 
   <!-- ================================================================== -->
-  <!-- FOOTER — future extension placeholders (hidden by default)         -->
+  <!-- FOOTER — collapsible tool drawers                                  -->
   <!-- ================================================================== -->
   <footer id="footer-area">
-    <div id="ml-training-section">
-      <div class="card-title" style="margin-bottom:8px;">ML Training</div>
-      <p style="color:var(--text-muted);font-size:12px;">Training module not loaded.</p>
+
+    <!-- Trade Journal browser (GET /api/journal) -->
+    <div class="card drawer" id="journal-card">
+      <button class="drawer-toggle" id="journal-toggle" onclick="toggleJournalDrawer()">
+        <span class="card-title">Trade Journal</span>
+        <span class="card-badge" id="journal-count">0</span>
+        <span class="chevron">&#9660;</span>
+      </button>
+      <div class="drawer-body" id="journal-body" hidden>
+        <div class="drawer-controls">
+          <label class="drawer-label" for="journal-filter">Strategy</label>
+          <select id="journal-filter" onchange="onJournalFilterChange()">
+            <option value="">All strategies</option>
+          </select>
+          <button class="pg-btn" onclick="fetchJournal()">Refresh</button>
+          <span class="drawer-spacer"></span>
+          <button class="pg-btn" id="journal-prev" onclick="journalPage(-1)">&#8249; Prev</button>
+          <span id="journal-page-label" class="drawer-label">Page 1/1</span>
+          <button class="pg-btn" id="journal-next" onclick="journalPage(1)">Next &#8250;</button>
+        </div>
+        <div id="journal-table-wrap">
+          <table class="data-table" id="journal-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th class="col-num">Qty</th>
+                <th class="col-num">Entry</th>
+                <th class="col-num">Exit</th>
+                <th class="col-num">PnL</th>
+                <th class="col-num">Cum PnL</th>
+                <th>Strategy</th>
+              </tr>
+            </thead>
+            <tbody id="journal-tbody">
+              <tr><td colspan="9" class="empty-state">Open the drawer to load trades</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <div id="test-harness-section">
-      <div class="card-title" style="margin-bottom:8px;">Test Harness</div>
-      <p style="color:var(--text-muted);font-size:12px;">Test harness not loaded.</p>
+
+    <!-- Log Viewer (GET /api/logs/tail) -->
+    <div class="card drawer" id="logview-card">
+      <button class="drawer-toggle" id="logview-toggle" onclick="toggleLogViewerDrawer()">
+        <span class="card-title">Log Viewer</span>
+        <span class="card-badge" id="logview-file">--</span>
+        <span class="chevron">&#9660;</span>
+      </button>
+      <div class="drawer-body" id="logview-body" hidden>
+        <div class="drawer-controls">
+          <label class="drawer-label" for="logview-pattern">Pattern</label>
+          <input type="text" id="logview-pattern" value="*.log" spellcheck="false"
+                 onkeydown="if(event.key==='Enter')fetchLogTail()" />
+          <button class="pg-btn" onclick="fetchLogTail()">Fetch</button>
+          <span class="drawer-label" id="logview-status"></span>
+        </div>
+        <pre id="logview-output">No log loaded.</pre>
+      </div>
     </div>
+
   </footer>
 
 </div><!-- /#app -->
 
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- uPlot (vendored — no CDN; the Pi host has no guaranteed internet) -->
+<script src="/static/vendor/uplot/uPlot.iife.min.js"></script>
 <!-- App scripts -->
 <script src="/static/js/mascot.js"></script>
 <script src="/static/js/app.js"></script>

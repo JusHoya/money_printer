@@ -4,18 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Start with [`HANDOFF.md`](HANDOFF.md).** As of 2026-08-22 the project has taken
 > **two consecutive HALT verdicts** — weather (Phase 2, 2026-07-26) and AAA gas
-> (Phase 4, 2026-07-30) — so **no strategy is currently cleared to trade** and
+> (Phase 4, 2026-07-30) — so **no strategy is cleared to trade live capital** and
 > `PRD.md` has no third engine. The Google Cloud VM was archived and stopped on
 > 2026-08-22; its data lives in `vm_snapshot_2026_08_22/` (see that folder's
 > `MANIFEST.md`). `HANDOFF.md` records what is dead, what is proven, and the open
 > decision — read it before acting on the roadmap in `PRD.md`, which describes a
 > path whose Phase 3 and Phase 5 are downstream of a proceed decision that never came.
+>
+> **2026-09-01 update**: sandbox **paper** trading was re-enabled for weather
+> (`WEATHER_TRADING_ENABLED = True` — simulated fills only; live capital stays
+> structurally impossible via `read_only=True`), and two new **feed-only**
+> harvesters were added (`mention`, `crypto_annual`). The screening evidence and
+> kill criteria are in `docs/MARKETS_EXPANSION_2026_09.md`; the milestone plan
+> awaiting ratification is `docs/REVIVAL_2026_09.md`.
 
 ## What This Is
 
 Money Printer is an algorithmic trading system for the **Kalshi** prediction market. It fetches live data (weather forecasts, market orderbooks), runs trading strategies against that data, and manages simulated/demo positions with full risk management. The goal is paper-trading validation before any real capital deployment.
 
-**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/` — gitignored, no longer on disk; conclusions survive in PRD/HANDOFF/reports) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. TWO feed-only bots are registered post-Phase-4: `weather` and `gas` (both gated off trading by module-level flags). `PRD.md` drives all pivot work; `deploy/README.md` describes the 2026-09 split deployment onto the Pleiades home cluster (sandbox on maia/Pi 4, Hermes agent + offline lab on alcyone/DGX Spark).
+**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/` — gitignored, no longer on disk; conclusions survive in PRD/HANDOFF/reports) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. FOUR bots are registered as of 2026-09-01: `weather` (paper trading ON in the sandbox — simulated fills, read-only creds), `gas` (feed-only, gated off by its module flag), and the feed-only harvesters `mention` (Kalshi mention markets) and `crypto_annual` (KXBTCY/KXETHY year-end ladders). `PRD.md` drives all pivot work; `docs/MARKETS_EXPANSION_2026_09.md` records the 2026-09 market screening; `deploy/README.md` describes the 2026-09 split deployment onto the Pleiades home cluster (sandbox on maia/Pi 4, Hermes agent + offline lab on alcyone/DGX Spark).
 
 ## Commands
 
@@ -62,9 +69,12 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`src/bots/`** — Bot implementations:
 - `base.py`: Bot ABC defining `setup()`, `tick()`, `get_symbols()`
-- `registry.py`: Bot registry for CLI `--bot` selection — registers `weather` and `gas` (both feed-only) post-teardown
-- `mixins.py`: `SignalProcessorMixin` — shared signal processing logic (risk check → execution)
-- `weather_bot.py`: The only concrete bot. Feed-only: `WEATHER_TRADING_ENABLED = False` gates the strategy waterfall; price/data feeds still run. (Crypto bots deleted 2026-07-24, PRD FR-0.1.)
+- `registry.py`: Bot registry for CLI `--bot` selection — registers `weather`, `gas`, `mention`, `crypto_annual` (see `src/bots/__init__.py`)
+- `mixins.py`: `SignalProcessorMixin` — shared signal processing logic (risk check → execution); category detection covers weather/crypto/mention buckets
+- `weather_bot.py`: Paper trading ON since 2026-09-01 (`WEATHER_TRADING_ENABLED = True` — simulated fills through the full risk/EV/Kelly gauntlet; live capital impossible via `read_only=True`). (Crypto bots deleted 2026-07-24, PRD FR-0.1.)
+- `gas_bot.py`: Feed-only KXAAAGASM/W harvester (`GAS_TRADING_ENABLED = False`, bound to the Phase 4 HALT).
+- `mention_bot.py`: Feed-only Kalshi mention-market harvester (`MENTION_TRADING_ENABLED = False`; series via `MENTION_SERIES` env, capped).
+- `crypto_annual_bot.py`: Feed-only KXBTCY/KXETHY year-end ladder harvester (`CRYPTO_ANNUAL_TRADING_ENABLED = False`; the API-reported zero fee multiplier is treated as unverified).
 
 **`src/core/risk_manager.py` — RiskManager**: Enforces capital preservation rules (max risk per trade, daily drawdown limits, per-strategy drawdown, portfolio exposure caps, trade interval throttling, loss cooldown per symbol). Owns a `SimulatedExchange` instance and syncs balance via `_on_trade_close` callback.
 
@@ -78,15 +88,19 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`src/data/nws_provider.py`**: Fetches weather observations from National Weather Service stations.
 
+**`src/data/x_provider.py`**: Official X API v2 timeline poller (feed-only, disabled by default via `X_FEED_ENABLED`; nothing in the runtime constructs it yet). Cost model and Kalshi TWEETS-settlement notes in its docstring.
+
 ### Strategies (`src/strategies/`)
-- **weather_strategy.py**: V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction. Phase 1-3 rebuild target; currently not trading (feed-only flag in `weather_bot.py`).
-- **ml_weather.py**: ML-driven weather bracket strategy. Phase 1-3 rebuild target; currently not trading.
+- **weather_strategy.py**: V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction. Paper-trading in the sandbox since 2026-09-01 (10:00–13:59 ET window, ≥2.0F edge, full risk gauntlet).
+- **ml_weather.py**: ML-driven weather bracket strategy. Paper-trading alongside V2 when models are on disk; silently degrades to V2-only when `ModelPredictor` is unavailable.
+- **mention_strategy.py**: Base-rate mention-market scaffold — inert until `data/mention_base_rates.json` exists AND `MENTION_TRADING_ENABLED` flips; activation path in its docstring.
 - **counter_trade.py**: `CounterTradeAnalyzer` — LOG-ONLY hedge analyzer still invoked by the orchestrator's market loop.
 - **latency_arb.py**: MOTHBALLED (2026-07-24, PRD §4 A2) — kept on disk, unregistered, not-for-capital. See its header for revival preconditions (websocket feeds, <1s loop, maker/IOC, realistic fills, ≥200 paper trades).
 - All crypto strategies (`crypto_strategy.py`, `ml_btc_15m.py`, `ml_btc_hourly.py`, `longshot_fader_v2.py`, `cross_spread_arb.py`) were **deleted** in the Phase 0 teardown.
 
-### Dashboard (`src/visualization/dashboard.py`)
-Real-time terminal UI showing PnL, market feeds, strategy signals, and position tracking.
+### Dashboards
+- **Terminal** (`src/visualization/dashboard.py`): TUI showing PnL, market feeds, strategy signals, and position tracking; also owns the harvested CSV tape writers.
+- **Web** (`src/web/` + `scripts/run_web_dashboard.py`): FastAPI + vanilla-JS dashboard (modernized 2026-09-01) — 1 Hz WebSocket snapshots, vendored uPlot equity chart with history range tabs (`/api/portfolio_history`), rolling-stats/journal/log panels, light+dark themes, live Mr. Krabs mascot, side-effect-free `/healthz` with harvester-liveness check, optional `MP_CONTROL_TOKEN` gate on bot start/stop. This is what runs in the maia sandbox container.
 
 ## Environment Setup
 Copy `.env.example` to `.env` and fill in Kalshi demo API credentials and NWS user-agent. The private key file (`kalshi_priv.key` or path in `KALSHI_PRIVATE_KEY_PATH`) must exist for Kalshi API auth.

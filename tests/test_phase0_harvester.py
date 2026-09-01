@@ -396,6 +396,12 @@ def _make_bot(ladder, orderbook=None):
     bot.name = "Weather"
     bot.ticker_cache = {}
     bot._last_depth_snapshot = 0.0
+    # 2026-09-01: WEATHER_TRADING_ENABLED is True, so tick() runs the strategy
+    # waterfall; these harvest-path tests exercise it with no-signal strategies.
+    bot.strategies = {
+        "ml_weather": MagicMock(analyze=MagicMock(return_value=[])),
+        "weather": MagicMock(analyze=MagicMock(return_value=[])),
+    }
     # PRD FR-1.4: cities are the authoritative config; NY observes KNYC
     # (Central Park), the station Kalshi settles KXHIGHNY on — not KJFK.
     bot.CITIES = (CITY_CONFIG["NY"],)  # single city keeps tests fast

@@ -3,8 +3,9 @@
 #
 # State lives OUTSIDE the SD card: bind-mounts under /srv/money_printer,
 # which bootstrap_maia.sh places on USB-SSD storage when one is present.
-# The container is feed-only until a strategy clears its sandbox gate —
-# the same posture the GCE VM held for its entire 152-day life.
+# Weather paper-trades in the sandbox (2026-09 activation, see
+# docs/MARKETS_EXPANSION_2026_09.md); mention and crypto_annual are feed-only
+# harvesters. All execution is SimulatedExchange — read-only Kalshi creds.
 
 name: money-printer
 
@@ -16,24 +17,45 @@ services:
     image: money-printer-sandbox:latest
     container_name: mp-sandbox
     restart: unless-stopped
+    # Mirrors the Dockerfile CMD but interpolates SIM_BALANCE at `up` time, so
+    # M2's $500 run needs no image rebuild:
+    #   SIM_BALANCE=500 docker compose -f deploy/pi/docker-compose.yml up -d
+    command:
+      [
+        "python", "scripts/run_web_dashboard.py",
+        "--auto-cycle",
+        "--sim-balance", "${SIM_BALANCE:-3000}",
+        "--no-browser",
+        "--host", "0.0.0.0"
+      ]
     environment:
       TZ: UTC
+    # /srv/money_printer/.env carries the runtime secrets and feature envs:
+    # Kalshi read-only creds, NWS_USER_AGENT, DISCORD_WEBHOOK_URL, and the
+    # 2026-09 additions — MP_CONTROL_TOKEN (gates POST /api/bots/*/start|stop),
+    # MENTION_SERIES, X_FEED_ENABLED, X_BEARER_TOKEN, X_TRACK_HANDLES.
+    # See .env.example for what each does.
     env_file:
       - /srv/money_printer/.env
     ports:
-      # LAN-only exposure is enforced at the router/firewall level; Hermes on
-      # alcyone reaches this at http://maia.local:8050 (mp_* plugin tools).
-      - "8050:8050"
+      # LAN-only exposure (pleiades trust boundary F1: never port-forward
+      # :8050 off the LAN). Hermes on alcyone reaches this at
+      # http://maia.local:8050 (mp_* plugin tools). Set MAIA_BIND_IP to the
+      # Pi's LAN address to pin the bind to one interface.
+      - "${MAIA_BIND_IP:-0.0.0.0}:8050:8050"
     volumes:
       - /srv/money_printer/data:/app/data
       - /srv/money_printer/logs:/app/logs
       - /srv/money_printer/kalshi_priv.key:/app/kalshi_priv.key:ro
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8050/api/status"]
+      # /healthz is side-effect free; /api/status wrote a CSV row per probe.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8050/healthz"]
       interval: 60s
       timeout: 10s
       retries: 5
       start_period: 120s
+    labels:
+      autoheal: "true"
     logging:
       driver: json-file
       options:
@@ -42,3 +64,16 @@ services:
     # Pi 4 headroom: leave RAM for the OS; the VM ran this workload in <8GB.
     mem_limit: 2500m
     cpus: 3.0
+
+  # Plain Docker never restarts an unhealthy-but-alive container; autoheal
+  # watches the healthcheck above and restarts anything labeled autoheal=true.
+  # Closes the hung-harvester gap the VM watchdog used to cover. arm64 image.
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: mp-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      TZ: UTC
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

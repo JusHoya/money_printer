@@ -485,16 +485,17 @@ class TestBotStatusSummary:
             == "alpha=TRADING, beta=FEED-ONLY, gamma=DISABLED"
         )
 
-    def test_weather_bot_module_constant_maps_to_feed_only(self):
+    def test_weather_bot_module_constant_maps_to_trading(self):
         """The real weather bot exposes no attribute — its module-level
-        WEATHER_TRADING_ENABLED=False must map to FEED-ONLY."""
+        WEATHER_TRADING_ENABLED (True since the 2026-09-01 sandbox paper
+        activation) must map to TRADING."""
         from src.bots.weather_bot import WeatherBot
 
         bot = WeatherBot.__new__(WeatherBot)  # skip heavy __init__
         bot.name = "Weather"
         engine = _status_engine([bot], active={"Weather"})
-        assert engine._bot_status(bot) == "FEED-ONLY"
-        assert engine._bot_status_summary() == "Weather=FEED-ONLY"
+        assert engine._bot_status(bot) == "TRADING"
+        assert engine._bot_status_summary() == "Weather=TRADING"
 
     def test_every_registered_bot_appears_in_summary(self):
         bots = [_StubBot(f"bot{i}", trading_enabled=True) for i in range(3)]
@@ -626,7 +627,7 @@ class TestCycleRollover:
         env.engine._run_drawdown_cycle()
 
         record = env.engine.cycle_history[-1]
-        assert record["bot_status"] == "Weather=FEED-ONLY"
-        assert any("BOTS | Weather=FEED-ONLY" in a for a in env.engine.dashboard.alerts)
+        assert record["bot_status"] == "Weather=TRADING"
+        assert any("BOTS | Weather=TRADING" in a for a in env.engine.dashboard.alerts)
         # Risk manager was reset to the default sim balance.
         assert env.engine.risk_manager.balance_updates == [3000.0]

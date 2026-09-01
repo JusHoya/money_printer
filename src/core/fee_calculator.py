@@ -77,6 +77,29 @@ FEE_TYPE_STANDARD = "quadratic"
 #: API before trading it rather than relying on that default.
 KNOWN_MAKER_FEE_SERIES = frozenset({"KXAAAGASM"})
 
+#: Per-series fee multiplier (the API's ``series.fee_multiplier``), applied to
+#: BOTH the maker and taker quadratic before the ceil-to-cent. The schedule's
+#: documented default is 1.0, and any series absent from this map is billed at
+#: 1.0.
+#:
+#: Live-API findings (verified 2026-09-01):
+#:
+#: * The Mentions category (95 series, ``KX*MENTION``) reports
+#:   ``fee_type == "quadratic"`` with ``fee_multiplier == 1`` — the standard
+#:   schedule, so no entry is needed here (maker fee is $0 under the standard
+#:   schedule anyway).
+#: * ``KXBTCY`` / ``KXETHY`` (annual BTC/ETH range ladders) report
+#:   ``fee_multiplier == 0`` in the live API, which would make them literally
+#:   fee-free. That is UNVERIFIED by an actual trade, and a fee model that
+#:   understates cost is exactly the optimistic-EV failure mode behind both
+#:   HALT verdicts — so their entries stay at the conservative 1.0 until a
+#:   demo-API trade confirms the fill really books $0.00. Change an entry only
+#:   with that receipt.
+SERIES_FEE_MULTIPLIER = {
+    "KXBTCY": 1.0,  # API reports 0; unverified by a trade — kept conservative
+    "KXETHY": 1.0,  # API reports 0; unverified by a trade — kept conservative
+}
+
 #: Exit models for :func:`ev_after_fees`.
 EXIT_TRADE_OUT = "trade_out"
 EXIT_SETTLEMENT = "settlement"
@@ -129,6 +152,23 @@ def fee_type_for_symbol(symbol: str) -> str:
     return fee_type_for_series(series_ticker_from_symbol(symbol))
 
 
+def fee_multiplier_for_series(series_ticker: str) -> float:
+    """Return the ``fee_multiplier`` to bill a series at (default 1.0).
+
+    Looked up in :data:`SERIES_FEE_MULTIPLIER`; anything absent — including an
+    empty ticker from a symbol-less caller — bills at the schedule's documented
+    default of 1.0. See the map's docstring for why a live-API multiplier of 0
+    is not, on its own, grounds for an entry below 1.0.
+    """
+    ticker = (series_ticker or "").strip().upper()
+    return SERIES_FEE_MULTIPLIER.get(ticker, 1.0)
+
+
+def fee_multiplier_for_symbol(symbol: str) -> float:
+    """Return the ``fee_multiplier`` for a full market ticker (default 1.0)."""
+    return fee_multiplier_for_series(series_ticker_from_symbol(symbol))
+
+
 def _ceil_cents(raw_dollars: float) -> float:
     """Round a raw fee UP to the next cent, without the float-ULP overcharge.
 
@@ -143,25 +183,35 @@ def maker_fee(
     price: float,
     contracts: int = 1,
     series_fee_type: str = FEE_TYPE_STANDARD,
+    fee_multiplier: float = 1.0,
 ) -> float:
     """Compute maker fee in dollars (rounded up to nearest cent).
 
     Returns ``0.0`` for standard-schedule series, which is every series in the
     Phase 1–3 weather scope. Pass ``FEE_TYPE_WITH_MAKER_FEES`` (or the result of
     :func:`fee_type_for_series`) for a series that bills resting liquidity.
+    ``fee_multiplier`` (the API's per-series ``fee_multiplier``, via
+    :func:`fee_multiplier_for_symbol`) scales the quadratic before the ceil;
+    the default 1.0 leaves every existing call site's fee unchanged.
     """
     if series_fee_type != FEE_TYPE_WITH_MAKER_FEES:
         return 0.0
     if price <= 0 or price >= 1.0 or contracts <= 0:
         return 0.0
-    return _ceil_cents(MAKER_RATE * contracts * price * (1.0 - price))
+    return _ceil_cents(fee_multiplier * MAKER_RATE * contracts * price * (1.0 - price))
 
 
-def taker_fee(price: float, contracts: int = 1) -> float:
-    """Compute taker fee in dollars (rounded up to nearest cent)."""
+def taker_fee(
+    price: float, contracts: int = 1, fee_multiplier: float = 1.0
+) -> float:
+    """Compute taker fee in dollars (rounded up to nearest cent).
+
+    ``fee_multiplier`` scales the quadratic before the ceil (default 1.0, the
+    schedule's documented default — see :data:`SERIES_FEE_MULTIPLIER`).
+    """
     if price <= 0 or price >= 1.0 or contracts <= 0:
         return 0.0
-    return _ceil_cents(TAKER_RATE * contracts * price * (1.0 - price))
+    return _ceil_cents(fee_multiplier * TAKER_RATE * contracts * price * (1.0 - price))
 
 
 def compute_fee(
@@ -169,6 +219,7 @@ def compute_fee(
     contracts: int = 1,
     is_maker: bool = True,
     series_fee_type: str = FEE_TYPE_STANDARD,
+    fee_multiplier: float = 1.0,
 ) -> FeeResult:
     """Compute fee with full breakdown.
 
@@ -183,6 +234,10 @@ def compute_fee(
     series_fee_type : str
         The series' ``fee_type``. Only affects the maker path; the taker
         formula is uniform across series.
+    fee_multiplier : float
+        The series' ``fee_multiplier`` (via :func:`fee_multiplier_for_symbol`),
+        scaling both rate formulas. Defaults to the schedule's documented 1.0,
+        which every entry in :data:`SERIES_FEE_MULTIPLIER` currently also is.
 
     Returns
     -------
@@ -190,12 +245,12 @@ def compute_fee(
         Named tuple with ``fee``, ``per_contract``, ``rate_used``.
     """
     if is_maker:
-        total = maker_fee(price, contracts, series_fee_type)
-        per = maker_fee(price, 1, series_fee_type)
+        total = maker_fee(price, contracts, series_fee_type, fee_multiplier)
+        per = maker_fee(price, 1, series_fee_type, fee_multiplier)
         label = "maker"
     else:
-        total = taker_fee(price, contracts)
-        per = taker_fee(price, 1)
+        total = taker_fee(price, contracts, fee_multiplier)
+        per = taker_fee(price, 1, fee_multiplier)
         label = "taker"
     return FeeResult(fee=total, per_contract=per, rate_used=label)
 

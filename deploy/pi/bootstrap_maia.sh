@@ -78,6 +78,11 @@ if [ ! -f "$STATE_ROOT/.env" ]; then
   say "Seeding $STATE_ROOT/.env from template — FILL IT IN before compose up"
   cp "$REPO_DIR/.env.example" "$STATE_ROOT/.env"
   chmod 600 "$STATE_ROOT/.env"
+  echo "  Besides the Kalshi creds and NWS user-agent, review the 2026-09 envs:"
+  echo "    MP_CONTROL_TOKEN   — gates POST /api/bots/*/start|stop (set it; GETs stay open)"
+  echo "    MENTION_SERIES     — mention-market series the harvester tracks"
+  echo "    X_FEED_ENABLED / X_BEARER_TOKEN / X_TRACK_HANDLES — X provider (leave disabled"
+  echo "                         until the X API account exists; see .env.example)"
 fi
 if [ ! -f "$STATE_ROOT/kalshi_priv.key" ]; then
   echo "REMINDER: place the Kalshi RSA private key at $STATE_ROOT/kalshi_priv.key (chmod 600)."
@@ -87,10 +92,12 @@ fi
 say "Installing systemd reconcile timers"
 sudo cp "$REPO_DIR"/deploy/pi/systemd/mp-reconcile-*.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mp-reconcile-weather.timer mp-reconcile-settlement.timer
+for timer in "$REPO_DIR"/deploy/pi/systemd/mp-reconcile-*.timer; do
+  sudo systemctl enable --now "$(basename "$timer")"
+done
 systemctl list-timers 'mp-reconcile-*' --no-pager || true
 
 say "Done. Next:"
 echo "  1) Fill $STATE_ROOT/.env (Kalshi read-only creds, NWS user-agent, fresh Discord webhook)"
 echo "  2) cd $REPO_DIR && docker compose -f deploy/pi/docker-compose.yml up -d --build"
-echo "  3) curl -s http://localhost:8050/api/status | head -c 300"
+echo "  3) curl -s http://localhost:8050/healthz"

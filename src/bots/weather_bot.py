@@ -16,12 +16,16 @@ from src.utils.logger import logger
 import os
 
 
-# 2026-06-03 review (LEAN config): ML Weather (-$137 net/21d, ~60% of all fees)
-# and Meteorologist V2 (-$75 net, ~14% of fees) are net-negative fee bleeders.
-# Both weather strategies are disabled from live trading. Flip this flag back
-# to True to re-enable the weather waterfall. Data/price feeds still run.
-# PRD Phase 1 is feed-only by design; trading is re-enabled in Phase 3.
-WEATHER_TRADING_ENABLED = False
+# 2026-09-01 revival decision (revival/pleiades-2026-09): weather PAPER trading
+# is re-enabled on the sandbox to exercise the settlement leg through the
+# simulator — the one path HANDOFF.md §2 flags as untested against live data
+# ("No weather position has ever been opened") — and to generate real PnL/
+# time-history for the dashboard. This is NOT a reversal of the Phase 2 HALT:
+# no capital verdict changed, and live capital remains structurally impossible
+# (KalshiProvider is read_only=True everywhere; place_order raises; all
+# execution is SimulatedExchange). History: disabled 2026-06-03 (LEAN review,
+# fee bleed) and kept off through the feed-only Phases 1-3.
+WEATHER_TRADING_ENABLED = True
 
 
 @dataclass(frozen=True)
@@ -382,8 +386,9 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
 
             # Waterfall: ML Weather → V2 rule-based fallback
-            # 2026-06-03 review: weather trading disabled (fee bleed). Price/data
-            # feeds above still run for dashboard + future re-enable.
+            # 2026-09-01: paper trading re-enabled on the sandbox (see the
+            # WEATHER_TRADING_ENABLED comment). Every signal still runs the
+            # full risk/EV/Kelly gauntlet in _process_signals.
             if WEATHER_TRADING_ENABLED:
                 traded = self._process_signals(
                     self.strategies["ml_weather"].analyze(obs_data),

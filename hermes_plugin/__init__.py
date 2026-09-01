@@ -53,8 +53,15 @@ def _api_get(path):
 
 
 def _api_post(path):
+    # Control-plane auth: when the sandbox sets MP_CONTROL_TOKEN, its POST
+    # routes require a matching X-MP-Token header (401 otherwise). GET routes
+    # never require it. Read per-call so a token set after plugin import works.
+    headers = {}
+    token = os.getenv("MP_CONTROL_TOKEN", "")
+    if token:
+        headers["X-MP-Token"] = token
     try:
-        r = requests.post(f"{DASHBOARD_URL}{path}", timeout=TIMEOUT)
+        r = requests.post(f"{DASHBOARD_URL}{path}", headers=headers, timeout=TIMEOUT)
         r.raise_for_status()
         return json.dumps({"ok": True, "data": r.json()})
     except requests.ConnectionError:
@@ -342,17 +349,34 @@ def compute_rolling_stats(params):
 
 
 def check_health(params):
-    """Check if the trading system process is alive and API responding."""
+    """Check if the trading system process is alive and API responding.
+
+    Prefers GET /healthz — the zero-side-effect probe (no snapshot, no CSV
+    writes) that returns {"status": "ok", "uptime_s": <float>}. A 404 means an
+    older sandbox without the route, so it falls back to /api/status.
+    """
     try:
-        r = requests.get(f"{DASHBOARD_URL}/api/status", timeout=5)
-        return json.dumps(
-            {
-                "ok": True,
-                "api_reachable": True,
-                "status_code": r.status_code,
-                "response_time_ms": int(r.elapsed.total_seconds() * 1000),
-            }
-        )
+        r = requests.get(f"{DASHBOARD_URL}/healthz", timeout=5)
+        endpoint = "/healthz"
+        uptime_s = None
+        if r.status_code == 404:
+            r = requests.get(f"{DASHBOARD_URL}/api/status", timeout=5)
+            endpoint = "/api/status"
+        else:
+            try:
+                uptime_s = r.json().get("uptime_s")
+            except ValueError:
+                pass
+        body = {
+            "ok": True,
+            "api_reachable": True,
+            "endpoint": endpoint,
+            "status_code": r.status_code,
+            "response_time_ms": int(r.elapsed.total_seconds() * 1000),
+        }
+        if uptime_s is not None:
+            body["uptime_s"] = uptime_s
+        return json.dumps(body)
     except requests.ConnectionError:
         return json.dumps(
             {
@@ -548,14 +572,14 @@ TOOLS = {
     "mp_start_bot": {
         "schema": {
             "name": "mp_start_bot",
-            "description": "Activate a trading bot so it participates in the market loop. Confirm with the user before executing. Available: weather (crypto bots were deleted in the Phase 0 teardown).",
+            "description": "Activate a bot so it participates in the market loop. Confirm with the user before executing. Available: weather (paper-trades in the sandbox sim), gas, mention, crypto_annual (feed-only harvesters). Sends X-MP-Token from MP_CONTROL_TOKEN when the sandbox requires it.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bot_name": {
                         "type": "string",
                         "description": "Bot to activate",
-                        "enum": ["weather"],
+                        "enum": ["weather", "gas", "mention", "crypto_annual"],
                     }
                 },
                 "required": ["bot_name"],
@@ -566,14 +590,14 @@ TOOLS = {
     "mp_stop_bot": {
         "schema": {
             "name": "mp_stop_bot",
-            "description": "Deactivate a trading bot (it stops ticking but stays registered). Confirm with the user before executing. Available: weather (crypto bots were deleted in the Phase 0 teardown).",
+            "description": "Deactivate a bot (it stops ticking but stays registered). Confirm with the user before executing. Available: weather, gas, mention, crypto_annual. Sends X-MP-Token from MP_CONTROL_TOKEN when the sandbox requires it.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bot_name": {
                         "type": "string",
                         "description": "Bot to deactivate",
-                        "enum": ["weather"],
+                        "enum": ["weather", "gas", "mention", "crypto_annual"],
                     }
                 },
                 "required": ["bot_name"],
@@ -654,7 +678,7 @@ TOOLS = {
     "mp_health": {
         "schema": {
             "name": "mp_health",
-            "description": "Check if the trading system API is reachable and responding. Returns status, response time, and error details if down.",
+            "description": "Check if the trading system API is reachable and responding. Probes the zero-side-effect /healthz route (uptime_s included when available; falls back to /api/status on older sandboxes). Returns status, response time, and error details if down.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         "handler": check_health,

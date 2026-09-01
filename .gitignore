@@ -26,6 +26,8 @@ Thumbs.db
 Skippy_demo.txt
 kalshi_priv.key
 Kalshi_priv_key_1_readOnly.key
+Kalshi_private_key_read_only.key
+Kalshi*.key
 
 # Data artifacts (V2)
 data/historical/*.parquet

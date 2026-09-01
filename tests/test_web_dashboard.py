@@ -3,6 +3,7 @@ Comprehensive tests for the web dashboard: StateManager, server endpoints,
 uptime timer, and formatting helpers.
 """
 
+import os
 import time
 import pytest
 from unittest.mock import MagicMock, PropertyMock
@@ -25,10 +26,10 @@ def _make_bot(name):
 @pytest.fixture
 def mock_orchestrator():
     orch = MagicMock()
-    bot1 = _make_bot("btc_15m")
-    bot2 = _make_bot("weather")
+    bot1 = _make_bot("weather")
+    bot2 = _make_bot("gas")
     orch.bots = [bot1, bot2]
-    orch.active_bots = {"btc_15m", "weather"}
+    orch.active_bots = {"weather", "gas"}
     orch.risk_manager = MagicMock()
     orch.risk_manager.balance = 100.0
     orch.risk_manager.daily_pnl = 5.0
@@ -44,6 +45,10 @@ def mock_orchestrator():
     orch.dashboard.mascot = MagicMock()
     orch.dashboard.mascot.state = "IDLE"
     orch.uptime_seconds = 125.0
+    # Real (JSON-serializable) values so /api/status can render the snapshot
+    orch.cycle_history = []
+    orch._training_diagnostics = {}
+    orch._training_history = []
     return orch
 
 
@@ -107,12 +112,12 @@ class TestStateManagerSnapshot:
         from src.web.state_manager import StateManager
 
         mock_orchestrator.dashboard.latest_prices = {
-            "BTC-YES": {"price": 0.55, "ts": time.time(), "extra": {}},
+            "KXHIGHNY-26SEP01-B85": {"price": 0.55, "ts": time.time(), "extra": {}},
         }
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         assert len(snap["market_data"]) == 1
-        assert snap["market_data"][0]["symbol"] == "BTC-YES"
+        assert snap["market_data"][0]["symbol"] == "KXHIGHNY-26SEP01-B85"
 
     def test_market_data_excludes_stale(self, mock_orchestrator):
         from src.web.state_manager import StateManager
@@ -168,7 +173,7 @@ class TestStateManagerSnapshot:
         mock_orchestrator.risk_manager.exchange.positions = [
             {
                 "id": "pos1",
-                "symbol": "BTC-YES",
+                "symbol": "KXHIGHNY-26SEP01-B85",
                 "side": "buy",
                 "contract_side": "YES",
                 "entry_price": 0.45,
@@ -189,12 +194,12 @@ class TestStateManagerSnapshot:
     def test_bots_active_status(self, mock_orchestrator):
         from src.web.state_manager import StateManager
 
-        mock_orchestrator.active_bots = {"btc_15m"}  # only btc active
+        mock_orchestrator.active_bots = {"weather"}  # only weather active
         sm = StateManager(mock_orchestrator)
         snap = sm.snapshot()
         bots_map = {b["name"]: b["active"] for b in snap["bots"]}
-        assert bots_map["btc_15m"] is True
-        assert bots_map["weather"] is False
+        assert bots_map["weather"] is True
+        assert bots_map["gas"] is False
 
     def test_mascot_state_from_dashboard(self, mock_orchestrator):
         from src.web.state_manager import StateManager
@@ -338,24 +343,24 @@ class TestServerEndpoints:
         data = resp.json()
         assert isinstance(data, list)
         names = [b["name"] for b in data]
-        assert "btc_15m" in names
+        assert "gas" in names
         assert "weather" in names
 
     def test_get_bots_active_status(self, client, mock_orchestrator):
-        mock_orchestrator.active_bots = {"btc_15m"}
+        mock_orchestrator.active_bots = {"gas"}
         resp = client.get("/api/bots")
         data = resp.json()
         bots_map = {b["name"]: b["active"] for b in data}
-        assert bots_map["btc_15m"] is True
+        assert bots_map["gas"] is True
         assert bots_map["weather"] is False
 
     def test_start_bot_success(self, client, mock_orchestrator):
         mock_orchestrator.start_bot = MagicMock()
-        resp = client.post("/api/bots/btc_15m/start")
+        resp = client.post("/api/bots/gas/start")
         assert resp.status_code == 200
         body = resp.json()
         assert body["action"] == "started"
-        mock_orchestrator.start_bot.assert_called_once_with("btc_15m")
+        mock_orchestrator.start_bot.assert_called_once_with("gas")
 
     def test_start_bot_not_found(self, client, mock_orchestrator):
         mock_orchestrator.start_bot = MagicMock(side_effect=ValueError("not found"))
@@ -514,12 +519,12 @@ class TestMarketDataFlow:
 
     def test_update_price_appears_in_snapshot(self, dashboard_and_sm):
         dash, sm = dashboard_and_sm
-        dash.update_price("BTC-USD", 71000.0)
+        dash.update_price("KXHIGHNY-26SEP01-B85", 0.55)
         snap = sm.snapshot()
         md = snap["market_data"]
         assert len(md) == 1
-        assert md[0]["symbol"] == "BTC-USD"
-        assert md[0]["price"] == 71000.0
+        assert md[0]["symbol"] == "KXHIGHNY-26SEP01-B85"
+        assert md[0]["price"] == 0.55
 
     def test_stale_data_filtered(self, dashboard_and_sm):
         dash, sm = dashboard_and_sm
@@ -533,11 +538,13 @@ class TestMarketDataFlow:
 
     def test_market_data_with_bid_ask_volume(self, dashboard_and_sm):
         dash, sm = dashboard_and_sm
-        dash.update_price("ETH-USD", 3500.0, bid=3499.0, ask=3501.0, volume=1234.5)
+        dash.update_price(
+            "KXAAAGASM-26SEP", 0.42, bid=0.41, ask=0.43, volume=1234.5
+        )
         snap = sm.snapshot()
         md = snap["market_data"][0]
-        assert md["bid"] == 3499.0
-        assert md["ask"] == 3501.0
+        assert md["bid"] == 0.41
+        assert md["ask"] == 0.43
         assert md["volume"] == 1234.5
 
 
@@ -605,9 +612,11 @@ class TestPortfolioLogging:
         assert float(rows[1][2]) == 100.0  # cash
         assert float(rows[1][3]) == 30.0  # exposure
 
-    def test_snapshot_triggers_portfolio_logging(
+    def test_snapshot_does_not_write_portfolio_csv(
         self, mock_orchestrator, dashboard_with_tmp
     ):
+        """snapshot() must be side-effect free on disk: the CSV write moved to
+        the market loop so WS clients and healthchecks never touch the SD card."""
         import csv
         from src.web.state_manager import StateManager
 
@@ -615,11 +624,12 @@ class TestPortfolioLogging:
         mock_orchestrator.dashboard = dash
         sm = StateManager(mock_orchestrator)
         sm.snapshot()
+        sm.snapshot()
 
         with open(dash.portfolio_log_path, "r", encoding="utf-8") as f:
             rows = list(csv.reader(f))
-        # header + 1 row from snapshot calling log_portfolio
-        assert len(rows) == 2
+        # header only — no rows appended by snapshot()
+        assert len(rows) == 1
 
     def test_csv_format_correctness(self, dashboard_with_tmp):
         import csv
@@ -672,13 +682,13 @@ class TestBotControlFlowExtended:
 
         orch.start_bot.side_effect = fake_start
 
-        resp = client.post("/api/bots/btc_15m/start")
+        resp = client.post("/api/bots/gas/start")
         assert resp.status_code == 200
-        assert "btc_15m" in orch.active_bots
+        assert "gas" in orch.active_bots
 
     def test_stop_changes_active_bots(self, client_and_orch):
         client, orch = client_and_orch
-        orch.active_bots = {"btc_15m", "weather"}
+        orch.active_bots = {"gas", "weather"}
 
         def fake_stop(name):
             orch.active_bots.discard(name)
@@ -691,10 +701,10 @@ class TestBotControlFlowExtended:
 
     def test_stopped_bot_not_active_in_snapshot(self, client_and_orch):
         client, orch = client_and_orch
-        orch.active_bots = {"btc_15m"}  # weather stopped
+        orch.active_bots = {"gas"}  # weather stopped
         resp = client.get("/api/bots")
         bots_map = {b["name"]: b["active"] for b in resp.json()}
-        assert bots_map["btc_15m"] is True
+        assert bots_map["gas"] is True
         assert bots_map["weather"] is False
 
 
@@ -749,13 +759,13 @@ class TestDataLogSnapshot:
 
     def test_update_price_creates_data_log_entries(self, dashboard_sm):
         dash, sm = dashboard_sm
-        dash.update_price("BTC-USD", 71000.0)
-        dash.update_price("ETH-USD", 3500.0)
+        dash.update_price("KXHIGHNY-26SEP01-B85", 0.55)
+        dash.update_price("KXAAAGASM-26SEP", 0.42)
         snap = sm.snapshot()
         assert len(snap["data_log"]) == 2
         symbols = [row["Symbol"] for row in snap["data_log"]]
-        assert "BTC-USD" in symbols
-        assert "ETH-USD" in symbols
+        assert "KXHIGHNY-26SEP01-B85" in symbols
+        assert "KXAAAGASM-26SEP" in symbols
 
     def test_data_log_api_endpoint(self, mock_orchestrator, tmp_path):
         from src.web.state_manager import StateManager
@@ -769,7 +779,13 @@ class TestDataLogSnapshot:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
             writer.writerow(
-                ["2026-03-15T10:00:00", "BTC-USD", "71000.0", "MARKET_DATA", "REAL"]
+                [
+                    "2026-03-15T10:00:00",
+                    "KXHIGHNY-26SEP01-B85",
+                    "0.55",
+                    "MARKET_DATA",
+                    "REAL",
+                ]
             )
 
         mock_orchestrator.dashboard = dash
@@ -781,7 +797,7 @@ class TestDataLogSnapshot:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["Symbol"] == "BTC-USD"
+        assert data[0]["Symbol"] == "KXHIGHNY-26SEP01-B85"
 
 
 # ---------------------------------------------------------------------------
@@ -814,7 +830,13 @@ class TestLogEndpoints:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "Symbol", "Price", "Type", "Status"])
             writer.writerow(
-                ["2026-03-15T10:00:00", "BTC-USD", "71000", "MARKET_DATA", "REAL"]
+                [
+                    "2026-03-15T10:00:00",
+                    "KXHIGHNY-26SEP01-B85",
+                    "0.55",
+                    "MARKET_DATA",
+                    "REAL",
+                ]
             )
         resp = client.get("/api/logs/data")
         assert resp.status_code == 200
@@ -914,39 +936,357 @@ class TestSnapshotCompleteness:
         assert isinstance(parsed, dict)
 
 
+# ---------------------------------------------------------------------------
+# Mode detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestDetectMode:
+    """'paper' whenever the Kalshi provider is read-only (it always is),
+    'sandbox' when additionally the demo URL is configured, 'live' only if
+    read_only is False — which is structurally impossible in this codebase."""
+
+    def _orch(self, read_only=True):
+        orch = MagicMock()
+        orch.kalshi = MagicMock()
+        orch.kalshi.read_only = read_only
+        return orch
+
+    def test_paper_on_production_url_when_read_only(self, monkeypatch):
+        from src.web.state_manager import _detect_mode
+
+        monkeypatch.setenv(
+            "KALSHI_API_URL", "https://api.elections.kalshi.com/trade-api/v2"
+        )
+        assert _detect_mode(self._orch(read_only=True)) == "paper"
+
+    def test_sandbox_on_demo_url_when_read_only(self, monkeypatch):
+        from src.web.state_manager import _detect_mode
+
+        monkeypatch.setenv(
+            "KALSHI_API_URL", "https://demo-api.kalshi.co/trade-api/v2"
+        )
+        assert _detect_mode(self._orch(read_only=True)) == "sandbox"
+
+    def test_live_only_when_not_read_only(self, monkeypatch):
+        from src.web.state_manager import _detect_mode
+
+        monkeypatch.setenv(
+            "KALSHI_API_URL", "https://api.elections.kalshi.com/trade-api/v2"
+        )
+        assert _detect_mode(self._orch(read_only=False)) == "live"
+
+    def test_paper_when_no_provider(self, monkeypatch):
+        from src.web.state_manager import _detect_mode
+
+        monkeypatch.delenv("KALSHI_API_URL", raising=False)
+        orch = MagicMock()
+        orch.kalshi = None
+        assert _detect_mode(orch) == "paper"
+
+    def test_snapshot_mode_is_paper_by_default(self, mock_orchestrator, monkeypatch):
+        from src.web.state_manager import StateManager
+
+        monkeypatch.setenv(
+            "KALSHI_API_URL", "https://api.elections.kalshi.com/trade-api/v2"
+        )
+        mock_orchestrator.kalshi = MagicMock()
+        mock_orchestrator.kalshi.read_only = True
+        sm = StateManager(mock_orchestrator)
+        assert sm.snapshot()["mode"] == "paper"
+
+
+# ---------------------------------------------------------------------------
+# Live mascot tests (web mode)
+# ---------------------------------------------------------------------------
+
+
+class TestLiveMascot:
+    """StateManager.snapshot() must drive Mascot.set_state() with the same
+    inputs Dashboard.render() computes (the web entrypoint never calls
+    render, so without this the browser mascot is permanently IDLE)."""
+
+    @pytest.fixture
+    def orch(self, mock_orchestrator):
+        from src.visualization.mascot import Mascot
+
+        mock_orchestrator.dashboard.mascot = Mascot()
+        mock_orchestrator.risk_manager.daily_pnl = 0.0
+        mock_orchestrator.risk_manager.exchange.positions = []
+        return mock_orchestrator
+
+    def test_panic_when_daily_pnl_below_minus_10(self, orch):
+        from src.web.state_manager import StateManager
+
+        orch.risk_manager.daily_pnl = -15.0
+        sm = StateManager(orch)
+        snap = sm.snapshot()
+        assert snap["mascot_state"] == "PANIC"
+
+    def test_money_eyes_on_positive_pnl_change(self, orch):
+        from src.web.state_manager import StateManager
+
+        sm = StateManager(orch)
+        sm.snapshot()  # baseline: pnl 0.0 -> IDLE
+        orch.risk_manager.daily_pnl = 1.0  # change = +1.0 > +0.5
+        snap = sm.snapshot()
+        assert snap["mascot_state"] == "MONEY_EYES"
+
+    def test_running_with_open_positions(self, orch):
+        from src.web.state_manager import StateManager
+
+        orch.risk_manager.exchange.positions = [
+            {
+                "id": 1,
+                "symbol": "KXHIGHNY-26SEP01-B85",
+                "side": "buy",
+                "entry_price": 0.40,
+                "current_price": 0.40,
+                "quantity": 10,
+                "pnl": 0.0,
+                "strategy_name": "WeatherV2",
+                "open_time": datetime.now(),
+            }
+        ]
+        sm = StateManager(orch)
+        snap = sm.snapshot()
+        assert snap["mascot_state"] == "RUNNING"
+
+    def test_idle_otherwise(self, orch):
+        from src.web.state_manager import StateManager
+
+        sm = StateManager(orch)
+        snap = sm.snapshot()
+        assert snap["mascot_state"] == "IDLE"
+
+    def test_cooldown_holds_state_between_snapshots(self, orch):
+        """set_state's 2s cooldown is preserved: a non-IDLE state does not
+        flip back on the very next snapshot."""
+        from src.web.state_manager import StateManager
+
+        orch.risk_manager.exchange.positions = [{"open_time": datetime.now()}]
+        sm = StateManager(orch)
+        assert sm.snapshot()["mascot_state"] == "RUNNING"
+        orch.risk_manager.exchange.positions = []
+        snap = sm.snapshot()  # within the 2s cooldown window
+        assert snap["mascot_state"] == "RUNNING"
+
+
+# ---------------------------------------------------------------------------
+# PnL history seeding tests
+# ---------------------------------------------------------------------------
+
+
+class TestPnlHistorySeeding:
+    """StateManager seeds _pnl_history from prior portfolio CSVs at startup
+    so the equity card is not empty after a restart."""
+
+    _HEADER = [
+        "Timestamp",
+        "Equity",
+        "Cash",
+        "Exposure",
+        "Realized_PnL",
+        "Unrealized_PnL",
+    ]
+
+    def _write_csv(self, path, rows):
+        import csv
+
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(self._HEADER)
+            for r in rows:
+                w.writerow(r)
+
+    def test_seeds_from_portfolio_csvs(self, mock_orchestrator, tmp_path):
+        from src.web.state_manager import StateManager
+
+        self._write_csv(
+            tmp_path / "portfolio_20260831_000000.csv",
+            [["2026-08-31T10:00:00", "95.0", "95.0", "0.0", "0", "0"]],
+        )
+        self._write_csv(
+            tmp_path / "portfolio_20260901_000000.csv",
+            [
+                ["2026-09-01T10:00:00", "100.0", "70.0", "30.0", "0", "0"],
+                ["2026-09-01T10:00:30", "101.0", "71.0", "30.0", "0", "0"],
+            ],
+        )
+        mock_orchestrator.dashboard.log_dir = str(tmp_path)
+        sm = StateManager(mock_orchestrator)
+        assert [p["equity"] for p in sm._pnl_history] == [95.0, 100.0, 101.0]
+
+    def test_seeded_history_appears_in_snapshot(self, mock_orchestrator, tmp_path):
+        from src.web.state_manager import StateManager
+
+        self._write_csv(
+            tmp_path / "portfolio_20260901_000000.csv",
+            [["2026-09-01T10:00:00", "100.0", "70.0", "30.0", "0", "0"]],
+        )
+        mock_orchestrator.dashboard.log_dir = str(tmp_path)
+        sm = StateManager(mock_orchestrator)
+        snap = sm.snapshot()
+        # 1 seeded row + 1 appended by the snapshot itself
+        assert len(snap["pnl_history"]) == 2
+        assert snap["pnl_history"][0]["equity"] == 100.0
+
+    def test_malformed_rows_are_skipped(self, mock_orchestrator, tmp_path):
+        from src.web.state_manager import StateManager
+
+        self._write_csv(
+            tmp_path / "portfolio_20260901_000000.csv",
+            [
+                ["not-a-timestamp", "100.0", "70.0", "30.0", "0", "0"],
+                ["2026-09-01T10:00:00", "not-a-float", "70.0", "30.0", "0", "0"],
+                ["2026-09-01T10:00:30", "101.0", "71.0", "30.0", "0", "0"],
+            ],
+        )
+        mock_orchestrator.dashboard.log_dir = str(tmp_path)
+        sm = StateManager(mock_orchestrator)
+        assert [p["equity"] for p in sm._pnl_history] == [101.0]
+
+    def test_no_seeding_without_usable_log_dir(self, mock_orchestrator):
+        from src.web.state_manager import StateManager
+
+        # MagicMock log_dir is not a str — seeding must silently no-op
+        sm = StateManager(mock_orchestrator)
+        assert len(sm._pnl_history) == 0
+
+    def test_seeds_from_archived_portfolio_csvs(self, mock_orchestrator, tmp_path):
+        """The startup/cycle/shutdown sweeps move session CSVs into
+        _archive/<...>/; seeding must read those too, deduped by basename
+        (the live copy wins, and one session duplicated across archive
+        subdirs counts once)."""
+        from src.web.state_manager import StateManager
+
+        arch1 = tmp_path / "_archive" / "startup_20260901_000000"
+        arch2 = tmp_path / "_archive" / "shutdown_20260901_010000"
+        arch1.mkdir(parents=True)
+        arch2.mkdir(parents=True)
+        # A swept previous session, present in TWO archive subdirs.
+        for d in (arch1, arch2):
+            self._write_csv(
+                d / "portfolio_20260831_000000.csv",
+                [["2026-08-31T10:00:00", "95.0", "95.0", "0.0", "0", "0"]],
+            )
+        # Current session: live in log_dir and already copied to the archive.
+        for d in (tmp_path, arch2):
+            self._write_csv(
+                d / "portfolio_20260901_000000.csv",
+                [["2026-09-01T10:00:00", "100.0", "70.0", "30.0", "0", "0"]],
+            )
+        mock_orchestrator.dashboard.log_dir = str(tmp_path)
+        sm = StateManager(mock_orchestrator)
+        # One row per session — no duplicates from the extra archive copies.
+        assert [p["equity"] for p in sm._pnl_history] == [95.0, 100.0]
+
+
+# ---------------------------------------------------------------------------
+# /healthz tests
+# ---------------------------------------------------------------------------
+
+
+class TestHealthz:
+    @pytest.fixture
+    def client_and_sm(self, mock_orchestrator):
+        from src.web.state_manager import StateManager
+        from src.web.server import create_app
+        from fastapi.testclient import TestClient
+
+        sm = StateManager(mock_orchestrator)
+        sm.snapshot = MagicMock(wraps=sm.snapshot)
+        app = create_app(sm, mock_orchestrator)
+        return TestClient(app), sm
+
+    def test_healthz_contract(self, client_and_sm):
+        client, _ = client_and_sm
+        resp = client.get("/healthz")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert isinstance(body["uptime_s"], float)
+        assert body["uptime_s"] == 125.0  # from mock_orchestrator.uptime_seconds
+
+    def test_healthz_has_zero_side_effects(self, client_and_sm, mock_orchestrator):
+        client, sm = client_and_sm
+        client.get("/healthz")
+        sm.snapshot.assert_not_called()
+        mock_orchestrator.dashboard.log_portfolio.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Control-token auth tests (MP_CONTROL_TOKEN)
+# ---------------------------------------------------------------------------
+
+
+class TestControlToken:
+    """POST bot routes honor MP_CONTROL_TOKEN; GET routes never require it."""
+
+    @pytest.fixture
+    def client(self, mock_orchestrator):
+        from src.web.state_manager import StateManager
+        from src.web.server import create_app
+        from fastapi.testclient import TestClient
+
+        mock_orchestrator.start_bot = MagicMock()
+        mock_orchestrator.stop_bot = MagicMock()
+        sm = StateManager(mock_orchestrator)
+        app = create_app(sm, mock_orchestrator)
+        return TestClient(app)
+
+    def test_open_mode_when_env_unset(self, client, monkeypatch):
+        monkeypatch.delenv("MP_CONTROL_TOKEN", raising=False)
+        assert client.post("/api/bots/weather/start").status_code == 200
+        assert client.post("/api/bots/weather/stop").status_code == 200
+
+    def test_valid_token_accepted(self, client, monkeypatch):
+        monkeypatch.setenv("MP_CONTROL_TOKEN", "s3cret")
+        resp = client.post(
+            "/api/bots/weather/start", headers={"X-MP-Token": "s3cret"}
+        )
+        assert resp.status_code == 200
+        resp = client.post(
+            "/api/bots/weather/stop", headers={"X-MP-Token": "s3cret"}
+        )
+        assert resp.status_code == 200
+
+    def test_missing_token_rejected(self, client, monkeypatch):
+        monkeypatch.setenv("MP_CONTROL_TOKEN", "s3cret")
+        resp = client.post("/api/bots/weather/start")
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "control token required"
+        assert client.post("/api/bots/weather/stop").status_code == 401
+
+    def test_wrong_token_rejected(self, client, monkeypatch):
+        monkeypatch.setenv("MP_CONTROL_TOKEN", "s3cret")
+        resp = client.post(
+            "/api/bots/weather/start", headers={"X-MP-Token": "wrong"}
+        )
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "control token required"
+
+    def test_get_routes_never_require_token(self, client, monkeypatch):
+        monkeypatch.setenv("MP_CONTROL_TOKEN", "s3cret")
+        assert client.get("/api/bots").status_code == 200
+        assert client.get("/healthz").status_code == 200
+        assert client.get("/api/status").status_code == 200
+
+
 # =========================================================================
-# Live Kalshi API Market Data Tests
+# Kalshi price parsing unit tests (no network)
 # =========================================================================
 
 
-class TestKalshiMarketDataLive:
-    """Integration tests that hit the real Kalshi public API to verify
-    we can discover and read market data (YES and NO prices) for all
-    three market types: BTC 15m, BTC Hourly, and Weather.
+class TestKalshiPriceParsing:
+    """Pure parsing unit tests (no network), split out of the live class so
+    they still run in default offline test runs.
 
-    These tests validate that:
+    They validate that:
     1. The API field names we use (_dollars suffix) match the actual API
     2. _parse_price handles both V2 (dollars strings) and V1 (cents ints)
     3. _parse_market_data returns non-None MarketData with correct fields
-    4. Discovery (search_markets) finds markets for each series
-    5. Weather markets (active) return real YES and NO prices
     """
-
-    @pytest.fixture
-    def provider(self):
-        """Unauthenticated provider pointed at public production API."""
-        from src.data.kalshi_provider import KalshiProvider
-
-        return KalshiProvider(
-            key_id=None,
-            private_key_path=None,
-            api_url="https://api.elections.kalshi.com/trade-api/v2",
-            read_only=True,
-        )
-
-    # ------------------------------------------------------------------
-    # _parse_price unit tests (no network)
-    # ------------------------------------------------------------------
 
     def test_parse_price_v2_dollars_field(self):
         """V2 API returns prices as dollar strings like '0.0700'."""
@@ -1003,9 +1343,41 @@ class TestKalshiMarketDataLive:
         assert md.volume == 1234
         assert md.extra["status"] == "active"
 
-    # ------------------------------------------------------------------
-    # Live API: Weather markets (most reliably active with prices)
-    # ------------------------------------------------------------------
+
+# =========================================================================
+# Live Kalshi API Market Data Tests (NETWORK REQUIRED — skipped by default)
+# =========================================================================
+
+
+@pytest.mark.live
+@pytest.mark.skipif(
+    os.getenv("MP_RUN_LIVE_TESTS") != "1",
+    reason="hits the real Kalshi API over the network; set MP_RUN_LIVE_TESTS=1 to run",
+)
+class TestKalshiMarketDataLive:
+    """Integration tests that hit the real Kalshi public API to verify we can
+    discover and read market data (YES and NO prices) for weather markets.
+
+    These need network access: they are marked ``live`` (deselect with
+    ``-m "not live"``) and additionally gated on MP_RUN_LIVE_TESTS=1 so
+    default runs skip them. Run them if you suspect Kalshi API changes.
+
+    The KXBTC15M / KXBTCD live tests that used to live here were deleted with
+    the Phase 0 crypto teardown (PRD FR-0.1) — weather is the only remaining
+    live-verified series family.
+    """
+
+    @pytest.fixture
+    def provider(self):
+        """Unauthenticated provider pointed at public production API."""
+        from src.data.kalshi_provider import KalshiProvider
+
+        return KalshiProvider(
+            key_id=None,
+            private_key_path=None,
+            api_url="https://api.elections.kalshi.com/trade-api/v2",
+            read_only=True,
+        )
 
     @pytest.mark.skipif(
         not pytest.importorskip("requests", reason="requests not installed"),
@@ -1066,62 +1438,6 @@ class TestKalshiMarketDataLive:
             assert (
                 0.9 <= complement <= 1.1
             ), f"yes_bid + no_ask = {complement}, expected ~1.0"
-
-    @pytest.mark.skipif(
-        not pytest.importorskip("requests", reason="requests not installed"),
-        reason="requests not installed",
-    )
-    def test_btc_15m_market_discovery(self, provider):
-        """Verify we can discover KXBTC15M markets via the API.
-        These may be 'initialized' (pre-open) rather than 'active'."""
-        import requests
-
-        url = f"{provider.api_url}/markets"
-        resp = requests.get(
-            url,
-            params={
-                "series_ticker": "KXBTC15M",
-                "limit": 5,
-            },
-            timeout=10,
-        )
-        assert resp.status_code == 200
-
-        markets = resp.json().get("markets", [])
-        assert len(markets) > 0, "No KXBTC15M markets found at all"
-
-        # Verify we can fetch at least one via our provider
-        ticker = markets[0].get("ticker")
-        md = provider.fetch_latest(ticker)
-        assert md is not None, f"fetch_latest({ticker}) returned None"
-        assert md.symbol == ticker
-
-        # Initialized markets may have 0 prices — that's OK.
-        # But the MarketData object must be valid.
-        assert md.bid >= 0
-        assert md.ask >= 0
-        assert md.extra["no_bid"] >= 0
-        assert md.extra["no_ask"] >= 0
-
-    @pytest.mark.skipif(
-        not pytest.importorskip("requests", reason="requests not installed"),
-        reason="requests not installed",
-    )
-    def test_btc_hourly_v1_discovery(self, provider):
-        """Verify V1 BTC Hourly event discovery returns markets."""
-        markets = provider.fetch_btc_hourly_markets()
-
-        # V1 discovery probes 12 hours; at least some should exist
-        assert len(markets) > 0, "V1 BTC Hourly discovery returned no markets"
-
-        md = markets[0]
-        assert md.symbol is not None
-        assert "KXBTCD" in md.symbol
-        assert md.extra.get("close_time") is not None
-
-        # V1 markets should have parsed prices (may be 0 for finalized ones)
-        assert md.bid >= 0
-        assert md.ask >= 0
 
     @pytest.mark.skipif(
         not pytest.importorskip("requests", reason="requests not installed"),

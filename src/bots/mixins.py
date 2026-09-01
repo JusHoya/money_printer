@@ -396,8 +396,16 @@ class SignalProcessorMixin:
                 conf,
             )
 
+            # MENTION is checked FIRST: the last ticker segment of a
+            # KX*MENTION market is an arbitrary spoken word
+            # (KXTRUMPMENTION-26AUG27-ETHEREUM), so the series marker must win
+            # over any word-suffix collision with the crypto/weather
+            # substrings. KXBTCY/KXETHY annual ladders classify as crypto via
+            # the existing "BTC"/"ETH" substrings.
             category = "general"
-            if "BTC" in sig.symbol or "ETH" in sig.symbol:
+            if "MENTION" in sig.symbol:
+                category = "mention"
+            elif "BTC" in sig.symbol or "ETH" in sig.symbol:
                 category = "crypto"
             elif "HIGH" in sig.symbol or "PRECIP" in sig.symbol or "TEMP" in sig.symbol:
                 category = "weather"

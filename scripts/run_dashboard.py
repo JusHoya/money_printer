@@ -126,11 +126,24 @@ class OrchestratorEngine:
             return self._uptime_accumulated + (time.time() - self._uptime_resumed_at)
         return self._uptime_accumulated
 
+    def _resolve_bot_name(self, name: str) -> str:
+        """Resolve a bot name case-insensitively to its display name.
+
+        Callers address bots by registry key ('mention', via the Hermes
+        plugin) or display name ('Mention', via the web UI); bot.name is the
+        display form, so match ignoring case and also ignoring underscores
+        ('crypto_annual' -> 'CryptoAnnual').
+        """
+        bot_names = [b.name for b in self.bots]
+        wanted = name.lower().replace("_", "")
+        for candidate in bot_names:
+            if candidate.lower().replace("_", "") == wanted:
+                return candidate
+        raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+
     def start_bot(self, name: str):
         """Activate a bot by name so it participates in the market loop."""
-        bot_names = [b.name for b in self.bots]
-        if name not in bot_names:
-            raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        name = self._resolve_bot_name(name)
         was_empty = len(self.active_bots) == 0
         self.active_bots.add(name)
         if was_empty:
@@ -139,9 +152,7 @@ class OrchestratorEngine:
 
     def stop_bot(self, name: str):
         """Deactivate a bot by name so it is skipped in the market loop."""
-        bot_names = [b.name for b in self.bots]
-        if name not in bot_names:
-            raise ValueError(f"Bot '{name}' not found. Available: {bot_names}")
+        name = self._resolve_bot_name(name)
         was_active = name in self.active_bots
         self.active_bots.discard(name)
         if was_active and len(self.active_bots) == 0:
@@ -908,10 +919,17 @@ class OrchestratorEngine:
             )
         return True
 
+    # Fixed cadence for portfolio CSV sampling in the market loop. The write
+    # used to live in StateManager.snapshot(), which meant one SD-card CSV row
+    # per second per WS client and on every healthcheck probe; snapshot() is
+    # now side-effect free and history accrues here instead.
+    _PORTFOLIO_LOG_INTERVAL_S = 30
+
     def market_loop(self):
         """Background thread: position updates + bot ticks."""
         last_heartbeat = time.time()
         last_fake_engine_check = time.time()
+        last_portfolio_log = 0.0  # 0 => first row written on the first pass
 
         # 2026-06-10 fix (b): publish the launch balance so a watchdog
         # auto-restart reuses it. (The ".orchestrator_state" marker write that
@@ -933,10 +951,25 @@ class OrchestratorEngine:
 
         while self.running:
             try:
+                # Liveness stamp read by /healthz: one bump per loop pass so
+                # autoheal can tell a hung harvester thread from a live one
+                # (staleness threshold lives in src/web/server.py).
+                self._last_loop_pass_monotonic = time.monotonic()
+
                 # Heartbeat
                 if time.time() - last_heartbeat > 60:
                     self.dashboard.log("[System] Heartbeat: Market Loop is Alive.")
                     last_heartbeat = time.time()
+
+                # Portfolio CSV sampling at a fixed cadence (>=30s between
+                # rows). Reads self.dashboard fresh each pass so the write
+                # follows the cycle-boundary Dashboard swap.
+                if time.time() - last_portfolio_log >= self._PORTFOLIO_LOG_INTERVAL_S:
+                    try:
+                        self.dashboard.log_portfolio(self.risk_manager)
+                    except Exception:
+                        pass
+                    last_portfolio_log = time.time()
 
                 # Layer 3: re-check that discovery still returns real symbols
                 if (
