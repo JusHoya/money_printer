@@ -6,9 +6,13 @@
 # ============================================================================
 #
 # Swaps alcyone's Hermes serving model:
-#   FROM nvidia/Qwen3.6-35B-A3B-NVFP4   (~45GB unified RAM consumed)
-#   TO   ykarout/Qwen3.5-9B-NVFP4       (~10-12GB)
-# freeing ~35GB of the Spark's 121GB for lab/backtest work.
+#   FROM nvidia/Qwen3.6-35B-A3B-NVFP4   (51.1GB reserved / ~45GB consumed)
+#   TO   ykarout/Qwen3.5-9B-NVFP4       (21.9GB reserved at 0.18 util)
+# freeing ~29GB of the Spark's 121GB for lab/backtest work.
+# 0.18 is measured, not guessed: at 0.12 the load FAILS ("No available memory
+# for the cache blocks") — the checkpoint's weights are 11.2GB (vision tower +
+# BF16 attention), leaving negative KV budget at 14.6GB. Validated 2026-09-01
+# side-by-side on this box: 5.59GB KV available, tool-call smoke test passed.
 #
 # ROLLBACK — the exact command the current container was started with; rerun
 # it verbatim (after docker rm -f mp-vllm) to restore the 35B model:
@@ -58,7 +62,7 @@ docker run -d --name mp-vllm --restart unless-stopped --gpus all \
   ykarout/Qwen3.5-9B-NVFP4 \
   --host 0.0.0.0 --port 8000 \
   --trust-remote-code \
-  --gpu-memory-utilization 0.12 \
+  --gpu-memory-utilization 0.18 \
   --max-model-len 32768 \
   --max-num-seqs 4 \
   --enable-prefix-caching \
