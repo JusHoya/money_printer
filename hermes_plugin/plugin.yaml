@@ -1,3 +1,26 @@
 name: money-printer
-version: "1.0"
-description: Tools for monitoring and controlling the Money Printer trading system via its HTTP API and data files
+version: 2.0.0
+description: >
+  Monitor and control the Money Printer Kalshi trading sandbox: portfolio
+  snapshots, trade journal, rolling stats, win rates, logs, and bot
+  start/stop. Works co-located or against a remote sandbox via
+  MONEY_PRINTER_URL (file-reading tools fall back to the dashboard HTTP API).
+provides_tools:
+  - mp_status
+  - mp_bots
+  - mp_start_bot
+  - mp_stop_bot
+  - mp_journal
+  - mp_rolling_stats
+  - mp_training
+  - mp_win_rates
+  - mp_session_log
+  - mp_data_log
+  - mp_health
+  - mp_log_tail
+  - mp_claude_usage
+provides_hooks: []
+requires_env:
+  - MONEY_PRINTER_URL
+python_dependencies:
+  - requests

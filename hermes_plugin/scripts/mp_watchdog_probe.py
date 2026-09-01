@@ -10,11 +10,23 @@ other scheduled tasks.
 Deploy: copy this file to ~/.hermes/scripts/mp_watchdog_probe.py on the VM
 (Hermes requires scripts to live under HERMES_HOME/scripts/ for sandboxing).
 """
+import os
 import subprocess
 import sys
 import time
 
-SCRIPT = "/home/hoyer/money_printer/scripts/watchdog_cron.sh"
+# Overridable: the VM-era default assumed a co-located checkout. In the split
+# alcyone/maia deployment the sandbox is remote and Docker restart policies
+# supersede the bash watchdog — prefer the mp_health tool there; this probe
+# remains for co-located installs.
+SCRIPT = os.getenv(
+    "MONEY_PRINTER_WATCHDOG",
+    os.path.join(
+        os.getenv("MONEY_PRINTER_DIR", os.path.expanduser("~/money_printer")),
+        "scripts",
+        "watchdog_cron.sh",
+    ),
+)
 TIMEOUT = 90  # seconds — bash worst-case is ~60s (health + restart + recheck); Hermes cap is 120s
 
 print(f"=== Money Printer probe @ {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} ===")
