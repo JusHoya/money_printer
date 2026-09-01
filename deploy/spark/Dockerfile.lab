@@ -17,6 +17,6 @@ COPY requirements.txt /tmp/requirements.txt
 # playwright/pre-commit/keyboard are dev-host tooling, not lab compute; torch
 # arm64 wheels are large but available. Trim what the lab never uses.
 RUN grep -vE '^(playwright|pre-commit|keyboard)' /tmp/requirements.txt > /tmp/req-lab.txt \
-    && pip install -r /tmp/req-lab.txt
+    && pip install -r /tmp/req-lab.txt pytest httpx
 
 ENV PYTHONPATH=/app
