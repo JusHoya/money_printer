@@ -100,7 +100,8 @@ from src.core.fee_calculator import (
     maker_fee,
     taker_fee,
 )
-from src.data.kalshi_history import LADDER_DIR
+from src.backtest.sealed_roots import assert_frame_not_sealed, assert_not_sealed
+from src.data.kalshi_history import LADDER_DIR, load_ladders
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
@@ -969,6 +970,33 @@ def build_probability_table(
 # --------------------------------------------------------------------------
 # Opportunity frame
 # --------------------------------------------------------------------------
+def load_search_ladders(
+    root=LADDER_DIR,
+    cities: Optional[Sequence[str]] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    quoted_only: bool = False,
+) -> pd.DataFrame:
+    """Resolve a ladder root for frame building -- refusing sealed roots.
+
+    The single entry through which the lab CLI and the factory's frame
+    builder turn a *path* into the ladder tape. ``data/ladders_holdout`` and
+    ``data/ladders_2026-09`` (and anything carrying a ``SEALED`` marker) raise
+    :class:`src.backtest.sealed_roots.SealedDataError` here, before a byte is
+    read (PRD_STRATEGY_FACTORY.md §4 A3 / FR-F0.5). ``load_ladders`` enforces
+    the same gate; this wrapper exists so the refusal is visible at the
+    frame-building layer and not only inside the data package.
+    """
+    root = assert_not_sealed(root, purpose="the search frame (ev_analysis)")
+    return load_ladders(
+        root,
+        cities=cities,
+        start_date=start_date,
+        end_date=end_date,
+        quoted_only=quoted_only,
+    )
+
+
 def build_opportunity_frame(
     ladders: pd.DataFrame,
     probabilities: pd.DataFrame,
@@ -982,7 +1010,12 @@ def build_opportunity_frame(
     whether it was available at all, the modelled win probability, the price
     after the adverse-fill allowance, the fee, the modelled EV, and the
     realized settlement PnL for the same trade.
+
+    Refuses a ``ladders`` frame whose ``attrs["ladder_root"]`` names a sealed
+    root (FR-F0.5) -- the last gate, in case the tape reached here through a
+    reader other than :func:`load_search_ladders`.
     """
+    assert_frame_not_sealed(ladders, purpose="the opportunity frame")
     tape = ladders.merge(
         vintages[
             [

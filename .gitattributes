@@ -67,3 +67,14 @@ tests/fixtures/**/*.png          -text
 # pinned to LF for the same reason reports/phase4/** is: a CRLF checkout would
 # alter files nobody edited and break the digests that make them evidence.
 vm_snapshot_2026_08_22/**         text eol=lf
+
+# Strategy factory F0 (FR-F0.5): the sealed ladder roots carry SHA manifests
+# and are hashed at unseal time — same pin as data/ladders/** above.
+data/ladders_holdout/**           text eol=lf
+data/ladders_2026-09/**           text eol=lf
+
+# Host-side shell scripts and systemd units run on Linux (maia/alcyone). A
+# CRLF checkout would break the shebang line and systemd's unit parser, so
+# they are pinned to LF regardless of the developer's core.autocrlf.
+*.sh                              text eol=lf
+deploy/**/systemd/**              text eol=lf

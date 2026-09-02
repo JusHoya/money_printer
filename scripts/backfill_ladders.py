@@ -16,10 +16,18 @@ Usage
     python scripts/backfill_ladders.py --probe-retention   # find the earliest
                                                            # retrievable date
 
-Writes ``data/ladders/<SERIES>/<YYYY-MM-DD>.csv`` plus the provenance manifest
-``data/ladders/manifest.json``. Read-only against the Kalshi API and against
+Writes ``<out>/<SERIES>/<YYYY-MM-DD>.csv`` plus the provenance manifest
+``<out>/manifest.json`` (``--out`` defaults to ``data/ladders``; the manifest
+always lives under the same root as the CSVs, never in ``data/ladders`` when
+``--out`` points elsewhere). Read-only against the Kalshi API and against
 ``data/weather_truth/``; it never places an order and never writes outside
-``data/ladders/``.
+``--out``. Note ``manifest.json`` describes the *last run* only -- the M0
+capture timer (``deploy/spark/ladder_capture.sh``) keeps a per-run copy.
+
+Sealed roots (PRD_STRATEGY_FACTORY.md FR-F0.5): ``--out data/ladders_holdout``
+and ``--out data/ladders_2026-09`` are written by this script but refused by
+``load_ladders``; ``--stats`` on them reads through the explicit unchecked
+loader and prints coverage only.
 """
 
 from __future__ import annotations
@@ -38,11 +46,13 @@ from src.data.kalshi_history import (  # noqa: E402
     OBSERVED_RETENTION_FLOOR,
     WEATHER_CITY_SPECS,
     KalshiHistoryClient,
+    _load_ladders_unchecked,
     backfill,
     event_ticker_for,
     load_ladders,
     load_manifest,
 )
+from src.backtest.sealed_roots import sealed_reason  # noqa: E402
 
 # Bracket distance from the settled outcome, in degrees F. 0 = the bracket
 # that actually paid; larger = further out of the money. This is the banding
@@ -144,7 +154,14 @@ def ttc_label(hours: float) -> str:
 def print_stats(root: Path) -> int:
     """Descriptive statistics over the backfilled ladders (deliverable 2)."""
 
-    df = load_ladders(root)
+    reason = sealed_reason(root)
+    if reason is None:
+        df = load_ladders(root)
+    else:
+        # Coverage statistics only (no fitness, no strategy input); the
+        # search frame itself keeps refusing this root -- FR-F0.5.
+        print(f"NOTE: {reason}; --stats prints descriptive coverage only.")
+        df = _load_ladders_unchecked(root)
     if df.empty:
         print(f"No ladder rows under {root}. Run the backfill first.")
         return 1
