@@ -45,10 +45,15 @@ services:
     volumes:
       - ../..:/app
       - ~/mp_archive/extracted:/archive:ro
-    tmpfs:
-      # Logs never touch the checkout (FR-F0.6). Docker mounts tmpfs 1777, so
-      # the non-root user can write it.
-      - /app/logs
+      # Logs never touch the checkout (FR-F0.6). Measured 2026-09-02 on
+      # alcyone: the short `tmpfs:` form mounts /app/logs root:root 0755, so
+      # the non-root lab user got EACCES from the logger at import time. The
+      # long form pins the mode. The YAML value is passed to the daemon as an
+      # integer, so it MUST be the octal literal: a bare `1777` mounts 3361.
+      - type: tmpfs
+        target: /app/logs
+        tmpfs:
+          mode: 0o1777
     working_dir: /app
     # No ports. No network services. This container only crunches data (and,
     # for the backfill scripts, pulls from public APIs — network stays on;

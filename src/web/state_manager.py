@@ -25,6 +25,18 @@ def _fmt_uptime(start_time: datetime) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def _iso_or_none(value):
+    """ISO 8601 (with offset when tz-aware) for a datetime; strings pass
+    through; anything else (None, legacy junk) becomes ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value or None
+    return None
+
+
 def _detect_mode(orchestrator) -> str:
     """Runtime mode shown in the dashboard header.
 
@@ -184,6 +196,11 @@ class StateManager:
                     "pnl": round(pos.get("pnl", 0.0), 4),
                     "strategy": pos.get("strategy_name", "Unknown"),
                     "age": age_sec,
+                    # PRD_STRATEGY_FACTORY FR-F0.1: the settlement-day close the
+                    # position will settle at (ISO 8601 with offset), or null
+                    # for a legacy row that has not been backfilled. The F0
+                    # exit criterion reads this field off /api/status.
+                    "expiration_time": _iso_or_none(pos.get("expiration_time")),
                 }
             )
         return result
