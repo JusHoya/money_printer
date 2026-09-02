@@ -131,10 +131,21 @@ class FeeRegime:
 
 
 def sha256_file(path: str) -> str:
+    """sha256 of a file with CRLF normalised to LF.
+
+    Every factory input that is hashed for provenance (lock file, family YAML,
+    fee regime, ladder/forecast/truth CSVs) is a text file that git checks out
+    with CRLF on Windows (``core.autocrlf=true``) and LF on alcyone. Hashing the
+    raw bytes made ``run.json``/``registry.jsonl`` disagree between the two
+    hosts for byte-identical content (measured 2026-09-02: the lab lock hashed
+    ``7591e064...`` on Windows and ``523a9fe5...`` in the container), which
+    would have aborted the alcyone gen-0 run on a spurious config mismatch.
+    Normalising line endings makes the hash a property of the content only.
+    """
     h = hashlib.sha256()
     with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
+        data = fh.read()
+    h.update(data.replace(b"\r\n", b"\n"))
     return h.hexdigest()
 
 

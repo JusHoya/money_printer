@@ -54,12 +54,11 @@ NOT_IMPLEMENTED = ("run", "resume", "controls", "report", "holdout", "score", "p
 # helpers (no heavy imports)
 # ---------------------------------------------------------------------------
 def sha256_file(path: Path) -> Optional[str]:
+    """CRLF-normalised sha256 (see ``src.factory.fees.sha256_file``); None if unreadable."""
     try:
-        h = hashlib.sha256()
-        with open(path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                h.update(chunk)
-        return h.hexdigest()
+        from src.factory.fees import sha256_file as _norm_sha
+
+        return _norm_sha(str(path))
     except OSError:
         return None
 
