@@ -190,3 +190,66 @@ def test_go_no_go_still_targets_the_default_root():
     assert not re.search(r"ladders_holdout|ladders_2026-09", src)
     assert load_ladders.__defaults__[0] == LADDER_DIR
     assert sealed_reason(LADDER_DIR) is None
+
+
+# ---------------------------------------------------------------------------
+# Content gate (red-team finding 2026-09-02): ``attrs`` do not survive
+# ``pd.concat`` or a bare ``pd.read_csv`` of a copied CSV, so the path/marker
+# gate alone is defeated by ``cp``. Dates are not.
+# ---------------------------------------------------------------------------
+
+
+def _ladder_rows(*dates):
+    return pd.DataFrame(
+        {
+            "city": ["NY"] * len(dates),
+            "target_date": list(dates),
+            "market_ticker": [f"KXHIGHNY-X-{i}" for i, _ in enumerate(dates)],
+        }
+    )
+
+
+def test_frame_gate_refuses_rows_dated_after_the_development_set():
+    with pytest.raises(sr.SealedDataError, match="target_date > 2026-07-25"):
+        assert_frame_not_sealed(_ladder_rows("2026-07-25", "2026-07-26"))
+
+
+def test_frame_gate_accepts_rows_inside_the_development_set():
+    assert_frame_not_sealed(_ladder_rows("2026-05-18", "2026-07-25"))
+
+
+def test_frame_gate_catches_a_copied_holdout_csv_without_marker(tmp_path):
+    src = Path("data/ladders_holdout/KXHIGHNY/2026-08-01.csv")
+    if not src.exists():
+        pytest.skip("holdout CSV not on disk")
+    copy = tmp_path / "copy" / "KXHIGHNY"
+    copy.mkdir(parents=True)
+    (copy / "2026-08-01.csv").write_bytes(src.read_bytes())
+    df = pd.read_csv(copy / "2026-08-01.csv")
+    assert not df.attrs  # exactly the bypass the red team demonstrated
+    with pytest.raises(sr.SealedDataError):
+        assert_frame_not_sealed(df)
+
+
+def test_frame_gate_survives_concat_dropping_attrs():
+    dev = _ladder_rows("2026-07-01")
+    dev.attrs["ladder_root"] = "data/ladders"
+    sealed = _ladder_rows("2026-08-15")
+    sealed.attrs["ladder_root"] = "data/ladders_holdout"
+    merged = pd.concat([dev, sealed], ignore_index=True)
+    with pytest.raises(sr.SealedDataError):
+        assert_frame_not_sealed(merged)
+
+
+def test_only_the_sealed_evaluation_attr_opens_the_content_gate():
+    df = _ladder_rows("2026-08-15")
+    df.attrs[sr.SEALED_EVALUATION_ATTR] = True
+    assert_frame_not_sealed(df)  # F4's sanctioned path
+    # ...and the flag does not travel through concat, by design.
+    assert not pd.concat([df, _ladder_rows("2026-08-16")]).attrs.get(
+        sr.SEALED_EVALUATION_ATTR
+    )
+
+
+def test_dev_set_cutoff_matches_the_prd_declaration():
+    assert sr.DEV_SET_LAST_DATE == "2026-07-25"

@@ -116,16 +116,54 @@ def assert_not_sealed(
     return Path(root)
 
 
-def assert_frame_not_sealed(frame, purpose: str = "the search frame") -> None:
-    """Refuse a ladder DataFrame that records a sealed origin in ``attrs``.
+#: Last target date of the development set (PRD A3: 2026-05-18..07-25 are
+#: "already searched"). Every date after it belongs to a sealed set, whatever
+#: path or reader the rows arrived through.
+DEV_SET_LAST_DATE = "2026-07-25"
 
-    :func:`src.data.kalshi_history.load_ladders` stamps
-    ``df.attrs["ladder_root"]`` with the resolved root it read. The frame
-    builder checks that stamp so a frame that reached it through some other
-    reader is refused at the last gate as well. Frames without the stamp
-    (hand-built fixtures) pass.
+#: ``df.attrs`` key the F4 holdout path sets, immediately before building a
+#: frame, to declare a sanctioned sealed evaluation. Nothing else sets it.
+SEALED_EVALUATION_ATTR = "sealed_evaluation"
+
+
+def assert_frame_not_sealed(frame, purpose: str = "the search frame") -> None:
+    """Refuse a ladder DataFrame that is sealed by origin OR by content.
+
+    Two independent tests, both must pass:
+
+    * **origin** -- :func:`src.data.kalshi_history.load_ladders` stamps
+      ``df.attrs["ladder_root"]`` with the resolved root it read; a stamp that
+      names a sealed root is refused.
+    * **content** -- any ``target_date`` after :data:`DEV_SET_LAST_DATE` is
+      refused. ``attrs`` do not survive ``pd.concat`` or a bare
+      ``pd.read_csv`` of a copied CSV (red-team finding, 2026-09-02), so the
+      path gate alone can be bypassed by ``cp``; the dates cannot.
+
+    Frames without a ``target_date`` column (hand-built fixtures) are judged
+    on origin only. The F4 holdout path opts out of the content test by
+    setting ``attrs[SEALED_EVALUATION_ATTR] = True`` right before the call,
+    under its unseal record; the flag is deliberately fragile (it, too, is
+    dropped by ``concat``) so it cannot leak into a search run by accident.
     """
     attrs = getattr(frame, "attrs", None) or {}
     origin = attrs.get("ladder_root")
     if origin:
         assert_not_sealed(origin, purpose=purpose)
+    if attrs.get(SEALED_EVALUATION_ATTR):
+        return
+    try:
+        dates = frame["target_date"]
+    except (KeyError, TypeError, IndexError):
+        return
+    if len(dates) == 0:
+        return
+    latest = str(dates.astype(str).max())[:10]
+    if latest > DEV_SET_LAST_DATE:
+        n_late = int((dates.astype(str).str[:10] > DEV_SET_LAST_DATE).sum())
+        raise SealedDataError(
+            f"refusing to build {purpose}: {n_late} row(s) carry target_date "
+            f"> {DEV_SET_LAST_DATE} (latest {latest}). Every date after the "
+            f"development set is sealed out-of-sample data ({PRD_CLAUSE}), "
+            "whatever directory it was read from; only the F4 holdout path "
+            f"may set attrs[{SEALED_EVALUATION_ATTR!r}] to evaluate it."
+        )
