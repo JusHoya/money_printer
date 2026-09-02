@@ -831,10 +831,50 @@ def load_ladders(
         ``NaN`` where the API reported no value -- never 0.0-as-missing.
         ``ts_utc`` and ``close_time_utc`` are tz-aware UTC timestamps.
         Empty DataFrame (with the right columns) when nothing matches.
+        ``df.attrs["ladder_root"]`` records the resolved root it was read
+        from, so the frame builder can refuse a sealed origin downstream.
+
+    Raises
+    ------
+    src.backtest.sealed_roots.SealedDataError
+        When ``root`` resolves to, or lies inside, a sealed ladder root
+        (``data/ladders_holdout``, ``data/ladders_2026-09``) or a directory
+        carrying a ``SEALED`` marker -- PRD_STRATEGY_FACTORY.md §4 A3 /
+        FR-F0.5. This is the search-frame gate; F4's holdout path and the
+        descriptive ``--stats`` reader go through
+        :func:`_load_ladders_unchecked` explicitly and own that choice.
+    """
+    from src.backtest.sealed_roots import assert_not_sealed
+
+    assert_not_sealed(root, purpose="the search frame (load_ladders)")
+    return _load_ladders_unchecked(
+        root,
+        cities=cities,
+        start_date=start_date,
+        end_date=end_date,
+        quoted_only=quoted_only,
+    )
+
+
+def _load_ladders_unchecked(
+    root: Path = LADDER_DIR,
+    cities: Optional[Sequence[str]] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    quoted_only: bool = False,
+):
+    """:func:`load_ladders` without the sealed-root gate.
+
+    Deliberately private. The only callers that may use it are F4's
+    ``holdout.py`` (one look per sealed root, under an unseal record) and
+    ``scripts/backfill_ladders.py --stats`` (coverage statistics, no
+    fitness). The frame it returns is still stamped with its origin, so
+    ``ev_analysis.build_opportunity_frame`` refuses it regardless.
     """
     import pandas as pd
 
     root = Path(root)
+    origin = str(root.resolve())
     wanted_series: Optional[set] = None
     if cities:
         by_key = {c: s for c, s, _ in WEATHER_CITY_SPECS}
@@ -855,7 +895,9 @@ def load_ladders(
             frames.append(pd.read_csv(csv_path))
 
     if not frames:
-        return pd.DataFrame(columns=list(LADDER_COLUMNS))
+        empty = pd.DataFrame(columns=list(LADDER_COLUMNS))
+        empty.attrs["ladder_root"] = origin
+        return empty
 
     df = pd.concat(frames, ignore_index=True)
     for col in (
@@ -893,9 +935,11 @@ def load_ladders(
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
     if quoted_only:
         df = df[df["has_quote"] == True].reset_index(drop=True)  # noqa: E712
-    return df.sort_values(
+    df = df.sort_values(
         ["target_date", "series", "market_ticker", "ts_utc"]
     ).reset_index(drop=True)
+    df.attrs["ladder_root"] = origin
+    return df
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> dict:

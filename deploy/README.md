@@ -63,10 +63,18 @@ deploy/
     bootstrap_maia.sh      one-shot host prep (run ON maia)
     systemd/               daily reconcile timers (host-level, call into the container)
   spark/
-    docker-compose.lab.yml offline lab/backtest container (isolates mp deps from other Spark projects)
+    docker-compose.lab.yml offline lab/backtest container (isolates mp deps from other Spark projects);
+                           runs as the host uid via LAB_UID/LAB_GID, logs on tmpfs (FR-F0.6)
     Dockerfile.lab         full-fat analysis image (offline ML stack)
+    requirements-lab.lock  pinned lab manifest: `pip freeze` inside the lab image (FR-F0.6);
+                           regenerate when Dockerfile.lab or requirements.txt change
+    .env                   gitignored; LAB_UID/LAB_GID written by bootstrap_alcyone.sh
     bootstrap_alcyone.sh   one-shot lab bring-up (run ON alcyone): docker check,
-                           repo clone, archive-hash verify, lab image build + smoke run
+                           repo clone into ~/projects/money_printer, archive-hash verify,
+                           .env with the host uid, lab image build + smoke run + uid check
+    ladder_capture.sh      M0 daily ladder capture into data/ladders_2026-09 (FR-F0.5)
+    install_ladder_capture.sh  copies the units below into /etc/systemd/system and enables the timer
+    systemd/               mp-ladder-capture.{service,timer} — daily 12:30 UTC, Persistent=true
     hermes_model_swap.sh   PREPARED, NOT AUTO-RUN: swaps the mp-vllm serving model
                            35B→9B to free ~35GB for lab work. Run only after
                            side-by-side validation; the verbatim rollback command
@@ -127,3 +135,60 @@ curl -s http://localhost:8050/healthz    # {"status":"ok","uptime_s":...}
 changed containers; bind-mounted state under `/srv/money_printer/` survives.
 If `git pull` refuses (non-fast-forward), stop and reconcile by hand — never
 reset the sandbox host's checkout blindly while the harvester is writing.
+
+## Lab container on alcyone (FR-F0.6)
+
+The lab (`deploy/spark/docker-compose.lab.yml`) runs as the **host uid**, so a
+run never leaves root-owned files in the checkout, and `/app/logs` is a tmpfs.
+The uid is interpolated from `LAB_UID`/`LAB_GID`:
+
+```bash
+# once — bootstrap_alcyone.sh writes deploy/spark/.env with your uid/gid (gitignored)
+bash deploy/spark/bootstrap_alcyone.sh
+# or per-invocation, no .env needed (the shell wins over .env):
+LAB_UID=$(id -u) LAB_GID=$(id -g) docker compose -f deploy/spark/docker-compose.lab.yml run --rm lab id -u
+```
+
+`docker compose -f deploy/spark/docker-compose.lab.yml run --rm lab id -u`
+must print your uid (F0 exit criterion). `deploy/spark/requirements-lab.lock`
+is the pinned lab manifest — `pip freeze` captured inside the image — and is
+regenerated whenever `Dockerfile.lab` or `requirements.txt` changes.
+
+## M0 ladder capture (alcyone, FR-F0.5)
+
+`PRD_STRATEGY_FACTORY.md` FR-F0.5 wants a daily capture of the four KXHIGH
+ladders into the **sealed** root `data/ladders_2026-09/` (the Sept–Oct R3
+reserve) until the kill date **2026-09-15**. maia has no headroom for it, so it
+runs on alcyone through the lab container (network on):
+
+```bash
+# ON alcyone, from ~/projects/money_printer (checkout fast-forwarded, lab image built)
+bash deploy/spark/install_ladder_capture.sh        # installs + enables mp-ladder-capture.timer
+MP_CAPTURE_DRY_RUN=1 bash deploy/spark/ladder_capture.sh   # prints the plan, no network
+sudo systemctl start mp-ladder-capture.service     # one real run now
+journalctl -u mp-ladder-capture.service -n 80 --no-pager
+```
+
+What one run does (`deploy/spark/ladder_capture.sh`):
+
+- target date = **yesterday in ET** (KXHIGH target dates are ET settlement
+  days); with the default two-day lookback it re-pulls D-2 too so `result` /
+  `expiration_value` settle into the tape;
+- the timer fires at **12:30 UTC** — after LAX's 07:59Z close (NY/MIA 04:59Z,
+  CHI 05:59Z) and after the NWS CLI publication Kalshi settles on;
+  `Persistent=true` catches up a missed day;
+- `docker compose ... run --rm lab python scripts/backfill_ladders.py --start D-2 --end D-1 --out data/ladders_2026-09`
+  writes `data/ladders_2026-09/<SERIES>/<date>.csv`, `manifest.json` (last
+  run) and a per-run copy `manifests/<date>.json`, plus a `SEALED` marker;
+- commits **explicit paths only** (`git add -- <files>`, never `-A`), message
+  `data(ladders_2026-09): capture <D-1>`, **no push**. Push by hand when
+  convenient; maia's `git pull --ff-only` keeps working because only dated
+  artifacts under one root are added;
+- refuses to run once the target date passes the kill date; override only on
+  purpose with `MP_CAPTURE_KILL_DATE=YYYY-MM-DD` (or `Environment=` in the unit).
+
+The unit runs as `jushoya` (must be in the `docker` group) with
+`WorkingDirectory=/home/jushoya/projects/money_printer`; edit the `.service`
+if the checkout lives elsewhere. The search-frame loader refuses this root
+and `data/ladders_holdout/` by path identity and by the `SEALED` marker
+(`src/backtest/sealed_roots.py`, `tests/test_sealed_roots.py`).

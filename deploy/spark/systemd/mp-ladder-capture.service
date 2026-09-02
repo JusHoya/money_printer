@@ -1,0 +1,19 @@
+[Unit]
+Description=Money Printer M0 daily ladder capture into data/ladders_2026-09 (PRD_STRATEGY_FACTORY FR-F0.5)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jushoya
+Group=jushoya
+WorkingDirectory=/home/jushoya/projects/money_printer
+Environment=MP_REPO_DIR=/home/jushoya/projects/money_printer
+# Kill date guard lives in the script (default 2026-09-15); override here only
+# on purpose: Environment=MP_CAPTURE_KILL_DATE=YYYY-MM-DD
+ExecStart=/usr/bin/env bash /home/jushoya/projects/money_printer/deploy/spark/ladder_capture.sh
+# Four cities x two days at the 0.12 s request floor is minutes, not hours;
+# the ceiling only stops a wedged pull from overlapping the next day.
+TimeoutStartSec=2h
+Nice=10

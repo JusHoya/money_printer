@@ -1,14 +1,28 @@
-# Offline lab on alcyone (DGX Spark): backtests, calibration builds, and
-# model training against the harvested tape — Docker-isolated so Money
-# Printer's Python stack never collides with other projects on the Spark.
+# Offline lab on alcyone (DGX Spark): backtests, calibration builds, ladder
+# backfills and model training against the harvested tape — Docker-isolated so
+# Money Printer's Python stack never collides with other projects on the Spark.
 #
 #   docker compose -f deploy/spark/docker-compose.lab.yml build
 #   docker compose -f deploy/spark/docker-compose.lab.yml run --rm lab \
 #       python scripts/gas_backtest.py --help
 #
+# The container runs as the HOST uid/gid (PRD_STRATEGY_FACTORY.md FR-F0.6) so
+# nothing it writes into the bind-mounted checkout is root-owned. The uid is
+# interpolated from LAB_UID / LAB_GID, which come from either
+#   (a) deploy/spark/.env — written by bootstrap_alcyone.sh, gitignored, read
+#       automatically because Compose loads .env from the compose file's
+#       directory; or
+#   (b) the shell, which wins over .env:
+#       LAB_UID=$(id -u) LAB_GID=$(id -g) docker compose -f deploy/spark/docker-compose.lab.yml run --rm lab id -u
+# Without either it falls back to 1000:1000 (the first user on Ubuntu). Verify:
+#   docker compose -f deploy/spark/docker-compose.lab.yml run --rm lab id -u   # prints your uid
+#
 # The archive payload (market tape etc.) is mounted read-only from
 # ~/mp_archive/extracted once it has been copied to the Spark and verified
 # against vm_snapshot_2026_08_22/meta/archive_sha256.txt.
+#
+# Pinned lab manifest: deploy/spark/requirements-lab.lock (pip freeze inside
+# this image) — the record of what the lab actually ran with.
 
 name: money-printer-lab
 
@@ -18,16 +32,25 @@ services:
       context: ../..
       dockerfile: deploy/spark/Dockerfile.lab
     image: money-printer-lab:latest
+    # Host uid/gid: see the header. The image installs as root at build time
+    # and needs no root at runtime.
+    user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
     environment:
       TZ: UTC
       PYTHONPATH: /app
+      # A non-root uid has no /root; give pip, matplotlib, joblib etc. a
+      # writable home that vanishes with the container.
+      HOME: /tmp
+      PIP_CACHE_DIR: /tmp/.cache/pip
     volumes:
       - ../..:/app
       - ~/mp_archive/extracted:/archive:ro
-      - lab-venv-cache:/root/.cache/pip
+    tmpfs:
+      # Logs never touch the checkout (FR-F0.6). Docker mounts tmpfs 1777, so
+      # the non-root user can write it.
+      - /app/logs
     working_dir: /app
-    # No ports. No network services. This container only crunches data.
+    # No ports. No network services. This container only crunches data (and,
+    # for the backfill scripts, pulls from public APIs — network stays on;
+    # the F1+ `factory` service is the one that runs with network_mode: none).
     command: ["python", "-c", "print('mp-lab ready — use docker compose run')"]
-
-volumes:
-  lab-venv-cache:
