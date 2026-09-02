@@ -128,3 +128,4 @@ vm_snapshot_2026_08_22/extracted/
 data/factory/
 reports/factory/*/gen_*
 reports/factory/*/controls/
+reports/factory/*/seed_date_pnl.json

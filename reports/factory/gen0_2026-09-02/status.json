@@ -1,0 +1,34 @@
+{
+  "campaigns": [
+    "A",
+    "B",
+    "C",
+    "ALL69"
+  ],
+  "controls": "n/a (F2)",
+  "evolution": "not started (F2)",
+  "family": "weather/gfs_mex/taker/v1",
+  "frame": {
+    "gefs_twin_sha256": "5d6611a3cbb7e6053db15f5793d2ff2f01e5ac1749da9db58b3662b63bdabe4b",
+    "parity_rows": 251728,
+    "parity_sha256": "749d876362c8c5d33c80fd4a3c29e0d3e3e1bdc01d38c09d77eb67480a6ace81",
+    "search_rows": 216636,
+    "search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076"
+  },
+  "git_rev": "c38a28f1567934998fac8144a7cf02f0eea49505",
+  "kind": "gen0",
+  "n_phenotypes": 7,
+  "parity_matches_1e9": true,
+  "phase": "F1",
+  "registry_status": "OPEN",
+  "run_id": "gen0_2026-09-02",
+  "seeds_scored": [
+    "fr31a_taker",
+    "fr31b",
+    "nofilter_no",
+    "salvage_5f",
+    "mlweather_fallback",
+    "fr31a_gefs",
+    "far_yes_taker"
+  ]
+}

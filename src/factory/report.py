@@ -104,7 +104,9 @@ def _row_cell(row: Any) -> str:
     if not isinstance(row, dict):
         return DASH
     reason = row.get("constraint_reason")
-    if row.get("fit") is not None and isinstance(row.get("fit"), float) and not math.isfinite(row["fit"]):
+    fit = row.get("fit")
+    # -inf in memory; None after the summary.json round-trip (write_json maps -inf -> null)
+    if (isinstance(fit, float) and not math.isfinite(fit)) or (fit is None and reason):
         return f"KILLED:{reason or '?'}"
     return f"{_fmt(row.get('realized'))} {_ci(row)} n={_fmt(row.get('trades'))} d={_fmt(row.get('dates'))}"
 
@@ -218,6 +220,16 @@ def render_status_json(summary: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _bss_entries(summary: Dict[str, Any]) -> List[Any]:
+    """``[(frame_name, bss_dict)]``: gen0 writes ``{"parity": {...}, "search": {...}}``; a flat dict is one entry."""
+    bss = summary.get("brier_skill_vs_market") or {}
+    if not isinstance(bss, dict):
+        return [("frame", {})]
+    if "bss" in bss or not bss:
+        return [("frame", bss)]
+    return [(str(k), v if isinstance(v, dict) else {}) for k, v in bss.items()]
+
+
 # ---------------------------------------------------------------------------
 # summary.md
 # ---------------------------------------------------------------------------
@@ -271,13 +283,13 @@ def render_summary_md(summary: Dict[str, Any]) -> str:
         lines.append(f"`mlweather_fallback` (what maia trades today): {ml.get('notes') or 'no note'}")
     else:
         lines.append(f"`mlweather_fallback` row: {DASH} (absent from this summary)")
-    bss = summary.get("brier_skill_vs_market") or {}
     lines.append("")
-    lines.append(
-        f"**Frame-level Brier skill vs market mid** (all two-sided rows): BSS {_fmt(bss.get('bss'))} "
-        f"CI [{_fmt(bss.get('ci_lo'))}, {_fmt(bss.get('ci_hi'))}] over {_fmt(bss.get('n_rows'))} rows / "
-        f"{_fmt(bss.get('n_dates'))} dates (date-clustered)"
-    )
+    for frame_name, bss in _bss_entries(summary):
+        lines.append(
+            f"**Frame-level Brier skill vs market mid** ({frame_name} frame, all two-sided rows): BSS {_fmt(bss.get('bss'))} "
+            f"CI [{_fmt(bss.get('ci_lo'))}, {_fmt(bss.get('ci_hi'))}] over {_fmt(bss.get('n_rows'))} rows / "
+            f"{_fmt(bss.get('n_dates'))} dates (date-clustered)"
+        )
     tp = summary.get("throughput")
     if tp:
         lines.append("")
@@ -406,8 +418,9 @@ def write_gen0_report(summary: Dict[str, Any], out_dir: Union[str, Path], *, rep
     ``reports_root`` defaults to ``out_dir.parent`` (i.e. ``reports/factory``); ``coverage``
     defaults to ``<reports_root>/coverage.json`` when present.
     """
-    out_dir = Path(out_dir)
-    reports_root = Path(reports_root) if reports_root else out_dir.parent
+    # Resolve both so a relative ``--out`` still yields reports-root-relative pointers in latest.json.
+    out_dir = Path(out_dir).resolve()
+    reports_root = Path(reports_root).resolve() if reports_root else out_dir.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     if coverage is None:
         coverage = _load_json(reports_root / "coverage.json")
