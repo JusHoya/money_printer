@@ -1214,6 +1214,29 @@ class TestHealthz:
         sm.snapshot.assert_not_called()
         mock_orchestrator.dashboard.log_portfolio.assert_not_called()
 
+    def test_healthz_503_when_market_loop_stopped(self, client_and_sm, mock_orchestrator):
+        """2026-09-02: the FakeEngine guard ended only its own thread and the
+        container answered 200 for seven hours. running=False must be 503 so
+        autoheal restarts it."""
+        client, _ = client_and_sm
+        mock_orchestrator.running = False
+        mock_orchestrator._loop_stop_reason = "startup discovery gate failed"
+        resp = client.get("/healthz")
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["status"] == "loop_stopped"
+        assert body["reason"] == "startup discovery gate failed"
+
+    def test_healthz_stale_heartbeat_is_503(self, client_and_sm, mock_orchestrator):
+        import time as _time
+
+        client, _ = client_and_sm
+        mock_orchestrator.running = True
+        mock_orchestrator._last_loop_pass_monotonic = _time.monotonic() - 10_000
+        assert client.get("/healthz").status_code == 503
+        mock_orchestrator._last_loop_pass_monotonic = _time.monotonic()
+        assert client.get("/healthz").status_code == 200
+
 
 # ---------------------------------------------------------------------------
 # Control-token auth tests (MP_CONTROL_TOKEN)

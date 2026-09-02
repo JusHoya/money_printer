@@ -168,5 +168,58 @@ class TestOrchestratorGuard(unittest.TestCase):
         self.assertTrue(eng._check_fake_engine(context="startup"))
 
 
+REAL_DISCOVERY = ([{"ticker": "KXHIGHNY-26SEP02-T83"}], None)
+FIXTURE_DISCOVERY = ([{"ticker": "KX-TEST-50000"}], None)
+
+
+class TestStartupGate(unittest.TestCase):
+    """2026-09-02 boot race: a probe that cannot be made is retried; a probe
+    that answers fixture-only is not. Either way the loop is marked stopped
+    (running=False) rather than sys.exit-ing its own thread."""
+
+    def test_transient_network_failure_is_retried_then_passes(self):
+        kalshi = mock.Mock()
+        kalshi.search_markets.side_effect = [
+            ConnectionError("no route to host"),
+            ConnectionError("no route to host"),
+            REAL_DISCOVERY,
+        ]
+        eng = _make_minimal_orchestrator(kalshi)
+        with mock.patch("scripts.run_dashboard.time.sleep") as sleep:
+            with self.assertLogs("MoneyPrinter", level="WARNING"):
+                self.assertTrue(eng._startup_discovery_gate())
+        self.assertEqual(kalshi.search_markets.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertTrue(eng.running)
+
+    def test_fixture_only_answer_fails_fast_without_retry(self):
+        kalshi = mock.Mock()
+        kalshi.search_markets.return_value = FIXTURE_DISCOVERY
+        eng = _make_minimal_orchestrator(kalshi)
+        with mock.patch("scripts.run_dashboard.time.sleep") as sleep:
+            with self.assertLogs("MoneyPrinter", level="ERROR"):
+                self.assertFalse(eng._startup_discovery_gate())
+        self.assertEqual(kalshi.search_markets.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_persistent_failure_gives_up_after_the_budget(self):
+        kalshi = mock.Mock()
+        kalshi.search_markets.side_effect = ConnectionError("still down")
+        eng = _make_minimal_orchestrator(kalshi)
+        eng._STARTUP_PROBE_ATTEMPTS = 3
+        with mock.patch("scripts.run_dashboard.time.sleep") as sleep:
+            with self.assertLogs("MoneyPrinter", level="ERROR"):
+                self.assertFalse(eng._startup_discovery_gate())
+        self.assertEqual(kalshi.search_markets.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_stop_loop_marks_running_false_with_reason(self):
+        eng = _make_minimal_orchestrator(kalshi_mock=None)
+        with self.assertLogs("MoneyPrinter", level="ERROR"):
+            eng._stop_loop("startup discovery gate failed")
+        self.assertFalse(eng.running)
+        self.assertEqual(eng._loop_stop_reason, "startup discovery gate failed")
+
+
 if __name__ == "__main__":
     unittest.main()

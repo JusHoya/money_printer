@@ -879,10 +879,15 @@ class OrchestratorEngine:
         """
         if not self.kalshi:
             return True
+        # Distinguishes "the probe could not be made" (network/auth exception —
+        # retried at startup) from "the probe answered fixture-only" (the real
+        # incident class — never retried). Read by _startup_discovery_gate.
+        self._last_probe_error = None
         try:
             result = self.kalshi.search_markets(limit=200)
             markets = result[0] if isinstance(result, tuple) else (result or [])
         except Exception as exc:
+            self._last_probe_error = f"{type(exc).__name__}: {exc}"
             logger.error(
                 "[FakeEngineGuard] Discovery probe failed (%s): %s", context, exc
             )
@@ -919,6 +924,51 @@ class OrchestratorEngine:
             )
         return True
 
+    # Boot race (2026-09-02 incident): on a host restart maia's network came
+    # up minutes AFTER the container, so every startup connection failed, the
+    # guard fired at 10:46:03 and the sandbox sat dead for 7 hours while
+    # /healthz kept answering 200. A probe that CANNOT BE MADE is retried for
+    # up to ~10 minutes; a probe that ANSWERS fixture-only still fails fast.
+    _STARTUP_PROBE_ATTEMPTS = 20
+    _STARTUP_PROBE_INTERVAL_S = 30
+
+    def _startup_discovery_gate(self) -> bool:
+        """Layer 2 with a bounded retry for transient startup failures."""
+        for attempt in range(1, self._STARTUP_PROBE_ATTEMPTS + 1):
+            if self._check_fake_engine(context="startup"):
+                return True
+            error = getattr(self, "_last_probe_error", None)
+            if error is None:
+                return False  # discovery answered, and it was fixture-only
+            if attempt == self._STARTUP_PROBE_ATTEMPTS:
+                logger.error(
+                    "[FakeEngineGuard] startup probe failed %d times; giving up (%s)",
+                    attempt,
+                    error,
+                )
+                return False
+            logger.warning(
+                "[FakeEngineGuard] startup probe %d/%d failed (%s); retrying in %ds",
+                attempt,
+                self._STARTUP_PROBE_ATTEMPTS,
+                error,
+                self._STARTUP_PROBE_INTERVAL_S,
+            )
+            time.sleep(self._STARTUP_PROBE_INTERVAL_S)
+        return False
+
+    def _stop_loop(self, reason: str) -> None:
+        """Mark the market loop dead in a way the process can see.
+
+        ``sys.exit`` from the loop THREAD only ends the thread: uvicorn kept
+        serving and the TUI kept rendering. ``running=False`` is what both
+        runtimes already watch — the TUI's render loop exits, and
+        ``/healthz`` answers 503 so docker/autoheal restart the container.
+        """
+        self.running = False
+        self._loop_stop_reason = reason
+        logger.error("[MarketLoop] stopped: %s", reason)
+
     # Fixed cadence for portfolio CSV sampling in the market loop. The write
     # used to live in StateManager.snapshot(), which meant one SD-card CSV row
     # per second per WS client and on every healthcheck probe; snapshot() is
@@ -937,10 +987,15 @@ class OrchestratorEngine:
         # watchdog no longer reads it.)
         self._write_sim_balance_marker()
 
+        # Liveness stamp from the very start, so a startup stuck in the probe
+        # retry (or dead before its first pass) is measured by /healthz against
+        # the same staleness clock as a hung pass, instead of being invisible.
+        self._last_loop_pass_monotonic = time.monotonic()
+
         # Layer 2: refuse to start the trading loop if discovery is fixture-only
-        if not self._check_fake_engine(context="startup"):
-            self.running = False
-            sys.exit(1)
+        if not self._startup_discovery_gate():
+            self._stop_loop("startup discovery gate failed (see FakeEngineGuard)")
+            return
 
         # Startup: archive stale CSVs from previous sessions (fast — the
         # startup retrain was removed per FR-0.2).
@@ -977,8 +1032,8 @@ class OrchestratorEngine:
                     > self._FAKE_ENGINE_RECHECK_INTERVAL
                 ):
                     if not self._check_fake_engine(context="recheck"):
-                        self.running = False
-                        sys.exit(1)
+                        self._stop_loop("discovery recheck failed (see FakeEngineGuard)")
+                        return
                     last_fake_engine_check = time.time()
 
                 # Update active positions (cross-bot)

@@ -174,8 +174,22 @@ def create_app(state_manager, orchestrator) -> FastAPI:
         carries a numeric ``_last_loop_pass_monotonic`` stamp (written once
         per market_loop pass) older than LOOP_STALE_AFTER_S, return 503 so
         autoheal can restart a hung loop. Absent the attribute (test stubs,
-        TUI-less contexts) the probe stays 200."""
+        TUI-less contexts) the probe stays 200.
+
+        A loop that STOPPED (``orchestrator.running is False`` — the
+        FakeEngine guard, a failed startup gate) is 503 as well: on
+        2026-09-02 the guard killed only its own thread and the container
+        answered 200 for seven hours with no harvest and no trading."""
         uptime_s = float(getattr(orchestrator, "uptime_seconds", 0.0))
+        if getattr(orchestrator, "running", True) is False:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "loop_stopped",
+                    "uptime_s": uptime_s,
+                    "reason": str(getattr(orchestrator, "_loop_stop_reason", "") or ""),
+                },
+            )
         stamp = getattr(orchestrator, "_last_loop_pass_monotonic", None)
         if isinstance(stamp, (int, float)):
             loop_age_s = time.monotonic() - stamp
