@@ -54,8 +54,10 @@ factory code; all of it gates F3/F4 and the retention items are irreversible if 
   `expiration_time` (ISO string with offset) and, within 36 h of their close, they leave the
   book via `_settle_weather_position` (reconcile_weather.py reports ≥1 sim-leg record,
   not "NOTHING TO CHECK").
-- `grep -c 'confidence=1.000' logs/money_printer_*.log` on maia returns 0 for any log
-  started after the deploy; `[Signal] EMIT strategy=ML Weather` lines are absent.
+- `grep -c 'strategy=ML Weather' logs/money_printer_*.log` on maia returns 0 for any log
+  started after the deploy (`[Signal] EMIT`/`EXECUTED strategy=ML Weather` lines absent).
+  A bare `confidence=1.000` grep is not the signal: V2's HIGH MET winner guard emits
+  `confidence=1.0` by design (red team, 2026-09-02); its sizing is an F3 owner decision.
 - A maia tape file for a city-day contains rows after 00:00Z D+1 up to the city's close
   (04:59Z NY/MIA, 05:59Z CHI, 07:59Z LAX).
 - `data/ladders_holdout/` holds ≥140 city-days with `result ∈ {yes,no}`, ≥30 dates with a

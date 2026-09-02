@@ -279,8 +279,12 @@ the only virgin data before Kalshi prunes it.
 - `GET /api/status` on maia shows positions 1–3 with non-null tz-aware `expiration_time`,
   and within 36 h of their close they leave the book via `_settle_weather_position`
   (`reconcile_weather.py` reports ≥1 sim-leg record, not "NOTHING TO CHECK").
-- `grep -c 'confidence=1.000'` on any maia log started after the deploy returns 0; no
-  `[Signal] EMIT strategy=ML Weather` lines.
+- `grep -c 'strategy=ML Weather'` on any maia log started after the deploy returns 0 (no
+  `[Signal] EMIT`/`EXECUTED strategy=ML Weather` lines). Note (red team, 2026-09-02): a
+  bare `confidence=1.000` grep is NOT the signal — V2's winner guard
+  (`weather_strategy.py`, HIGH MET: buy remaining value on a bracket the observed max has
+  already settled) legitimately emits `confidence=1.0`; whether that guard should size at
+  Kelly max is an owner decision for F3, not an F0 defect.
 - A maia tape file for a city-day contains rows after 00:00Z D+1 up to the city's close.
 - `data/ladders_holdout/` holds ≥140 city-days with `result ∈ {yes,no}`, ≥30 dates with a
   gfs_mex vintage of lead 4–20 h, a passing SHA manifest; the search-frame builder refuses

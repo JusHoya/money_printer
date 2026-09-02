@@ -1,6 +1,7 @@
 import time
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict
 from src.core.interfaces import TradeSignal
 from src.core.fee_calculator import trade_is_profitable
@@ -169,7 +170,11 @@ class TickerResolverMixin:
                         best_ticker = active_markets[0].get("ticker")
 
             elif criteria == "sentiment":
-                now = datetime.now()
+                # FR-F0.3 (2026-09-02): weather event dates are ET calendar
+                # days; the host clock is UTC in the maia container and
+                # rolled the date 4-5 h early (red-team residual after the
+                # _ladder_for_city fix).
+                now = datetime.now(ZoneInfo("America/New_York"))
                 target_dates = [
                     now.strftime("%y%b%d").upper(),
                     (now + timedelta(days=1)).strftime("%y%b%d").upper(),
