@@ -1,5 +1,12 @@
 # PRD — Money Printer Strategic Pivot (pivot_weather_v1)
 
+> **2026-09-02 — active work has moved.** New development is driven by
+> [`PRD_STRATEGY_FACTORY.md`](PRD_STRATEGY_FACTORY.md) (the evolutionary strategy
+> factory, Phases **F0–F5**, executed with `/sprint Phase F<N>`). This document stays as
+> the governance record: its FR-0..FR-5 requirements, the HALT verdicts and the §9.3
+> pre-registered evidence standard are cited by the code and by the factory PRD. Phases 3
+> and 5 below were never executed (see `HANDOFF.md`).
+
 **Status:** Draft v1.0 — 2026-07-24
 **Driving document:** `review_2026_07_24/STATE_OF_THE_PRINTER_2026_07_24.md` (comprehensive review, 22-agent verified)
 **Branch:** `pivot_weather_v1`
