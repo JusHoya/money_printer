@@ -51,7 +51,7 @@ import re
 import threading
 import time
 from datetime import date as _date
-from datetime import datetime, timedelta
+from datetime import datetime, time as _time, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -66,6 +66,7 @@ __all__ = [
     "settlement_station_for",
     "settlement_date_for",
     "settlement_timezone_for",
+    "settlement_close_for",
     "city_key_for_station",
     "city_keys",
     "resolve_settlement_high",
@@ -264,14 +265,30 @@ def settlement_date_for(symbol: str) -> Optional[_date]:
     return None
 
 
-def hours_since_settlement_day_close(
-    symbol: str, now: Optional[datetime] = None
-) -> Optional[float]:
-    """Hours elapsed since the settlement day ended, in the station's timezone.
+def settlement_close_for(symbol: str) -> Optional[datetime]:
+    """The tz-aware instant at which ``symbol``'s settlement day ends.
 
-    Negative while the day is still running. Used to decide whether missing
-    truth is ordinary latency (INFO) or a fault worth paging about
-    (see :data:`SETTLEMENT_TRUTH_GRACE_HOURS`).
+    ``KXHIGHNY-26SEP01-T83`` -> ``2026-09-02 00:00 America/New_York``: local
+    midnight *following* the event date, in the settlement station's own
+    timezone (so ~04:00Z for NY/MIA, 05:00Z for CHI, 07:00Z for LAX).
+
+    This is the one definition of "when does a weather contract expire" in
+    the runtime (PRD FR-F0.1). It is what
+    :func:`src.core.bracket_payoff.attach_spec_to_signals` stamps onto every
+    outgoing weather ``TradeSignal``, what ``SimulatedExchange.open_position``
+    backfills for a weather position opened without one, and what
+    ``SimulatedExchange._load_state`` backfills onto a restored position that
+    predates the stamp. Before it existed no weather signal carried an
+    expiration at all, so the exchange's EXPIRATION CHECK never fired and the
+    FR-1.2 settlement branch was unreachable from the live path -- positions
+    simply never left the book.
+
+    Deterministic and offline: derived from the ticker's event-date label and
+    the city registry only, never from a Kalshi ``close_time`` (which is the
+    market's *trading* close, a different instant). ``None`` when the symbol is
+    not a registered weather series, carries no event-date segment, or its
+    timezone cannot be loaded -- the same cases in which
+    :func:`settlement_date_for` reports missing truth.
     """
     tz_name = settlement_timezone_for(symbol)
     day = settlement_date_for(symbol)
@@ -282,9 +299,22 @@ def hours_since_settlement_day_close(
     except (ZoneInfoNotFoundError, ValueError, KeyError):
         return None
     # Local midnight that ends the settlement day.
-    day_close = datetime.combine(
-        day + timedelta(days=1), datetime.min.time(), tzinfo=tz
-    )
+    return datetime.combine(day + timedelta(days=1), _time(0, 0), tzinfo=tz)
+
+
+def hours_since_settlement_day_close(
+    symbol: str, now: Optional[datetime] = None
+) -> Optional[float]:
+    """Hours elapsed since the settlement day ended, in the station's timezone.
+
+    Negative while the day is still running. Used to decide whether missing
+    truth is ordinary latency (INFO) or a fault worth paging about
+    (see :data:`SETTLEMENT_TRUTH_GRACE_HOURS`).
+    """
+    day_close = settlement_close_for(symbol)
+    if day_close is None:
+        return None
+    tz = day_close.tzinfo
     current = now.astimezone(tz) if now is not None else datetime.now(tz)
     return (current - day_close).total_seconds() / 3600.0
 

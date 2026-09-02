@@ -1,0 +1,6819 @@
+{
+ "argv": [
+  "--start",
+  "2026-07-25",
+  "--end",
+  "2026-08-31",
+  "--max-workers",
+  "4",
+  "--out",
+  "data/forecast_archive_2026-09"
+ ],
+ "bucket": "https://noaa-gefs-pds.s3.amazonaws.com",
+ "cycles": [
+  {
+   "complete": true,
+   "cycle": "2026072500",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-25T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427212,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5291957-5719168",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 419072,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5179835-5598906",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416167,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5133221-5549387",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 410788,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5079880-5490667",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408240,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5064989-5473228",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406479,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5066084-5472562",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406590,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5058430-5465019",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 410772,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5060224-5470995",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406616,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5042665-5449280",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405068,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5045357-5450424",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403858,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5047224-5451081",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 273432,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3731852-4005283",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 290996,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3810432-4101427",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 298336,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3882833-4181168",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 298609,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3871348-4169956",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 302465,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3918571-4221035",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 307737,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3932662-4240398",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 305157,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3909524-4214680",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 305263,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3969370-4274632",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 305252,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3982579-4287830",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 308697,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3995697-4304393",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311997,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=4020031-4332027",
+     "s3_key": "gefs.20260725/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026072600",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-26T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427738,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5280443-5708180",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413127,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5167416-5580542",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 415400,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5121498-5536897",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409777,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5068247-5478023",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408351,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5063517-5471867",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406850,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5064185-5471034",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407286,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5060498-5467783",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411778,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5065443-5477220",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408251,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5034733-5442983",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405702,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5034987-5440688",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404474,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5051331-5455804",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 276247,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3726589-4002835",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 293381,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3786022-4079402",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297726,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3851348-4149073",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 297679,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3869369-4167047",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 303067,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3916693-4219759",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306675,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3917905-4224579",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 304392,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3918766-4223157",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306074,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3970264-4276337",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 303077,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3953180-4256256",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 307658,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3983253-4290910",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 312258,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3995989-4308246",
+     "s3_key": "gefs.20260726/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026072700",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-27T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427160,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5270135-5697294",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413664,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5169254-5582917",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416544,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5134780-5551323",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411148,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5075910-5487057",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409106,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5062598-5471703",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408105,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5079215-5487319",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408675,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5062649-5471323",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 412948,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5064030-5476977",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 409373,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5001957-5411329",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406836,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5001646-5408481",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 406067,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4999990-5406056",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 275399,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3749547-4024945",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 292939,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3810384-4103322",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297613,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3865391-4163003",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295048,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3871045-4166092",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300924,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3900192-4201115",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306253,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3907469-4213721",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 304101,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3924707-4228807",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306444,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3961439-4267882",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 304367,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3917298-4221664",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 307756,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3946316-4254071",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311909,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3938720-4250628",
+     "s3_key": "gefs.20260727/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026072800",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-28T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427644,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5267651-5695294",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 416091,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5178635-5594725",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 423402,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5130888-5554289",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 413405,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5029434-5442838",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 410070,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5061817-5471886",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408864,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5022444-5431307",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 409828,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5014525-5424352",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 413249,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5010076-5423324",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408622,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4989768-5398389",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406001,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4986411-5392411",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 405966,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4991117-5397082",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 274729,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3729727-4004455",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 291540,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3813061-4104600",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 298154,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3856752-4154905",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 296138,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3825925-4122062",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 299416,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3875593-4175008",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305937,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3858549-4164485",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302729,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3856285-4159013",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 302664,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3892110-4194773",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301725,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3901728-4203452",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305294,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3932795-4238088",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309210,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3935660-4244869",
+     "s3_key": "gefs.20260728/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026072900",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-29T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 428136,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5269048-5697183",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 415703,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5170419-5586121",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416788,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5126232-5543019",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411610,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5022983-5434592",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408483,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5009974-5418456",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407618,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5012360-5419977",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408578,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5018232-5426809",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 419069,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5037684-5456752",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408129,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5000461-5408589",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 404654,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5045301-5449954",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404717,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5050883-5455599",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 272715,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3715577-3988291",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 289839,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3777079-4066917",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 293767,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3835290-4129056",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 292164,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3804665-4096828",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 296710,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3824741-4121450",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 302272,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3847881-4150152",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 299958,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3865049-4165006",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304274,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3919285-4223558",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 307936,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3910880-4218815",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 304372,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3976038-4280409",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 308213,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3987365-4295577",
+     "s3_key": "gefs.20260729/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026073000",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-30T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426872,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5226232-5653103",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 414665,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5127976-5542640",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 423057,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5100603-5523659",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411952,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5044000-5455951",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409464,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5022294-5431757",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408358,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5032270-5440627",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408617,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5030222-5438838",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 412379,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5032049-5444427",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408537,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5018138-5426674",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405511,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5003289-5408799",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 405207,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5009629-5414835",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 270993,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3696097-3967089",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 287419,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3744946-4032364",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 294011,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3838069-4132079",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 294333,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3831438-4125770",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 296915,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3847357-4144271",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 302078,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3859761-4161838",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 298994,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3864069-4163062",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 301063,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3914277-4215339",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301048,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3923502-4224549",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305340,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3923891-4229230",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 307383,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3937580-4244962",
+     "s3_key": "gefs.20260730/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026073100",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-07-31T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427886,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5257534-5685419",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 415012,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5147435-5562446",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 417051,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5113143-5530193",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 412203,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5050946-5463148",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409230,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5020638-5429867",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408189,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5030628-5438816",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 409295,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5024816-5434110",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 419177,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5049012-5468188",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408983,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5005532-5414514",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 407221,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4993911-5401131",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 407017,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5007484-5414500",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 269075,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3703060-3972134",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 287604,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3768300-4055903",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 293850,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3822598-4116447",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 294117,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3829861-4123977",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 296828,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3860312-4157139",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 302290,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3867027-4169316",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 298748,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3915631-4214378",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304358,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3912095-4216452",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 300989,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3937389-4238377",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 304731,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3922118-4226848",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309204,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3937401-4246604",
+     "s3_key": "gefs.20260731/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080100",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-01T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427849,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5292097-5719945",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 415111,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5197721-5612831",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 422730,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5149178-5571907",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 413229,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5091096-5504324",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 410396,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5018046-5428441",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 409517,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5025795-5435311",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 410232,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5021005-5431236",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 412808,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5031719-5444526",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 409329,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5000176-5409504",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406991,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4998681-5405671",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 406933,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5009769-5416701",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 267949,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3718974-3986922",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 286559,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3810994-4097552",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295169,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3864752-4159920",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 294922,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3863675-4158596",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300176,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3852446-4152621",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 304969,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3859959-4164927",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303123,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3880989-4184111",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306201,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3928522-4234722",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 305733,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3907802-4213534",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 307128,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3938291-4245418",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311534,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3948483-4260016",
+     "s3_key": "gefs.20260801/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080200",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-02T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 428050,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5241997-5670046",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 417226,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5135163-5552388",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 417498,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5085508-5503005",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 413508,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5037033-5450540",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 410657,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5028312-5438968",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 410318,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5024955-5435272",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 411072,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5014620-5425691",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 418791,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5032974-5451764",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407801,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4990874-5398674",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406130,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4887848-5293977",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 406403,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4887023-5293425",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 267713,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3703545-3971257",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 289239,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3773882-4063120",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 299189,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3828467-4127655",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 297950,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3800429-4098378",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300608,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3832366-4132973",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306566,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3863574-4170139",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303524,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3880912-4184435",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306890,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3943973-4250862",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 306131,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3918056-4224186",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 306531,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3828121-4134651",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 310182,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3852173-4162354",
+     "s3_key": "gefs.20260802/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080300",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-03T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426403,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5235746-5662148",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 416439,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5143120-5559558",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 423192,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5093759-5516950",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411685,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5026517-5438201",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409572,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4904437-5314008",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 409090,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=4907127-5316216",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 409941,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4896610-5306550",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 413008,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=4909160-5322167",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408602,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4884262-5292863",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406340,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4885520-5291859",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 406210,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4915845-5322054",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 268975,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3664450-3933424",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 291635,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3747753-4039387",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 299274,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3838593-4137866",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 297800,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3831307-4129106",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 302842,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3761460-4064301",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 307693,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3773249-4080941",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303833,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3777771-4081603",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306117,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3813249-4119365",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 303807,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3813948-4117754",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305850,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3827818-4133667",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311016,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3839884-4150899",
+     "s3_key": "gefs.20260803/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080400",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-04T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427429,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5114771-5542199",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 416046,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5133936-5549981",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 423480,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5095586-5519065",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 412354,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5044458-5456811",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409234,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5042555-5451788",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408774,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5052396-5461169",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 409523,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5055623-5465145",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 412392,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5037510-5449901",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 409346,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5015305-5424650",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406498,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5011066-5417563",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 405320,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5029372-5434691",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 274283,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3558302-3832584",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 292438,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3745438-4037875",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 298640,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3822290-4120929",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 298099,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3823897-4121995",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300791,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3845363-4146153",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306302,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3876752-4183053",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303363,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3895608-4198970",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 309393,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3953096-4262488",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 305411,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3932284-4237694",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 307858,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3957820-4265677",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309818,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3962692-4272509",
+     "s3_key": "gefs.20260804/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080500",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-05T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426968,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5263559-5690526",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 420167,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5160815-5580981",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 421717,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5094011-5515727",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411752,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5356272-5768023",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408684,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5025360-5434043",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407965,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5043044-5451008",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 409173,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5031894-5441066",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 412549,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5023059-5435607",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407763,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5006431-5414193",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406003,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4996665-5402667",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404859,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5002941-5407799",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 272784,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3724245-3997028",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 290792,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3784359-4075150",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 300445,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3835532-4135976",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 297878,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4134424-4432301",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300715,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3858507-4159221",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 307198,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3885415-4192612",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 305446,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3887853-4193298",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 307786,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3921253-4229038",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302313,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3897169-4199481",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305928,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3917167-4223094",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309670,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3926792-4236461",
+     "s3_key": "gefs.20260805/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080600",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-06T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426808,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5293052-5719859",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 414665,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5138175-5552839",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416680,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5087903-5504582",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 410825,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5035488-5446312",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 712945,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5065130-5778074",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407171,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5066663-5473833",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407757,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5057968-5465724",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411695,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5054239-5465933",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407546,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5034276-5441821",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405381,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4992897-5398277",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404625,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4999997-5404621",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 271716,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3729075-4000790",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 291587,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3747404-4038990",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 299682,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3820680-4120361",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295137,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3813719-4108855",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 582912,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3878504-4461415",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305314,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3894239-4199552",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302332,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3905348-4207679",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304396,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3927537-4231932",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301604,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3922663-4224266",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305044,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3908655-4213698",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 308857,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3915536-4224392",
+     "s3_key": "gefs.20260806/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080700",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-07T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 425223,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5272535-5697757",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 414143,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5164129-5578271",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416633,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5121529-5538161",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 410348,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5081131-5491478",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408235,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5041654-5449888",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407605,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5056890-5464494",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408293,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5050839-5459131",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411318,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5011053-5422370",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407939,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4987779-5395717",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 406542,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4985327-5391868",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 406674,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4994762-5401435",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 269566,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3722696-3992261",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 292136,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3788606-4080741",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297320,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3831464-4128783",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295074,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3832399-4127472",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 299334,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3863462-4162795",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 304933,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3886215-4191147",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 301739,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3927836-4229574",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 303383,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3887465-4190847",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 300430,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3860299-4160728",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 304557,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3878570-4183126",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 308547,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3901274-4209820",
+     "s3_key": "gefs.20260807/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080800",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-08T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 425579,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5274333-5699911",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 414639,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5166517-5581155",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 415830,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5105067-5520896",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411067,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5016768-5427834",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409066,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4998460-5407525",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408263,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5010019-5418281",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 415420,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5017111-5432530",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411384,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5007395-5418778",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406935,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4974533-5381467",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405536,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4973924-5379459",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404576,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4989723-5394298",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 273921,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3683369-3957289",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 292315,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3762827-4055141",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295381,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3807071-4102451",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 294195,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3765022-4059216",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 298487,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3798363-4096849",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305029,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3833123-4138151",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302202,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3842428-4144629",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 303351,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3884745-4188095",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 309957,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3869727-4179683",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 304004,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3898921-4202924",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 307536,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3910518-4218053",
+     "s3_key": "gefs.20260808/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026080900",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-09T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426003,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5208662-5634664",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 416015,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5110847-5526861",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416737,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5078262-5494998",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 410781,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5006707-5417487",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409600,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4988173-5397772",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407436,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=4997102-5404537",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408339,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4998456-5406794",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 410087,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5002387-5412473",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405392,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4977517-5382908",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405304,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4975201-5380504",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404439,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4989798-5394236",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 265195,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3646612-3911806",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 290660,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3703573-3994232",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 294305,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3790738-4085042",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 294711,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3783634-4078344",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 298812,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3813496-4112307",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 302714,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3819582-4122295",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 300984,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3833233-4134216",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 301533,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3880571-4182103",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 300528,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3876460-4176987",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 302982,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3897536-4200517",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 306999,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3901424-4208422",
+     "s3_key": "gefs.20260809/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081000",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-10T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 424168,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5192630-5616797",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 412346,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5097232-5509577",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 413406,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5065510-5478915",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 408715,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5006225-5414939",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408254,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4994083-5402336",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406498,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=4997320-5403817",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407381,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4993559-5400939",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 410145,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5017610-5427754",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406506,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5010643-5417148",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405397,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5021805-5427201",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404452,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5037675-5442126",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 270404,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3638878-3909281",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 288722,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3718503-4007224",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 293962,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3774729-4068690",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 293394,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3791816-4085209",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 296258,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3817279-4113536",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 303353,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3826817-4130169",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 300653,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3844398-4145050",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304178,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3873921-4178098",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301613,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3917704-4219316",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305591,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3934289-4239879",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 310480,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3945526-4256005",
+     "s3_key": "gefs.20260810/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081100",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-11T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 424145,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5205180-5629324",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 418583,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5101217-5519799",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 419996,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5057080-5477075",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 410120,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5059353-5469472",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408412,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5040096-5448507",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407123,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5052494-5459616",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406672,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5042400-5449071",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 408885,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5059811-5468695",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405027,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5022346-5427372",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 403675,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4972899-5376573",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403914,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4990734-5394647",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 269619,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3649465-3919083",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 288849,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3724337-4013185",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295395,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3795105-4090499",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 293955,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3825133-4119087",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 299501,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3853179-4152679",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 303870,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3877524-4181393",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 300091,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3874019-4174109",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 303372,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3928903-4232274",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301414,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3916019-4217432",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305790,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3891857-4197646",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 306929,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3915883-4222811",
+     "s3_key": "gefs.20260811/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081200",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-12T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426291,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5259575-5685865",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 419160,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5166167-5585326",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 414124,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5079207-5493330",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409319,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5017896-5427214",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 406388,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4988696-5395083",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405156,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=4987875-5393030",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406022,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4990927-5396948",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 415524,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5051588-5467111",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405308,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5011662-5416969",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 402980,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5020529-5423508",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 402689,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4996166-5398854",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 271336,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3685842-3957177",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 289954,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3763545-4053498",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295356,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3796457-4091812",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295042,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3801412-4096453",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 297891,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3835303-4133193",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 302826,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3822916-4125741",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 299290,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3830358-4129647",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 301275,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3920371-4221645",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302633,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3898850-4201482",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 302725,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3924959-4227683",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 306510,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3907776-4214285",
+     "s3_key": "gefs.20260812/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081300",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-13T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 429247,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5200917-5630163",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 418279,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5417504-5835782",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 419573,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5101985-5521557",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 723225,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5347568-6070792",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 405415,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5042157-5447571",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405786,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5038954-5444739",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 412147,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4996127-5408273",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 415405,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5032780-5448184",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406487,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4993244-5399730",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 404026,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4982353-5386378",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403467,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4987459-5390925",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 271861,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3642244-3914104",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 289975,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3988906-4278880",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 296491,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3844721-4141211",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 586230,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4090614-4676843",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 293754,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3836084-4129837",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 302708,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3855143-4157850",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 300159,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3846281-4146439",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 303330,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3876896-4180225",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302521,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3881417-4183937",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305260,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3898843-4204102",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 308434,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3892705-4201138",
+     "s3_key": "gefs.20260813/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081400",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-14T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 744109,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5191820-5935928",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 417955,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5102337-5520291",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 419862,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5075193-5495054",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409616,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5319223-5728838",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 407081,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5008740-5415820",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406103,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5020278-5426380",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406076,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4959882-5365957",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 410146,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=4953936-5364081",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406211,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5571613-5977823",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 404140,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4979347-5383486",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404267,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5032287-5436553",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 526360,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3651884-4178243",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 285359,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3712267-3997625",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 293278,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3774964-4068241",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 296123,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4065997-4362119",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 298475,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3834384-4132858",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 304971,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3842517-4147487",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302514,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3784839-4087352",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304546,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3826455-4131000",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301652,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=4440967-4742618",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 306655,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3904942-4211596",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 310177,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3967020-4277196",
+     "s3_key": "gefs.20260814/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081500",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-15T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 424606,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5214324-5638929",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 416727,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5110116-5526842",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 413116,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5075368-5488483",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 712537,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5599026-6311562",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 700743,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5611038-6311780",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405589,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5300453-5706041",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406072,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5315769-5721840",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 410813,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5638301-6049113",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 403735,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5288241-5691975",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 402797,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5315142-5717938",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403110,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5035082-5438191",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 273150,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3655927-3929076",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 288387,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3730667-4019053",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297077,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3790564-4087640",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 564397,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4323292-4887688",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 566684,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=4405271-4971954",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 304571,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=4126359-4430929",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302722,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=4120636-4423357",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304605,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=4466051-4770655",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 295658,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=4179595-4475252",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 303037,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=4260209-4563245",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309703,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3966934-4276636",
+     "s3_key": "gefs.20260815/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081600",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-16T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 757183,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5597152-6354334",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413187,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5164037-5577223",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 360424,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5722398-6082821",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 701326,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5349970-6051295",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 708542,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5338934-6047475",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405975,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5056827-5462801",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406397,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5048715-5455111",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 409900,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5365106-5775005",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405433,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4975506-5380938",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 403543,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5014161-5417703",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403681,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5029570-5433250",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 551393,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3998503-4549895",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 294714,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3776283-4070996",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 222938,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=4359099-4582036",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 542252,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4081503-4623754",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 564347,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=4168187-4732533",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305878,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3900568-4206445",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302929,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3905949-4208877",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 307227,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=4238166-4545392",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 304384,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3905994-4210377",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 307466,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3968583-4276048",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311545,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3985880-4297424",
+     "s3_key": "gefs.20260816/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081700",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-17T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 752283,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5594612-6346894",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413484,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5168726-5582209",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 414115,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5108144-5522258",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409517,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5067378-5476894",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 406686,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5037680-5444365",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406689,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5054257-5460945",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407079,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5052794-5459872",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 409475,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5012198-5421672",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405372,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5006349-5411720",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 403560,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5012832-5416391",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403544,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5023973-5427516",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 544267,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=4013591-4557857",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 291260,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3782808-4074067",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297406,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3841505-4138910",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 298481,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3845461-4143941",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 301739,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3871070-4172808",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 307348,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3881859-4189206",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303603,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3889397-4192999",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306294,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3901017-4207310",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302997,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3936958-4239954",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305935,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3958420-4264354",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 310475,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3949430-4259904",
+     "s3_key": "gefs.20260817/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081800",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-18T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 424572,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5271161-5695732",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 412480,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5163413-5575892",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 413155,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5108549-5521703",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409448,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5047749-5457196",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 406549,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5042658-5449206",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405723,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5051024-5456746",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406414,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5049303-5455716",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 409918,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5046633-5456550",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405031,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5023905-5428935",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 402370,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5021302-5423671",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403278,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5040334-5443611",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 270454,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3707818-3978271",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 290866,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3768689-4059554",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297151,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3835222-4132372",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295153,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3822963-4118115",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 298915,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3854593-4153507",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 304534,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3879444-4183977",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 301708,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3892386-4194093",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304073,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3936142-4240214",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302965,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3922427-4225391",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 302715,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3953421-4256135",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309922,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3969225-4279146",
+     "s3_key": "gefs.20260818/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026081900",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-19T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 423785,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5268747-5692531",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 411876,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5161704-5573579",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 413496,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5109840-5523335",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 408743,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5055799-5464541",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 405799,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4998220-5404018",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405343,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5057587-5462929",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406413,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5059570-5465982",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411084,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5075674-5486757",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406883,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5036297-5443179",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 404907,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5029974-5434880",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404475,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5046504-5450978",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 268873,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3726560-3995432",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 287836,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3787961-4075796",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295302,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3846543-4141844",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 296062,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3848639-4144700",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 299326,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3809918-4109243",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306022,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3906300-4212321",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303016,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3916431-4219446",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306425,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3962742-4269166",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 303814,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3947925-4251738",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 306768,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3973789-4280556",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311427,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3987361-4298787",
+     "s3_key": "gefs.20260819/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082000",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-20T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 423348,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5227987-5651334",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 412510,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5171552-5584061",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 414083,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5126978-5541060",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409848,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5062789-5472636",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408293,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5052306-5460598",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 408042,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5069032-5477073",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 414420,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5073458-5487877",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 412356,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5076711-5489066",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 413029,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5044727-5457755",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405606,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5043969-5449574",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404142,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5048696-5452837",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 270294,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3697594-3967887",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 288668,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3785623-4074290",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297335,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3848160-4145494",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 296880,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3830491-4127370",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300033,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3884302-4184334",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306217,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3901992-4208208",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 304365,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3917661-4222025",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306254,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3955834-4262087",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 304610,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3957878-4262487",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 308467,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3977617-4286083",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 313098,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3996491-4309588",
+     "s3_key": "gefs.20260820/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082100",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-21T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 425314,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5276700-5702013",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413898,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5190479-5604376",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416197,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5156843-5573039",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 416143,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5082702-5498844",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409070,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5064082-5473151",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407196,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5072007-5479202",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407407,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5059323-5466729",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411343,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5064910-5476252",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406386,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5031507-5437892",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 404904,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5032666-5437569",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404227,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5047635-5451861",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 271323,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3742654-4013976",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 289464,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3856472-4145935",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 297628,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3840780-4138407",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 297064,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3849975-4147038",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 302241,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3870047-4172287",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 307552,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3879678-4187229",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 305264,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3881588-4186851",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 308564,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3920381-4228944",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 305698,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3922442-4228139",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 308286,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3943699-4251984",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 319424,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3947699-4267122",
+     "s3_key": "gefs.20260821/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082200",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-22T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426134,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5265507-5691640",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 414274,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5183535-5597808",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 416175,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5132903-5549077",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411039,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5058277-5469315",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 409124,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5062717-5471840",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407470,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5069858-5477327",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407804,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5075533-5483336",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 410632,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5064648-5475279",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406324,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5029485-5435808",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405219,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4994724-5399942",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404677,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5000163-5404839",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 273332,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3690261-3963592",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 292752,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3777357-4070108",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 298791,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3841615-4140405",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 299451,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3843583-4143033",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 302927,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3889411-4192337",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 308173,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3903899-4212071",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 305385,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3909724-4215108",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 315733,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3916380-4232112",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 307502,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3918752-4226253",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 308489,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3916549-4225037",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 312550,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3923615-4236164",
+     "s3_key": "gefs.20260822/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082300",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-23T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 426566,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5289823-5716388",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413542,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5177866-5591407",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 415587,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5126029-5541615",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409777,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5060830-5470606",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 406982,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4930504-5337485",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 412667,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5018786-5431452",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408109,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5028176-5436284",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411337,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5017012-5428348",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408042,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4992092-5400133",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405926,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5004992-5410917",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403887,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5010365-5414251",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 273989,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3695663-3969651",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 291468,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3789532-4080999",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 306841,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3836083-4142923",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 298793,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3814306-4113098",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 301174,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3741304-4042477",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306663,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3833183-4139845",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 304426,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3847764-4152189",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 309414,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3894134-4203547",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 307435,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3891779-4199213",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 308953,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3910518-4219470",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 312063,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3920792-4232854",
+     "s3_key": "gefs.20260823/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082400",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-24T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 425290,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5224288-5649577",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 412987,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5140259-5553245",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 420146,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5071278-5491423",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 410530,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5021603-5432132",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 408208,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5010714-5418921",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406668,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5006876-5413543",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 413069,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5016442-5429510",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411430,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5011646-5423075",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407688,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5032999-5440686",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405704,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5030051-5435754",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 410650,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5053939-5464588",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 272060,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3641561-3913620",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 292781,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3730791-4023571",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 298444,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3797382-4095825",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 299568,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3806240-4105807",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 302531,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3812409-4114939",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306594,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3821284-4127877",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 304377,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3835998-4140374",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 306733,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3887996-4194728",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 304475,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3921796-4226270",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 306383,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3950856-4257238",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 312208,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3946260-4258467",
+     "s3_key": "gefs.20260824/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082500",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-25T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 423748,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5213786-5637533",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 418759,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5131174-5549932",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 415415,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5124296-5539710",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411043,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5073647-5484689",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 407916,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5052150-5460065",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 412889,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5069916-5482804",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407967,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5074491-5482457",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411905,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5068867-5480771",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 408155,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5015305-5423459",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405548,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4983657-5389204",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 405761,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5054646-5460406",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 273457,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3636461-3909917",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 290622,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3711295-4001916",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 298090,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3799690-4097779",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 297759,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3807633-4105391",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300976,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3859833-4160808",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 306919,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3843948-4150866",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303303,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3873897-4177199",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 302716,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3911473-4214188",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301982,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3908096-4210077",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305596,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3908486-4214081",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309882,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3926523-4236404",
+     "s3_key": "gefs.20260825/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082600",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-26T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 422981,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5255922-5678902",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 412217,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5178729-5590945",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 415538,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5122272-5537809",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411441,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5058655-5470095",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 407582,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5097632-5505213",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406917,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5070947-5477863",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 413756,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5068891-5482646",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411962,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5369598-5781559",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407187,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5341148-5748334",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405497,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5036816-5442312",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404976,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5060927-5465902",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 271105,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3664437-3935541",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 288695,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3743176-4031870",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295539,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3795381-4090919",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 294773,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3804068-4098840",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 299502,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3845233-4144734",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305154,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3853030-4158183",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 301538,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3861580-4163117",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 304038,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=4199890-4503927",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 303905,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=4189976-4493880",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 307210,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3928797-4236006",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 310663,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3928300-4238962",
+     "s3_key": "gefs.20260826/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082700",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-27T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 423800,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5204999-5628798",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 418983,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5162192-5581174",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 415695,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5106604-5522298",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 411659,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5017231-5428889",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 407344,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5056798-5464141",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407913,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5069724-5477636",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 408227,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5074611-5482837",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411629,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5061491-5473119",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406891,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5040907-5447797",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 405082,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4992217-5397298",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 404371,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5010930-5415300",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 271379,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3623380-3894758",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 287732,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3740180-4027911",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295238,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3788664-4083901",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295670,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3735176-4030845",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 300066,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3846026-4146091",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305914,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3876619-4182532",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 303048,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3896209-4199256",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 303722,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3921147-4224868",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302521,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3936800-4239320",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 305162,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3903954-4209115",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311323,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3913084-4224406",
+     "s3_key": "gefs.20260827/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082800",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-28T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 765072,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5611769-6376840",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 418735,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5179022-5597756",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 414964,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5448417-5863380",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409980,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5397399-5807378",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 353571,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5069499-5423069",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 406632,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5068204-5474835",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406161,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5068194-5474354",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 409951,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5059675-5469625",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 404597,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5026776-5431372",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 401853,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5032770-5434622",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 401931,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=5357836-5759766",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 567234,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3994960-4562193",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 290581,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3763083-4053663",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 295386,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=4104127-4399512",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 296503,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4134087-4430589",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 223632,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3850536-4074167",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305732,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3878924-4184655",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302871,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3881714-4184584",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 303602,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3912966-4216567",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 302508,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3892920-4195427",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 304956,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3918321-4223276",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 308734,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=4235051-4543784",
+     "s3_key": "gefs.20260828/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026082900",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-29T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 425189,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5284380-5709568",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 413544,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5185711-5599254",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 413957,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5113523-5527479",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 408879,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5389579-5798457",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 404753,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5361644-5766396",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 404172,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5372703-5776874",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 404329,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5355189-5759517",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 409703,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5039509-5449211",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 405349,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=5586260-5991608",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 707522,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=5599575-6307096",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403396,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4979334-5382729",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 270799,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=3673227-3944025",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 289414,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3753144-4042557",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 292509,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=3795936-4088444",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 293637,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4104681-4398317",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 295428,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=4115952-4411379",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 303022,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=4165995-4469016",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 300188,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=4160469-4460656",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 302682,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3913136-4215817",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 301032,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=4447529-4748560",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 576513,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=4452069-5028581",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 309797,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3887719-4197515",
+     "s3_key": "gefs.20260829/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026083000",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-30T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 427877,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5936268-6364144",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 409755,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5486134-5895888",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 413385,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5748686-6162070",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 731153,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5665954-6397106",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 705019,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=5297420-6002438",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 405561,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=5315113-5720673",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 406142,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=5289797-5695938",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411230,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=4992034-5403263",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 407315,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4970446-5377760",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 404230,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4979902-5384131",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403965,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4989883-5393847",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 268830,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=4247488-4516317",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 286876,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=4021844-4308719",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 294959,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=4378714-4673672",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 583318,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=4357457-4940774",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 572187,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=4060379-4632565",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 303611,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=4083841-4387451",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 301028,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=4095257-4396284",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 305828,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3857828-4163655",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 304214,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3864306-4168519",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 306813,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3882151-4188963",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311087,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3903599-4214685",
+     "s3_key": "gefs.20260830/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  },
+  {
+   "complete": true,
+   "cycle": "2026083100",
+   "forecast_hours": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    33,
+    36,
+    42,
+    48,
+    54,
+    57
+   ],
+   "init_time_utc": "2026-08-31T00:00:00Z",
+   "record_failures": {},
+   "records": [
+    {
+     "bytes": 749211,
+     "fhour": 6,
+     "product": "geavg",
+     "range": "bytes=5866510-6615720",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 411888,
+     "fhour": 12,
+     "product": "geavg",
+     "range": "bytes=5456869-5868756",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 414786,
+     "fhour": 18,
+     "product": "geavg",
+     "range": "bytes=5408438-5823223",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 409712,
+     "fhour": 24,
+     "product": "geavg",
+     "range": "bytes=5038848-5448559",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 406998,
+     "fhour": 30,
+     "product": "geavg",
+     "range": "bytes=4987601-5394598",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 407118,
+     "fhour": 33,
+     "product": "geavg",
+     "range": "bytes=4998676-5405793",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 407188,
+     "fhour": 36,
+     "product": "geavg",
+     "range": "bytes=4991240-5398427",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 411647,
+     "fhour": 42,
+     "product": "geavg",
+     "range": "bytes=5003660-5415306",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 406991,
+     "fhour": 48,
+     "product": "geavg",
+     "range": "bytes=4967879-5374869",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 403512,
+     "fhour": 54,
+     "product": "geavg",
+     "range": "bytes=4971789-5375300",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 403258,
+     "fhour": 57,
+     "product": "geavg",
+     "range": "bytes=4988241-5391498",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/geavg.t00z.pgrb2s.0p25.f057"
+    },
+    {
+     "bytes": 541797,
+     "fhour": 6,
+     "product": "gespr",
+     "range": "bytes=4196320-4738116",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f006"
+    },
+    {
+     "bytes": 288768,
+     "fhour": 12,
+     "product": "gespr",
+     "range": "bytes=3997833-4286600",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f012"
+    },
+    {
+     "bytes": 296370,
+     "fhour": 18,
+     "product": "gespr",
+     "range": "bytes=4076735-4373104",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f018"
+    },
+    {
+     "bytes": 295927,
+     "fhour": 24,
+     "product": "gespr",
+     "range": "bytes=3780493-4076419",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f024"
+    },
+    {
+     "bytes": 297963,
+     "fhour": 30,
+     "product": "gespr",
+     "range": "bytes=3786479-4084441",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f030"
+    },
+    {
+     "bytes": 305838,
+     "fhour": 33,
+     "product": "gespr",
+     "range": "bytes=3817929-4123766",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f033"
+    },
+    {
+     "bytes": 302028,
+     "fhour": 36,
+     "product": "gespr",
+     "range": "bytes=3828905-4130932",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f036"
+    },
+    {
+     "bytes": 305367,
+     "fhour": 42,
+     "product": "gespr",
+     "range": "bytes=3876840-4182206",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f042"
+    },
+    {
+     "bytes": 303872,
+     "fhour": 48,
+     "product": "gespr",
+     "range": "bytes=3873173-4177044",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f048"
+    },
+    {
+     "bytes": 306434,
+     "fhour": 54,
+     "product": "gespr",
+     "range": "bytes=3885198-4191631",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f054"
+    },
+    {
+     "bytes": 311647,
+     "fhour": 57,
+     "product": "gespr",
+     "range": "bytes=3911769-4223415",
+     "s3_key": "gefs.20260831/00/atmos/pgrb2sp25/gespr.t00z.pgrb2s.0p25.f057"
+    }
+   ],
+   "row_errors": {},
+   "rows": 8,
+   "rows_expected": 8
+  }
+ ],
+ "field": "TMAX",
+ "geavg_to_member_mean_offset_f": {
+  "CHI": 0.0489,
+  "LAX": 0.0269,
+  "MIA": 0.0549,
+  "NY": 0.2514
+ },
+ "generated_at_utc": "2026-09-02T21:28:37Z",
+ "generator": "scripts/backfill_ensemble_history.py",
+ "level": "2 m above ground",
+ "live_statistic_for_contrast": "mean_m(max_t member TMAX)",
+ "missing": [],
+ "missing_note": "A cycle that could not be fetched, or whose covering set was incomplete, appears here. It is never silently absent from the series.",
+ "offset_provenance": {
+  "effect_on_sigma": "none -- a constant per-city shift moves bias_f by exactly its own value and leaves sigma_f unchanged",
+  "measured_on": "reports/phase2/ec1_ensemble_members.json runs[].geavg_check",
+  "n_per_city": 5,
+  "quantity": "mean_m(max_t member TMAX) - max_t(mean_m TMAX)",
+  "sample": "5 consecutive 00Z cycles 2026-07-20..2026-07-24 x 4 cities, 31 members",
+  "units": "degF",
+  "why": "max and mean do not commute; the live path maximises each member then averages, the backfill averages then maximises"
+ },
+ "products": [
+  "geavg",
+  "gespr"
+ ],
+ "resolution": "0p25",
+ "resolution_note": "0.5 deg (pgrb2ap5) carries the same field in a ~3.1x smaller record and was measured and rejected: its nearest node is 24-31 km from three of the four settlement stations and the daily highs disagree by up to 5.2 F. See reports/phase2/ws_f_report.md.",
+ "spread_rule": "gespr TMAX at the interval where geavg attains its daily maximum",
+ "statistic": "max_t(geavg TMAX) + per-city geavg-to-member-mean offset",
+ "stats": {
+  "bytes_downloaded": 304673818,
+  "cycles_fetched": 38,
+  "cycles_from_cache": 0,
+  "cycles_incomplete_or_failed": 0,
+  "cycles_present": 38,
+  "cycles_requested": 38,
+  "records_seen": 836,
+  "wall_seconds": 101.9
+ }
+}

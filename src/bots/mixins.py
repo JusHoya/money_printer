@@ -1,10 +1,11 @@
 import time
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict
 from src.core.interfaces import TradeSignal
 from src.core.fee_calculator import trade_is_profitable
-from src.core.risk_manager import RejectReason, log_rejection
+from src.core.risk_manager import MAX_CONTRACTS, RejectReason, log_rejection
 from src.utils.logger import logger
 
 # FR-0.4: mixins-local rejection reason codes — skips decided inside
@@ -169,7 +170,11 @@ class TickerResolverMixin:
                         best_ticker = active_markets[0].get("ticker")
 
             elif criteria == "sentiment":
-                now = datetime.now()
+                # FR-F0.3 (2026-09-02): weather event dates are ET calendar
+                # days; the host clock is UTC in the maia container and
+                # rolled the date 4-5 h early (red-team residual after the
+                # _ladder_for_city fix).
+                now = datetime.now(ZoneInfo("America/New_York"))
                 target_dates = [
                     now.strftime("%y%b%d").upper(),
                     (now + timedelta(days=1)).strftime("%y%b%d").upper(),
@@ -441,7 +446,11 @@ class SignalProcessorMixin:
             kelly_qty = risk_manager.calculate_kelly_size(
                 conf_for_sizing, sig.limit_price, strategy_name, symbol=sig.symbol
             )
-            sig.quantity = kelly_qty
+            # FR-F0.4 (2026-09-02): clamp to the exchange's per-entry cap HERE
+            # so the cost estimate, check_order and the EXECUTED log line all
+            # see the quantity that record_execution will actually book.
+            # Kelly can return up to 75; record_execution caps at 50.
+            sig.quantity = min(kelly_qty, MAX_CONTRACTS)
 
             if sig.quantity < 1:
                 # KELLY_ZERO was already logged at INFO inside

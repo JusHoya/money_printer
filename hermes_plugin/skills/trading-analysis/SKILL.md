@@ -25,8 +25,10 @@ metadata:
   were removed in the Phase 0 pivot). PnL is continuous from the session's
   starting balance — the sandbox launches with `SIM_BALANCE` (default
   $3,000); read the actual figure from `mp_status`, never assume a number.
-- Strategy names you will see in the journal: "ML Weather" and
-  "Meteorologist V2" (both run under the weather bot). "Gas Convergence" and
+- Strategy names you will see in the journal: "Meteorologist V2" (the weather
+  bot's only live strategy since 2026-09-02) and, in rows older than that,
+  "ML Weather" (now behind `ML_WEATHER_ENABLED = False`; a NEW "ML Weather"
+  row after 2026-09-02 is a posture change — flag it). "Gas Convergence" and
   "Mention Base Rate" exist in code but are behind trading flags that are off,
   so trades from them indicate a posture change worth flagging.
 
@@ -91,8 +93,8 @@ metadata:
      $3,000 default starts in the Growth stage: 12 positions). Above the
      cap, flag — stage caps should prevent it
    - Any bot showing active=false unexpectedly
-   - Any EXECUTED trade from a strategy other than "ML Weather" /
-     "Meteorologist V2" — the other bots are feed-only, so that is a posture
+   - Any EXECUTED trade from a strategy other than "Meteorologist V2" — the
+     other bots are feed-only and ML Weather is disabled, so that is a posture
      change, flag it
 3. Call `mp_rolling_stats` with hours=1 — if 1h PnL is worse than -10% of the
    starting balance (at the $3,000 default: below -$300), flag rapid loss

@@ -1,4 +1,6 @@
 station,date,high,low,high_time,source,source_url,product,fetched_at
+KMIA,2025-12-26,81,63,401 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2025,202512270928-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:14Z
+KMIA,2025-12-27,81,62,351 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2025,202512280931-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:14Z
 KMIA,2025-12-28,82,61,248 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2025,202512290933-KMFL-CDUS42-CLIMIA,2026-07-25T16:35:20Z
 KMIA,2025-12-29,82,63,353 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2025,202512300922-KMFL-CDUS42-CLIMIA,2026-07-25T16:35:20Z
 KMIA,2025-12-30,68,56,,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2025,202512310923-KMFL-CDUS42-CLIMIA,2026-07-25T16:35:20Z
@@ -207,3 +209,42 @@ KMIA,2026-07-21,92,82,328 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.
 KMIA,2026-07-22,92,82,156 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607230824-KMFL-CDUS42-CLIMIA,2026-07-25T16:35:20Z
 KMIA,2026-07-23,93,82,119 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607240822-KMFL-CDUS42-CLIMIA,2026-07-25T16:35:20Z
 KMIA,2026-07-24,93,81,246 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607250822-KMFL-CDUS42-CLIMIA,2026-07-25T16:35:20Z
+KMIA,2026-07-25,92,81,1231 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607260822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-07-26,94,78,1153 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607270825-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-07-27,92,75,118 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607280823-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-07-28,91,78,1120 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607290832-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-07-29,94,79,420 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607300828-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-07-30,96,80,353 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202607310825-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-07-31,96,81,151 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608010830-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-01,94,74,1238 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608020826-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-02,91,78,1203 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608030824-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-03,93,73,1138 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608040827-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-04,92,77,1148 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608050827-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-05,90,78,1149 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608060830-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-06,88,75,458 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608070828-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-07,91,79,322 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608080824-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-08,92,82,118 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608090822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-09,92,82,312 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608100823-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-10,93,84,228 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608110831-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-11,94,83,239 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608120833-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-12,94,80,123 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608130829-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-13,94,78,1229 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608140826-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-14,96,82,113 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608150822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-15,93,80,400 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608160822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-16,94,82,218 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608170822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-17,95,80,214 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608180822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-18,100,82,247 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608190822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-19,96,76,112 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608200826-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-20,93,79,1058 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608210824-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-21,94,81,1246 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608220825-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-22,94,80,154 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608230824-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-23,93,79,1223 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608240825-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-24,91,77,339 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608250827-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-25,92,79,150 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608260832-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-26,92,77,111 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608270830-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-27,93,78,207 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608280828-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-28,93,80,240 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608290823-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-29,85,76,511 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608300910-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-30,91,81,,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202608310822-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-08-31,91,78,1112 AM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202609011328-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z
+KMIA,2026-09-01,89,75,1254 PM,iem_cli,https://mesonet.agron.iastate.edu/json/cli.py?station=KMIA&year=2026,202609020824-KMFL-CDUS42-CLIMIA,2026-09-02T21:26:15Z

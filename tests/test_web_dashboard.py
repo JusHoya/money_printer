@@ -190,6 +190,37 @@ class TestStateManagerSnapshot:
         pos = snap["positions"][0]
         assert pos["id"] == "pos1"
         assert 58 <= pos["age"] <= 62  # approximately 60 seconds
+        # No expiration on the record -> explicit null, never a KeyError.
+        assert pos["expiration_time"] is None
+
+    def test_positions_expose_tz_aware_expiration_time(self, mock_orchestrator):
+        """PRD_STRATEGY_FACTORY FR-F0.1 exit criterion: /api/status shows each
+        weather position's settlement close as an ISO string WITH offset."""
+        from zoneinfo import ZoneInfo
+
+        from src.web.state_manager import StateManager
+
+        close = datetime(2026, 9, 2, 0, 0, tzinfo=ZoneInfo("America/New_York"))
+        mock_orchestrator.risk_manager.exchange.positions = [
+            {
+                "id": 1,
+                "symbol": "KXHIGHNY-26SEP01-T83",
+                "side": "buy",
+                "contract_side": "NO",
+                "entry_price": 0.17,
+                "current_price": 0.0,
+                "quantity": 50,
+                "pnl": -8.5,
+                "strategy_name": "ML Weather",
+                "open_time": datetime.now() - timedelta(hours=27),
+                "expiration_time": close,
+            }
+        ]
+        sm = StateManager(mock_orchestrator)
+        pos = sm.snapshot()["positions"][0]
+        assert pos["expiration_time"] == "2026-09-02T00:00:00-04:00"
+        parsed = datetime.fromisoformat(pos["expiration_time"])
+        assert parsed.tzinfo is not None and parsed.utcoffset() is not None
 
     def test_bots_active_status(self, mock_orchestrator):
         from src.web.state_manager import StateManager

@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily M0 ladder capture at 12:30 UTC (after LAX closes 07:59Z and the CLI-based settlement has usually posted)
+
+[Timer]
+# The four KXHIGH city-days for ET date D close at 04:59Z (NY/MIA), 05:59Z
+# (CHI) and 07:59Z (LAX) on D+1. 12:30 UTC (08:30 ET) is past all of them and
+# past the morning NWS CLI publication Kalshi settles on; the script's
+# two-day lookback re-captures D-2 in case a result posted late.
+OnCalendar=*-*-* 12:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

@@ -43,6 +43,13 @@ WIN_RATE_WINDOW = 50
 # Win-rate influences Kelly sizing only once the window holds this many samples.
 MIN_WIN_SAMPLES = 20
 
+# Hard position size cap: never record more than this many contracts per entry.
+# Module-level (2026-09-02, PRD_STRATEGY_FACTORY FR-F0.4) so the signal
+# processor can clamp a Kelly size to the same cap BEFORE it is cost-checked
+# and logged as EXECUTED — previously the log line and check_order saw the
+# uncapped Kelly quantity (up to 75) while record_execution booked 50.
+MAX_CONTRACTS = 50
+
 
 class RejectReason:
     """FR-0.4 stable reason codes for risk rejections and zero-sizing.
@@ -871,8 +878,9 @@ class RiskManager:
         maker default and, after the Phase 2 maker-multiplier correction, paid
         $0.00.
         """
-        # Hard position size cap: never record more than 50 contracts per entry
-        MAX_CONTRACTS = 50
+        # Hard position size cap (module-level MAX_CONTRACTS): never record
+        # more than 50 contracts per entry. Kept as the last line of defence
+        # even though the signal processor now clamps upstream (FR-F0.4).
         if quantity > MAX_CONTRACTS:
             logger.warning(
                 "[Risk] Position size capped: %d → %d contracts (%s)",

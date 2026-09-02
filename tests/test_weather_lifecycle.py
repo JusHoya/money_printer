@@ -33,8 +33,12 @@ Seams (three, all named):
      provider is replaced with an offline stub, so the tests never hit the
      network. The *resolver logic* is untouched.
   3. Positions are opened via ``exchange.open_position`` rather than through a
-     strategy signal, since weather trading is disabled in Phase 1
-     (``WEATHER_TRADING_ENABLED = False``).
+     strategy signal, since weather trading was disabled in Phase 1
+     (``WEATHER_TRADING_ENABLED = False``). The FR-F0.1 section at the bottom
+     is the exception: it drives the real strategy -> ``SignalProcessorMixin``
+     -> ``RiskManager`` -> exchange chain, because the defect it pins (no
+     weather signal ever carried an ``expiration_time``, so the EXPIRATION
+     CHECK never reached ``_settle_weather_position``) lived in that chain.
 """
 
 import json
@@ -133,13 +137,24 @@ def exchange(tmp_path):
     return SimulatedExchange(state_file=tmp_path / "exchange_state.json")
 
 
+#: ``_open_weather`` default: the settlement day is still running. The tests
+#: in the lifecycle sections below exercise the *pre-expiry* sweep (stops,
+#: time limit, marks, ladder) on a ticker dated 2026-07-25; they used to rely
+#: on ``expiration_time=None`` to keep that sweep away from the expiry branch,
+#: which was the FR-F0.1 defect itself -- since the fix the exchange backfills
+#: a missing weather expiration with the settlement-day close, and 2026-07-25
+#: closed long ago. Tests that want expiry set ``pos["expiration_time"]`` by
+#: hand, exactly as before.
+_DAY_STILL_RUNNING = object()
+
+
 def _open_weather(
     exchange,
     ticker=WEATHER_TICKER,
     entry=0.40,
     qty=10,
     stop_loss=0.0,
-    expiration_time=None,
+    expiration_time=_DAY_STILL_RUNNING,
     disable_profit_targets=False,
 ):
     """Open a weather position exactly as the production path would.
@@ -152,6 +167,8 @@ def _open_weather(
     PROFIT_TARGET tranches, never reaching settlement) was invisible as a
     result. A test that opts out of the defect cannot detect it.
     """
+    if expiration_time is _DAY_STILL_RUNNING:
+        expiration_time = datetime.now().astimezone() + timedelta(days=1)
     exchange.open_position(
         symbol=ticker,
         side="buy",
@@ -1114,3 +1131,400 @@ def test_kmdw_maps_to_chicago_positions(exchange, truth):
     assert pos["current_price"] == pytest.approx(
         0.75
     ), "TEMP_KMDW must route to the KXHIGHCHI position"
+
+
+# ======================================================================
+# 11. PRD FR-F0.1: every weather signal carries a tz-aware expiration_time
+# ======================================================================
+#
+# Confirmed defect (2026-09-02): ``pos["expiration_time"]`` was set only from
+# ``sig.expiration_time`` and no weather strategy ever set it, so the
+# EXPIRATION CHECK in ``update_market`` never ran for a weather position and
+# ``_settle_weather_position`` was unreachable from the live path. maia's
+# three 2026-09-01 positions were still open 27 h after their settlement day
+# closed. The stamp now lives at the strategy return boundary
+# (``bracket_payoff.attach_spec_to_signals``) with backfills in
+# ``open_position`` and ``_load_state``, all reading one helper:
+# ``weather_settlement.settlement_close_for``.
+
+import src.core.matching_engine as matching_engine  # noqa: E402
+import src.strategies.weather_strategy as weather_strategy  # noqa: E402
+from src.bots.mixins import SignalProcessorMixin  # noqa: E402
+from src.core.bracket_payoff import attach_spec_to_signals  # noqa: E402
+from src.core.interfaces import MarketData, TradeSignal  # noqa: E402
+from src.core.risk_manager import RiskManager  # noqa: E402
+from src.core.weather_settlement import settlement_close_for  # noqa: E402
+from src.strategies.weather_strategy import WeatherArbitrageStrategyV2  # noqa: E402
+
+ET = ZoneInfo("America/New_York")
+
+# The three positions open on maia (opened 2026-09-01 13:50 ET, id 1-3).
+MAIA_POSITIONS = [
+    # (symbol, strike_type, floor, cap, expected settlement close)
+    (
+        "KXHIGHNY-26SEP01-T83",
+        "greater",
+        83,
+        None,
+        datetime(2026, 9, 2, 0, 0, tzinfo=ZoneInfo("America/New_York")),
+    ),
+    (
+        "KXHIGHLAX-26SEP01-B76.5",
+        "between",
+        76,
+        77,
+        datetime(2026, 9, 2, 0, 0, tzinfo=ZoneInfo("America/Los_Angeles")),
+    ),
+    (
+        "KXHIGHMIA-26SEP01-B89.5",
+        "between",
+        89,
+        90,
+        datetime(2026, 9, 2, 0, 0, tzinfo=ZoneInfo("America/New_York")),
+    ),
+]
+
+
+class _Clock(datetime):
+    """A ``datetime`` whose ``now()`` is pinned; everything else is inherited.
+
+    Substituted for a module's ``datetime`` name so ``isinstance`` checks,
+    ``fromisoformat`` and arithmetic in that module keep working unchanged.
+    """
+
+    _now = None
+
+    @classmethod
+    def now(cls, tz=None):
+        """Aware in ``tz`` when asked; otherwise naive host-local, like the real one."""
+        current = cls._now
+        if tz is not None:
+            return current.astimezone(tz)
+        return current.astimezone().replace(tzinfo=None)
+
+    @classmethod
+    def set(cls, when):
+        cls._now = when
+
+
+class _Dashboard:
+    """The two calls ``_process_signals`` makes on the dashboard."""
+
+    def __init__(self):
+        self.signals = []
+
+    def log(self, *_args, **_kwargs):
+        pass
+
+    def record_signal(self, sig, status=None, strategy_name=None):
+        self.signals.append((sig, status, strategy_name))
+
+
+class _Bot(SignalProcessorMixin):
+    """The mixin as WeatherBot uses it; no provider, no tick loop."""
+
+
+def _won_market(symbol, strike_type, floor, cap, observed_max):
+    """A market the V2 WINNER GUARD emits on: a one-sided bracket already met.
+
+    Shaped as ``kalshi_provider._parse_market_data`` + the weather bot's
+    observation enrichment emit it. The guard path is the one deterministic
+    emit in ``_analyze`` (no forecast model, no velocity window), so it is the
+    right way to get a *real* strategy signal into the chain.
+    """
+    return MarketData(
+        symbol=symbol,
+        timestamp=datetime.now(),
+        price=0.60,
+        volume=100,
+        bid=0.55,
+        ask=0.60,
+        extra={
+            "status": "active",
+            "source": "live_metar",
+            "metar_age_seconds": 30,
+            "no_bid": 0.40,
+            "no_ask": 0.45,
+            "strike": floor,
+            "strike_type": strike_type,
+            "floor_strike": floor,
+            "cap_strike": cap,
+            "temperature_f": observed_max,
+            "max_temp_today_f": observed_max,
+            "forecast": [{"isDaytime": True, "temperature": observed_max}],
+        },
+    )
+
+
+def _settle_spy(exchange, monkeypatch):
+    calls = []
+    real = exchange._settle_weather_position
+
+    def spy(pos):
+        calls.append(pos["symbol"])
+        return real(pos)
+
+    monkeypatch.setattr(exchange, "_settle_weather_position", spy)
+    return calls
+
+
+def test_signal_path_stamps_settlement_close_then_settles(truth, monkeypatch, logs):
+    """Strategy -> mixin -> risk manager -> exchange, nothing set by hand.
+
+    The stamp must come out of the real strategy's return boundary and survive
+    the whole executed-signal chain onto the position; then, once the clock
+    passes it, the position must leave the book through
+    ``_settle_weather_position`` -- and only once truth is published.
+    """
+    symbol, strike_type, floor, cap, expected_close = MAIA_POSITIONS[0]
+    assert expected_close == settlement_close_for(symbol)
+
+    # 13:50 ET on the settlement day: inside the 10:00-13:59 trading window,
+    # the observed max (85F) is already above the `greater` floor (83 -> YES
+    # at >= 84), so the WINNER GUARD emits a BUY YES at the ask.
+    _Clock.set(datetime(2026, 9, 1, 13, 50, tzinfo=ET))
+    monkeypatch.setattr(weather_strategy, "datetime", _Clock)
+    signals = WeatherArbitrageStrategyV2().analyze(
+        _won_market(symbol, strike_type, floor, cap, observed_max=85.0)
+    )
+    assert signals, "fixture precondition: the WINNER GUARD must emit here"
+    for sig in signals:
+        assert sig.expiration_time is not None, "FR-F0.1: unstamped weather signal"
+        assert sig.expiration_time.tzinfo is not None, "FR-F0.1: naive expiration"
+        assert sig.expiration_time == expected_close
+
+    # The real gauntlet: slot check, Kelly, EV gate, check_order, record_execution.
+    risk = RiskManager(starting_balance=3000.0)
+    exchange = risk.exchange
+    dashboard = _Dashboard()
+    assert _Bot()._process_signals(signals, "Meteorologist V2", risk, dashboard)
+    assert [s for s in dashboard.signals if s[1] == "EXECUTED"]
+
+    (pos,) = exchange.positions
+    assert pos["symbol"] == symbol
+    assert pos["expiration_time"] == expected_close
+    assert pos["expiration_time"].tzinfo is not None
+    assert pos["expiration_time"].utcoffset() == expected_close.utcoffset()
+
+    # Before the close the sweep must not touch the settlement branch.
+    settle_calls = _settle_spy(exchange, monkeypatch)
+    monkeypatch.setattr(matching_engine, "datetime", _Clock)
+    _Clock.set(expected_close - timedelta(minutes=1))
+    exchange.update_market("TEMP_KNYC", 85.0)
+    assert pos in exchange.positions
+    assert settle_calls == []
+
+    # The clock passes the close; truth is not published -> hold, via the
+    # settlement helper, never a lifecycle close.
+    _Clock.set(expected_close + timedelta(minutes=1))
+    exchange.update_market("TEMP_KNYC", 85.0)
+    assert pos in exchange.positions
+    assert settle_calls == [symbol]
+    assert not exchange.closed_trades
+
+    # Truth arrives (85F >= 84 -> YES); the same sweep now settles it.
+    truth.publish("KNYC|2026-09-01", 85)
+    exchange.update_market("TEMP_KNYC", 85.0)
+    assert pos not in exchange.positions
+    assert settle_calls == [symbol, symbol]
+    (trade,) = exchange.closed_trades
+    assert trade["id"] == pos["id"]
+    assert trade["reason"] == "EXPIRATION"
+    assert not trade["reason"].startswith(FORBIDDEN_WEATHER_REASONS)
+    assert trade["exit_price"] == pytest.approx(1.00)
+    assert trade["settlement_high"] == pytest.approx(85.0)
+    assert trade["settlement_outcome"] == "yes"
+    assert any("FR-1.2 SETTLED" in m for m in logs.messages(logging.INFO))
+
+
+def test_caller_supplied_expiration_is_never_overridden(exchange, tmp_path):
+    """Signal, open_position and _load_state all keep an explicit value."""
+    symbol = MAIA_POSITIONS[0][0]
+    custom = datetime(2026, 9, 1, 23, 0, tzinfo=ZoneInfo("UTC"))
+    assert custom != settlement_close_for(symbol)
+
+    # Signal boundary.
+    sig = TradeSignal(
+        symbol=symbol, side="buy", quantity=1, limit_price=0.5, expiration_time=custom
+    )
+    (sig,) = attach_spec_to_signals([sig], _won_market(symbol, "greater", 83, None, 85))
+    assert sig.expiration_time == custom
+
+    # Exchange open.
+    pos = _open_weather(exchange, ticker=symbol, expiration_time=custom)
+    assert pos["expiration_time"] == custom
+
+    # Restart: the persisted ISO string carries its offset and comes back
+    # tz-aware and equal, with no backfill on top of it.
+    exchange._save_state()
+    restored = SimulatedExchange(state_file=exchange._state_file)
+    (again,) = restored.positions
+    assert again["expiration_time"] == custom
+    assert again["expiration_time"].tzinfo is not None
+
+
+def _legacy_row(pid, symbol, strike_type, floor, cap, **extra):
+    """A position row as maia's pre-FR-F0.1 exchange_state.json holds it."""
+    row = {
+        "id": pid,
+        "symbol": symbol,
+        "side": "buy",
+        "entry_price": 0.40,
+        "current_price": 0.40,
+        "quantity": 5,
+        "original_quantity": 5,
+        "open_time": "2026-09-01T17:50:00",
+        "pnl": 0.0,
+        "stop_loss": 0.0,
+        "trailing_rules": None,
+        "trailing_activated": False,
+        "expiration_time": None,
+        "strategy_name": "Meteorologist V2",
+        "last_market_price": 0,
+        "contract_side": "YES",
+        "strike": floor,
+        "strike_type": strike_type,
+        "floor_strike": floor,
+        "cap_strike": cap,
+        "profit_targets": [],
+        "entry_fee": 0.0,
+        "is_maker": False,
+        "fill_type": "taker_assumed",
+    }
+    row.update(extra)
+    return row
+
+
+def _legacy_state(positions):
+    return {
+        "schema_version": 1,
+        "saved_at": "2026-09-01T17:50:00",
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "total_fees_paid": 0.0,
+        "maker_fills": 0,
+        "taker_fills": len(positions),
+        "cumulative_realized_pnl": 0.0,
+        "cumulative_fees_paid": 0.0,
+        "cumulative_entry_fees": 0.0,
+        "next_position_id": len(positions) + 1,
+        "positions": positions,
+        "closed_trades": [],
+    }
+
+
+def test_load_state_backfills_the_maia_positions(tmp_path, logs):
+    """maia's exchange_state.json: three weather rows with no expiration."""
+    state_file = tmp_path / "exchange_state.json"
+    rows = [
+        _legacy_row(i, sym, st, lo, hi)
+        for i, (sym, st, lo, hi, _close) in enumerate(MAIA_POSITIONS, start=1)
+    ]
+    state_file.write_text(json.dumps(_legacy_state(rows)), encoding="utf-8")
+
+    restored = SimulatedExchange(state_file=state_file)
+
+    assert [p["id"] for p in restored.positions] == [1, 2, 3]
+    for pos, (sym, _st, _lo, _hi, expected_close) in zip(
+        restored.positions, MAIA_POSITIONS
+    ):
+        assert pos["symbol"] == sym
+        exp = pos["expiration_time"]
+        assert exp is not None, f"{sym}: not backfilled"
+        assert exp.tzinfo is not None, f"{sym}: backfilled naive"
+        assert exp == expected_close
+        # Same instant in the station's own zone, not a UTC-flavoured midnight.
+        assert exp.utcoffset() == expected_close.utcoffset()
+    # LAX closes three hours after NY/MIA in absolute terms.
+    ny, lax, mia = (p["expiration_time"] for p in restored.positions)
+    assert lax - ny == timedelta(hours=3)
+    assert mia == ny
+
+    # One INFO line per repaired position.
+    backfill_lines = [
+        m for m in logs.messages(logging.INFO) if "BACKFILL expiration_time" in m
+    ]
+    assert len(backfill_lines) == 3
+    for sym, *_rest in MAIA_POSITIONS:
+        assert any(sym in m for m in backfill_lines), sym
+
+    # Round trip: the repaired state was persisted with offsets, and a second
+    # restart reads it back tz-aware and equal without repairing again.
+    on_disk = json.loads(state_file.read_text(encoding="utf-8"))
+    assert on_disk["positions"][0]["expiration_time"] == "2026-09-02T00:00:00-04:00"
+    assert on_disk["positions"][1]["expiration_time"] == "2026-09-02T00:00:00-07:00"
+    logs.records.clear()
+    again = SimulatedExchange(state_file=state_file)
+    assert [p["expiration_time"] for p in again.positions] == [
+        close for *_r, close in MAIA_POSITIONS
+    ]
+    assert all(p["expiration_time"].tzinfo is not None for p in again.positions)
+    assert not [
+        m for m in logs.messages(logging.INFO) if "BACKFILL expiration_time" in m
+    ]
+
+
+def test_backfilled_maia_position_settles_once_truth_is_published(
+    tmp_path, truth, monkeypatch
+):
+    """What the exit criterion asks of maia: the restored row leaves the book."""
+    state_file = tmp_path / "exchange_state.json"
+    sym, st, lo, hi, close = MAIA_POSITIONS[0]
+    state_file.write_text(
+        json.dumps(_legacy_state([_legacy_row(1, sym, st, lo, hi)])), encoding="utf-8"
+    )
+    restored = SimulatedExchange(state_file=state_file)
+    (pos,) = restored.positions
+    settle_calls = _settle_spy(restored, monkeypatch)
+
+    monkeypatch.setattr(matching_engine, "datetime", _Clock)
+    _Clock.set(close + timedelta(hours=6))  # the morning after; CLI not out yet
+    restored.update_market("TEMP_KNYC", 80.0)
+    assert pos in restored.positions
+    assert settle_calls == [sym]
+
+    truth.publish("KNYC|2026-09-01", 83)  # 83 is NOT >= 84 -> NO
+    restored.update_market("TEMP_KNYC", 80.0)
+    assert pos not in restored.positions
+    (trade,) = restored.closed_trades
+    assert trade["reason"] == "EXPIRATION"
+    assert trade["exit_price"] == pytest.approx(0.00)
+    assert trade["settlement_outcome"] == "no"
+
+
+def test_non_weather_symbol_gets_no_backfill(exchange, tmp_path):
+    """Crypto rows and signals are untouched on every one of the three paths."""
+    # Signal boundary (a non-bracket market, as the crypto_annual feed emits).
+    market = MarketData(
+        symbol=CRYPTO_TICKER,
+        timestamp=datetime.now(),
+        price=0.4,
+        volume=1,
+        bid=0.39,
+        ask=0.41,
+        extra={"source": "live", "strike": 64000.0},
+    )
+    sig = TradeSignal(symbol=CRYPTO_TICKER, side="buy", quantity=1, limit_price=0.4)
+    (sig,) = attach_spec_to_signals([sig], market)
+    assert sig.expiration_time is None
+
+    # Exchange open.
+    pos = _open_crypto(exchange)
+    assert pos["expiration_time"] is None
+
+    # Restart over a legacy file.
+    exchange._save_state()
+    restored = SimulatedExchange(state_file=exchange._state_file)
+    (again,) = restored.positions
+    assert again["symbol"] == CRYPTO_TICKER
+    assert again["expiration_time"] is None
+    assert settlement_close_for(CRYPTO_TICKER) is None
+
+
+def test_open_position_backfills_a_weather_position_opened_without_one(exchange):
+    """The exchange-level backstop for any caller that bypasses the stamp."""
+    sym, _st, _lo, _hi, close = MAIA_POSITIONS[1]  # LAX: a different zone
+    pos = _open_weather(exchange, ticker=sym, expiration_time=None)
+    assert pos["expiration_time"] == close
+    assert pos["expiration_time"].tzinfo is not None
+    assert pos["expiration_time"].utcoffset() == timedelta(hours=-7)
