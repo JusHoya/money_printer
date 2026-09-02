@@ -21,6 +21,12 @@ data/weather_truth/*.csv         text eol=lf
 # Phase 2 (FR-2.4): recorded ladder history replayed by the go/no-go report.
 data/ladders/**                  text eol=lf
 
+# Factory F0 (FR-F0.5): sealed holdout-B ladders + the 2026-09 GEFS re-pull. Both carry
+# a SHA-256 manifest (`sha256sum -c`), so a CRLF checkout would fail the digests.
+data/ladders_holdout/**          text eol=lf
+data/ladders_2026-09/**          text eol=lf
+data/forecast_archive_2026-09/** text eol=lf
+
 # Phase 2 (FR-2.4): the go/no-go artifact and the calibration reports state
 # that they regenerate byte-identically from committed inputs, and a red-team
 # verified it. That claim is only true if the checkout matches what the

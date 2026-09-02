@@ -961,8 +961,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--resolution-days", type=int, default=5)
     ap.add_argument("--validate-spread", action="store_true")
     ap.add_argument("--json-out", help="write the probe/summary blob here")
+    ap.add_argument(
+        "--out",
+        default=None,
+        help=(
+            "directory for the series CSV + manifest (default data/forecast_archive; "
+            "the script OVERWRITES both, so point a sealed-window pull elsewhere)"
+        ),
+    )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+
+    global SERIES_CSV, MANIFEST_PATH
+    if args.out:
+        out_dir = os.path.abspath(args.out)
+        os.makedirs(out_dir, exist_ok=True)
+        SERIES_CSV = os.path.join(out_dir, os.path.basename(SERIES_CSV))
+        MANIFEST_PATH = os.path.join(out_dir, os.path.basename(MANIFEST_PATH))
 
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO,
