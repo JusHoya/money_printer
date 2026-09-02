@@ -23,6 +23,7 @@ from src.core.weather_settlement import (
     city_keys,
     hours_since_settlement_day_close,
     resolve_settlement_high,
+    settlement_close_for,
 )
 
 # PRD FR-4.4 (Phase 4). The AAA gas payoff and its truth resolver live in
@@ -570,6 +571,12 @@ class SimulatedExchange:
             ]
             n_shells_dropped = len(loaded_positions) - len(self.positions)
 
+            # PRD FR-F0.1: weather positions persisted before the expiration
+            # stamp existed (maia's 2026-09-01 book) carry no expiration_time,
+            # so the EXPIRATION CHECK skips them forever. Backfill the
+            # settlement-day close so they can settle on the next sweep.
+            n_expiry_backfilled = self._backfill_weather_expirations()
+
             # Restore closed trades (deserialize datetime strings)
             self.closed_trades = [
                 _deserialize_position(p) for p in data.get("closed_trades", [])
@@ -614,6 +621,7 @@ class SimulatedExchange:
                     f"[OMS] STATE HYGIENE: dropped {n_shells_dropped} qty<=0 "
                     f"shell position(s) at load; persisting cleaned state"
                 )
+            if n_shells_dropped or n_expiry_backfilled:
                 self._save_state()
 
         except Exception as exc:
@@ -642,6 +650,35 @@ class SimulatedExchange:
             self.cumulative_fees_paid = 0.0
             self.cumulative_entry_fees = 0.0
             self._next_id = 1
+
+    def _backfill_weather_expirations(self) -> int:
+        """Stamp the settlement-day close onto open weather positions lacking one.
+
+        PRD FR-F0.1. Returns the number of positions changed; logs one INFO
+        line per position so the operator can see exactly which restored rows
+        were repaired. A position that already carries an expiration (aware or
+        naive) is left alone, as is every non-weather position.
+        """
+        count = 0
+        for pos in self.positions:
+            if pos.get("expiration_time") is not None:
+                continue
+            symbol = pos.get("symbol", "")
+            if not is_weather_symbol(symbol):
+                continue
+            close = settlement_close_for(symbol)
+            if close is None:
+                continue
+            pos["expiration_time"] = close
+            count += 1
+            logger.info(
+                "[OMS] BACKFILL expiration_time id=%s symbol=%s -> %s "
+                "(settlement-day close, FR-F0.1)",
+                pos.get("id"),
+                symbol,
+                close.isoformat(),
+            )
+        return count
 
     def _warn_on_duplicate_ids(self, context: str = ""):
         """Log once if the restored book already contains duplicate ids.
@@ -970,6 +1007,21 @@ class SimulatedExchange:
                     expiry_dt = None
             else:
                 expiry_dt = expiration_time
+
+        # PRD FR-F0.1: a weather position must always carry its settlement-day
+        # close, or the EXPIRATION CHECK in update_market never reaches
+        # _settle_weather_position and the position never leaves the book.
+        # The signal path stamps this in attach_spec_to_signals; this is the
+        # backstop for any caller that did not. A supplied value is kept.
+        if expiry_dt is None and is_weather_symbol(symbol):
+            expiry_dt = settlement_close_for(symbol)
+            if expiry_dt is not None:
+                logger.info(
+                    "[OMS] expiration_time backfilled for %s -> %s "
+                    "(settlement-day close, FR-F0.1)",
+                    symbol,
+                    expiry_dt.isoformat(),
+                )
 
         # Sprint 4: compute and deduct fee
         from src.core.fee_calculator import compute_fee, fee_type_for_symbol

@@ -34,6 +34,11 @@ class TradeSignal:
     strike_type: Optional[str] = None
     floor_strike: Optional[float] = None
     cap_strike: Optional[float] = None
+    # PRD FR-F0.1: when the contract expires. Weather signals get the tz-aware
+    # settlement-day close stamped at the strategy return boundary
+    # (bracket_payoff.attach_spec_to_signals); the exchange's EXPIRATION CHECK
+    # never fires for a position that carries None here.
+    expiration_time: Optional[datetime] = None
 
 
 class DataProvider(ABC):
