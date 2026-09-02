@@ -182,6 +182,17 @@ class XProvider(DataProvider):
 
     # -- polling ---------------------------------------------------------
 
+    def poll_due(self, handle: str) -> bool:
+        """True when :meth:`poll_handle` would make a request right now: the
+        feed is connected, the handle is tracked, and the per-handle interval
+        floor has elapsed. Side-effect free — callers use it to tell "no new
+        posts" apart from "inside the floor, nothing was asked"."""
+        key = handle.lstrip("@").lower()
+        if not (self.enabled and self.connected) or key not in self._user_ids:
+            return False
+        last = self._last_poll.get(key)
+        return last is None or (time.monotonic() - last) >= self.MIN_POLL_INTERVAL_S
+
     def poll_handle(self, handle: str) -> List[dict]:
         """Poll one handle's timeline; append new posts to the tape.
 

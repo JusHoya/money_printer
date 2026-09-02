@@ -220,6 +220,26 @@ def test_poll_failure_returns_empty_and_keeps_the_watermark(monkeypatch, tmp_pat
     assert provider._since_ids["alice"] == "902"
 
 
+def test_poll_due_tracks_the_floor_without_side_effects(monkeypatch, tmp_path):
+    provider, session = _connected_provider(
+        monkeypatch, tmp_path, [_timeline([{"id": "1", "text": "x"}], newest_id="1")]
+    )
+    n_calls = len(session.calls)
+
+    assert provider.poll_due("alice") is True
+    assert provider.poll_due("@Alice") is True
+    assert provider.poll_due("mallory") is False
+    assert len(session.calls) == n_calls  # asking never requests
+
+    provider.poll_handle("alice")
+    assert provider.poll_due("alice") is False  # inside the floor
+    provider._last_poll["alice"] -= provider.MIN_POLL_INTERVAL_S + 1
+    assert provider.poll_due("alice") is True
+
+    provider.connected = False
+    assert provider.poll_due("alice") is False
+
+
 def test_untracked_handle_polls_nothing(monkeypatch, tmp_path):
     provider, session = _connected_provider(monkeypatch, tmp_path, [])
     n_calls = len(session.calls)

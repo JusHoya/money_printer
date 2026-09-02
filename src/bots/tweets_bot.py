@@ -8,10 +8,11 @@ Two feeds, one bot:
    account, plus an hourly top-3 orderbook depth snapshot.
 2. **X side** — :class:`src.data.x_provider.XProvider` polls the tracked
    handles (default: the settlement account of the live series) and appends
-   every raw post to ``data/x_feed/x_posts_<UTCdate>.jsonl``. Each poll that
-   returns posts also writes one ``@handle (X)`` row into the dashboard's
-   data log carrying the running counts, so the feed's liveness is visible
-   next to the ladder it would price.
+   every raw post to ``data/x_feed/x_posts_<UTCdate>.jsonl``. Every real
+   poll (one per handle per >=60s, whether or not it returned posts) also
+   writes one ``@handle (X)`` row into the dashboard's data log carrying the
+   running counts, so the feed's liveness is visible next to the ladder it
+   would price.
 
 MARKET FACTS (verified live 2026-09-01)
 ---------------------------------------
@@ -256,27 +257,32 @@ class TweetsBot(Bot, SignalProcessorMixin):
                 return
 
         for handle in self.x.handles:
+            if not self.x.poll_due(handle):
+                continue  # inside the >=60s floor: no request, no row
             try:
                 posts = self.x.poll_handle(handle)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[Tweets] X poll raised for @%s: %s", handle, exc)
                 continue
-            if not posts:
-                continue
             counts = self._bump_counts(handle, posts)
-            latest = posts[0]
-            logger.info(
-                "[Tweets] @%s +%d post(s) (today=%d since_start=%d) latest=%s %r",
-                handle,
-                len(posts),
-                counts["today"],
-                counts["since_start"],
-                latest.get("id"),
-                str(latest.get("text") or "")[:80],
-            )
-            # One data-log row per poll that returned posts: price is today's
+            if posts:
+                latest = posts[0]
+                logger.info(
+                    "[Tweets] @%s +%d post(s) (today=%d since_start=%d) latest=%s %r",
+                    handle,
+                    len(posts),
+                    counts["today"],
+                    counts["since_start"],
+                    latest.get("id"),
+                    str(latest.get("text") or "")[:80],
+                )
+            # One data-log row per REAL poll (not per tick): price is today's
             # post count (UTC, by created_at), volume the new posts this poll,
-            # last the running total since the feed started.
+            # last the running total since the feed started. A poll that
+            # returned nothing still writes its row — that zero is the feed's
+            # heartbeat in the tape and the flat segment of the count series;
+            # without it the row appeared once (the backfill) and scrolled
+            # out of the dashboard's 100-row data log within a tick.
             dashboard.update_price(
                 f"@{handle} (X)",
                 float(counts["today"]),

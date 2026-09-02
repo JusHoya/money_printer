@@ -213,7 +213,9 @@ def test_x_enabled_poll_writes_tape_and_dashboard_row(monkeypatch, tmp_path):
         {"id": "901", "text": "first", "created_at": "2026-01-01T12:00:00.000Z"},
     ]
     bot, session = _bot_with_x(
-        monkeypatch, tmp_path, [POTUS_USER, _timeline(posts, newest_id="902")]
+        monkeypatch,
+        tmp_path,
+        [POTUS_USER, _timeline(posts, newest_id="902"), _timeline([])],
     )
     dashboard = _FakeDashboard()
     risk = _FakeRiskManager()
@@ -240,14 +242,30 @@ def test_x_enabled_poll_writes_tape_and_dashboard_row(monkeypatch, tmp_path):
     assert len(session.calls) == n_calls
     assert len(dashboard.rows) == n_rows + 1  # only the Kalshi ladder row
 
+    # Past the floor with nothing new: one request, and a heartbeat row whose
+    # counts are unchanged and whose volume is 0.
+    bot.x._last_poll["realdonaldtrump"] -= bot.x.MIN_POLL_INTERVAL_S + 1
+    bot.tick(risk, dashboard)
+    assert len(session.calls) == n_calls + 1
+    assert session.calls[-1]["params"]["since_id"] == "902"
+    price, kwargs = dashboard.prices["@realDonaldTrump (X)"]
+    assert price == 1.0
+    assert kwargs["volume"] == 0
+    assert kwargs["last"] == 2
+    assert len(dashboard.rows) == n_rows + 3  # Kalshi row + X heartbeat row
 
-def test_x_poll_with_no_new_posts_writes_no_row(monkeypatch, tmp_path):
+
+def test_x_first_poll_with_no_posts_still_writes_a_heartbeat_row(monkeypatch, tmp_path):
     bot, _ = _bot_with_x(monkeypatch, tmp_path, [POTUS_USER, _timeline([])])
     dashboard = _FakeDashboard()
 
     bot.setup(_kalshi())
     bot.tick(_FakeRiskManager(), dashboard)
-    assert "@realDonaldTrump (X)" not in dashboard.prices
+    price, kwargs = dashboard.prices["@realDonaldTrump (X)"]
+    assert price == 0.0
+    assert kwargs["volume"] == 0
+    assert kwargs["last"] == 0
+    assert list(tmp_path.iterdir()) == []  # nothing to tape
 
 
 def test_failed_x_connect_is_retried_after_the_interval(monkeypatch, tmp_path):
