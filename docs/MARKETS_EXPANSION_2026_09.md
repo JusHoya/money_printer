@@ -72,6 +72,23 @@ Two **new screenable shapes** surfaced — screenable, not tradeable:
 - **Nitter is dead** (C&D, Aug 2026). Scrapers are **not load-bearing**: a
   settlement-relevant feed cannot depend on an interface X is actively
   killing.
+- **Kalshi-side surface, re-verified 2026-09-01 (evening):** the weekly
+  `KXELONTWEETS` count ladder this section was written for has listed **no
+  event since 2025-04-18** (dormant). `KXPOTUSTWEETS` is now a **monthly
+  binary** ("Will @realDonaldTrump tweet in Sep 2026?", YES 0.62/0.69, ~32
+  contracts). The other X-settled series (`KXPOPETWEETS`, `KXHUNTERTWEETS`,
+  `KXROARINGKITTYTWEETS`, `KXPLATNERTWEET`) are one-offs with no live market.
+  The **live post-count ladder is `KXTRUTHSOCIAL`** (weekly, 10 brackets,
+  13–17k contracts on the middle brackets, settles Saturday 13:59 UTC from
+  Roll Call's Factbase count) — a Truth Social feed, not X. Consequence: the
+  X spend has exactly one live consumer today, and tracking only
+  @realDonaldTrump (a few X posts a month) makes it cents, not $10–25.
+- **Wiring:** the `tweets` bot (`src/bots/tweets_bot.py`, registered
+  2026-09-01) harvests the X-settled ladders every tick and, when
+  `X_FEED_ENABLED=1`, polls the tracked handles through `XProvider`, writing
+  the raw-post tape (`data/x_feed/`) and one `@handle (X)` data-log row per
+  poll that returns posts. No strategy behind it; `TWEETS_TRADING_ENABLED`
+  is `False`.
 
 ## d. Decisions
 
@@ -80,7 +97,7 @@ Two **new screenable shapes** surfaced — screenable, not tradeable:
 | 1 | **Weather paper trading ON** | Sandbox only, read-only creds, `SimulatedExchange`. Purpose: exercise the untested sim settlement leg and generate PnL history. Explicitly *not* a clearing of the Phase 2 HALT — that still requires the §9.3 pre-registered evidence. |
 | 2 | **`mention` + `crypto_annual` harvesters ON, feed-only** | Tape collection only (`MENTION_SERIES` selects the mention series). No signals reach execution. |
 | 3 | **Mention strategy scaffold gated `False`** | Stays off pending (i) a base-rate corpus to price against and (ii) encoding the settlement grammar from Kalshi's MENTION.pdf rules — pattern-matching settlement text without the grammar is the inverted-suffix-parser mistake again. |
-| 4 | **X provider built but disabled** | `X_FEED_ENABLED=0` until the user opens an X API account. No scraper fallback. |
+| 4 | **X provider wired into the feed-only `tweets` bot; poller disabled** | `X_FEED_ENABLED=0` until the user opens an X API account; the Kalshi side (`TWEETS_SERIES`) harvests regardless. No scraper fallback. Only one live X-settled market exists today (§c). |
 
 Operational surface: `deploy/README.md` (envs, healthcheck, autoheal,
 redeploy runbook).

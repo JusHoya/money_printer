@@ -28,6 +28,9 @@ Decision record: `docs/MARKETS_EXPANSION_2026_09.md`.
   base-rate corpus.
 - **crypto_annual** — feed-only harvester over the annual crypto ladders
   (KXBTCY/KXETHY). Harvesting only; the July crypto refutation stands.
+- **tweets** — feed-only harvester over Kalshi's X-settled series
+  (`TWEETS_SERIES`, default KXPOTUSTWEETS plus the dormant KXELONTWEETS) and
+  the X timeline tape behind them, which polls only when `X_FEED_ENABLED=1`.
 
 ## Non-negotiables carried over from the VM era
 
@@ -93,9 +96,10 @@ deploy/
   the control routes change runtime state.
 - **X provider envs** (runtime, `/srv/money_printer/.env`): `X_FEED_ENABLED`,
   `X_BEARER_TOKEN`, `X_TRACK_HANDLES` — the official pay-per-use X API poller
-  behind TWEETS-settled mention markets. Built but **disabled** until an X API
-  account exists (`docs/MARKETS_EXPANSION_2026_09.md` §c). `MENTION_SERIES`
-  selects the mention series the harvester tracks.
+  the `tweets` bot runs behind Kalshi's X-settled markets. **Off** until an X
+  API account exists (`docs/MARKETS_EXPANSION_2026_09.md` §c); the bot still
+  harvests the Kalshi side. `TWEETS_SERIES` selects those series and
+  `MENTION_SERIES` the mention series the mention harvester tracks.
 
 ## Bring-up order
 

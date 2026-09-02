@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Money Printer is an algorithmic trading system for the **Kalshi** prediction market. It fetches live data (weather forecasts, market orderbooks), runs trading strategies against that data, and manages simulated/demo positions with full risk management. The goal is paper-trading validation before any real capital deployment.
 
-**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/` — gitignored, no longer on disk; conclusions survive in PRD/HANDOFF/reports) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. FOUR bots are registered as of 2026-09-01: `weather` (paper trading ON in the sandbox — simulated fills, read-only creds), `gas` (feed-only, gated off by its module flag), and the feed-only harvesters `mention` (Kalshi mention markets) and `crypto_annual` (KXBTCY/KXETHY year-end ladders). `PRD.md` drives all pivot work; `docs/MARKETS_EXPANSION_2026_09.md` records the 2026-09 market screening; `deploy/README.md` describes the 2026-09 split deployment onto the Pleiades home cluster (sandbox on maia/Pi 4, Hermes agent + offline lab on alcyone/DGX Spark).
+**Pivot in progress (see `PRD.md`)**: a 22-agent review (`review_2026_07_24/` — gitignored, no longer on disk; conclusions survive in PRD/HANDOFF/reports) proved short-horizon crypto structurally unwinnable, so Phase 0 tore out all crypto surface area. FIVE bots are registered as of 2026-09-01: `weather` (paper trading ON in the sandbox — simulated fills, read-only creds), `gas` (feed-only, gated off by its module flag), and the feed-only harvesters `mention` (Kalshi mention markets), `crypto_annual` (KXBTCY/KXETHY year-end ladders) and `tweets` (Kalshi X-settled series plus the `X_FEED_ENABLED`-gated X timeline tape). `PRD.md` drives all pivot work; `docs/MARKETS_EXPANSION_2026_09.md` records the 2026-09 market screening; `deploy/README.md` describes the 2026-09 split deployment onto the Pleiades home cluster (sandbox on maia/Pi 4, Hermes agent + offline lab on alcyone/DGX Spark).
 
 ## Commands
 
@@ -69,12 +69,13 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`src/bots/`** — Bot implementations:
 - `base.py`: Bot ABC defining `setup()`, `tick()`, `get_symbols()`
-- `registry.py`: Bot registry for CLI `--bot` selection — registers `weather`, `gas`, `mention`, `crypto_annual` (see `src/bots/__init__.py`)
+- `registry.py`: Bot registry for CLI `--bot` selection — registers `weather`, `gas`, `mention`, `crypto_annual`, `tweets` (see `src/bots/__init__.py`)
 - `mixins.py`: `SignalProcessorMixin` — shared signal processing logic (risk check → execution); category detection covers weather/crypto/mention buckets
 - `weather_bot.py`: Paper trading ON since 2026-09-01 (`WEATHER_TRADING_ENABLED = True` — simulated fills through the full risk/EV/Kelly gauntlet; live capital impossible via `read_only=True`). (Crypto bots deleted 2026-07-24, PRD FR-0.1.)
 - `gas_bot.py`: Feed-only KXAAAGASM/W harvester (`GAS_TRADING_ENABLED = False`, bound to the Phase 4 HALT).
 - `mention_bot.py`: Feed-only Kalshi mention-market harvester (`MENTION_TRADING_ENABLED = False`; series via `MENTION_SERIES` env, capped).
 - `crypto_annual_bot.py`: Feed-only KXBTCY/KXETHY year-end ladder harvester (`CRYPTO_ANNUAL_TRADING_ENABLED = False`; the API-reported zero fee multiplier is treated as unverified).
+- `tweets_bot.py`: Feed-only harvester over Kalshi's X-settled series (`TWEETS_SERIES` env, default KXPOTUSTWEETS + the dormant KXELONTWEETS) that also owns the `XProvider` poller — polls only when `X_FEED_ENABLED=1`, writes the raw-post tape to `data/x_feed/` and one `@handle (X)` data-log row per poll with posts (`TWEETS_TRADING_ENABLED = False`). Its docstring records that the live post-count ladder is KXTRUTHSOCIAL (Truth Social, not X).
 
 **`src/core/risk_manager.py` — RiskManager**: Enforces capital preservation rules (max risk per trade, daily drawdown limits, per-strategy drawdown, portfolio exposure caps, trade interval throttling, loss cooldown per symbol). Owns a `SimulatedExchange` instance and syncs balance via `_on_trade_close` callback.
 
@@ -88,7 +89,7 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 **`src/data/nws_provider.py`**: Fetches weather observations from National Weather Service stations.
 
-**`src/data/x_provider.py`**: Official X API v2 timeline poller (feed-only, disabled by default via `X_FEED_ENABLED`; nothing in the runtime constructs it yet). Cost model and Kalshi TWEETS-settlement notes in its docstring.
+**`src/data/x_provider.py`**: Official X API v2 timeline poller (feed-only, disabled by default via `X_FEED_ENABLED`; constructed and polled by the `tweets` bot). Cost model and Kalshi TWEETS-settlement notes in its docstring.
 
 ### Strategies (`src/strategies/`)
 - **weather_strategy.py**: V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction. Paper-trading in the sandbox since 2026-09-01 (10:00–13:59 ET window, ≥2.0F edge, full risk gauntlet).

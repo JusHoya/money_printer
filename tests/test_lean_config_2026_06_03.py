@@ -28,8 +28,8 @@ impossible (KalshiProvider read_only=True; place_order raises; all execution
 is SimulatedExchange). The test now pins the flag ON so an accidental
 re-disable is as loud as an accidental enable used to be.
 
-The two 2026-09-01 harvester additions (mention, crypto_annual) ship feed-only
-and are pinned OFF below, each with the evidence that would flip it.
+The three 2026-09-01 harvester additions (mention, crypto_annual, tweets) ship
+feed-only and are pinned OFF below, each with the evidence that would flip it.
 """
 
 import os
@@ -40,12 +40,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import src.bots  # noqa: F401  — trigger registration
 from src.bots.registry import BotRegistry
-from src.bots import crypto_annual_bot, gas_bot, mention_bot, weather_bot
+from src.bots import crypto_annual_bot, gas_bot, mention_bot, tweets_bot, weather_bot
 
 #: Every bot the project sanctions as registered, as of the 2026-09-01 revival.
 #: Adding to this set is a deliberate act that must come with the decision that
 #: authorizes the engine.
-EXPECTED_REGISTERED_BOTS = {"weather", "gas", "mention", "crypto_annual"}
+EXPECTED_REGISTERED_BOTS = {"weather", "gas", "mention", "crypto_annual", "tweets"}
 
 
 class TestTradingFlags(unittest.TestCase):
@@ -97,6 +97,15 @@ class TestTradingFlags(unittest.TestCase):
             crypto_annual_bot.CRYPTO_ANNUAL_TRADING_ENABLED,
             "The crypto annual bot is a harvester; no strategy has been "
             "proposed, let alone adjudicated, for the annual ladders",
+        )
+
+    def test_tweets_trading_disabled(self):
+        """No strategy exists for the X-settled markets; the X poller behind
+        the bot is itself gated by ``X_FEED_ENABLED`` (off by default)."""
+        self.assertFalse(
+            tweets_bot.TWEETS_TRADING_ENABLED,
+            "The tweets bot is a harvester (Kalshi X-settled ladders + the X "
+            "timeline tape); no strategy has been proposed for it",
         )
 
 

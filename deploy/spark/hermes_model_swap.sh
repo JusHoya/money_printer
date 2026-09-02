@@ -14,6 +14,13 @@
 # BF16 attention), leaving negative KV budget at 14.6GB. Validated 2026-09-01
 # side-by-side on this box: 5.59GB KV available, tool-call smoke test passed.
 #
+# --max-model-len 65536 is a FLOOR, not a tuning knob: Hermes Agent refuses
+# any model whose context_length is below 64K (agent_init raises on every
+# chat turn — the 2026-09-01 swap first shipped 32768 and every Discord
+# message failed with "context window of 32,768 tokens ... below the minimum
+# 64,000"). The 9B's native window is 262144, and at 0.18 util the KV pool
+# (164,789 tokens) still gives 2.5x concurrency at 64K.
+#
 # ROLLBACK — the exact command the current container was started with; rerun
 # it verbatim (after docker rm -f mp-vllm) to restore the 35B model:
 #
@@ -40,8 +47,10 @@
 #     --tool-call-parser qwen3_xml \
 #     --enable-auto-tool-choice
 #
-# (Rolling back also means reverting the ~/.hermes config: model.default and
-# model.context_length back to nvidia/Qwen3.6-35B-A3B-NVFP4 / 65536.)
+# (Rolling back also means reverting the ~/.hermes config: model.default back
+# to nvidia/Qwen3.6-35B-A3B-NVFP4; model.context_length stays 65536 — and
+# re-pinning any cron job with `hermes cron edit <id> --provider custom
+# --model <model>`, or it drift-skips.)
 set -euo pipefail
 
 if [ "${1:-}" != "--yes" ]; then
@@ -63,7 +72,7 @@ docker run -d --name mp-vllm --restart unless-stopped --gpus all \
   --host 0.0.0.0 --port 8000 \
   --trust-remote-code \
   --gpu-memory-utilization 0.18 \
-  --max-model-len 32768 \
+  --max-model-len 65536 \
   --max-num-seqs 4 \
   --enable-prefix-caching \
   --enable-auto-tool-choice \
@@ -73,10 +82,12 @@ docker run -d --name mp-vllm --restart unless-stopped --gpus all \
 echo
 echo "== Container started. REMAINING MANUAL STEPS (Hermes config, ~/.hermes):"
 echo "   1) model.default        = ykarout/Qwen3.5-9B-NVFP4"
-echo "   2) model.context_length = 32768"
+echo "   2) model.context_length = 65536 (Hermes refuses anything under 64K)"
 echo "   3) KEEP model.max_tokens = 8192 (unset, Hermes sends max_tokens ="
 echo "      context_length and vLLM 400s every tool-bearing request)"
 echo "   4) KEEP the placeholder model.api_key (Hermes rejects empty keys)"
+echo "   5) Re-pin every cron job to the new model, or each one drift-skips:"
+echo "      hermes cron edit <job-id> --provider custom --model ykarout/Qwen3.5-9B-NVFP4"
 echo "   Then restart Hermes and watch: docker logs -f mp-vllm"
 echo
 echo "   Rollback: docker rm -f mp-vllm, then the verbatim command in this"

@@ -2,10 +2,15 @@
 
 A :class:`src.core.interfaces.DataProvider` that polls the official X API v2
 user-timeline endpoint for a small set of tracked handles and appends every
-raw post to ``data/x_feed/x_posts_<UTCdate>.jsonl``. It exists to build a
-transcript tape for the mention engine (see
-:mod:`src.strategies.mention_strategy`), nothing else: NOTHING in the runtime
-constructs it yet — no orchestrator wiring — it is a ready component.
+raw post to ``data/x_feed/x_posts_<UTCdate>.jsonl``. It exists to build the
+post tape behind Kalshi's X-settled ("TWEETS") markets. The runtime wiring is
+:class:`src.bots.tweets_bot.TweetsBot` (registered as ``tweets``), which owns
+one instance and polls it once per market-loop tick.
+
+Each post is requested with ``referenced_tweets`` so the tape can tell an
+original post from a repost/quote/reply. That distinction is what a
+rules-faithful counter for the TWEETS.pdf settlement grammar needs — it is
+recorded raw here, never interpreted.
 
 GATING
 ------
@@ -197,7 +202,7 @@ class XProvider(DataProvider):
 
         params = {
             "max_results": self.MAX_RESULTS_PER_POLL,
-            "tweet.fields": "created_at",
+            "tweet.fields": "created_at,referenced_tweets",
         }
         since_id = self._since_ids.get(key)
         if since_id:

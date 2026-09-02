@@ -572,14 +572,14 @@ TOOLS = {
     "mp_start_bot": {
         "schema": {
             "name": "mp_start_bot",
-            "description": "Activate a bot so it participates in the market loop. Confirm with the user before executing. Available: weather (paper-trades in the sandbox sim), gas, mention, crypto_annual (feed-only harvesters). Sends X-MP-Token from MP_CONTROL_TOKEN when the sandbox requires it.",
+            "description": "Activate a bot so it participates in the market loop. Confirm with the user before executing. Available: weather (paper-trades in the sandbox sim), gas, mention, crypto_annual, tweets (feed-only harvesters). Sends X-MP-Token from MP_CONTROL_TOKEN when the sandbox requires it.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bot_name": {
                         "type": "string",
                         "description": "Bot to activate",
-                        "enum": ["weather", "gas", "mention", "crypto_annual"],
+                        "enum": ["weather", "gas", "mention", "crypto_annual", "tweets"],
                     }
                 },
                 "required": ["bot_name"],
@@ -590,14 +590,14 @@ TOOLS = {
     "mp_stop_bot": {
         "schema": {
             "name": "mp_stop_bot",
-            "description": "Deactivate a bot (it stops ticking but stays registered). Confirm with the user before executing. Available: weather, gas, mention, crypto_annual. Sends X-MP-Token from MP_CONTROL_TOKEN when the sandbox requires it.",
+            "description": "Deactivate a bot (it stops ticking but stays registered). Confirm with the user before executing. Available: weather, gas, mention, crypto_annual, tweets. Sends X-MP-Token from MP_CONTROL_TOKEN when the sandbox requires it.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bot_name": {
                         "type": "string",
                         "description": "Bot to deactivate",
-                        "enum": ["weather", "gas", "mention", "crypto_annual"],
+                        "enum": ["weather", "gas", "mention", "crypto_annual", "tweets"],
                     }
                 },
                 "required": ["bot_name"],

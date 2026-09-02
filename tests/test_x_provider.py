@@ -171,7 +171,7 @@ def test_poll_appends_raw_posts_to_the_daily_tape(monkeypatch, tmp_path):
     call = session.calls[-1]
     assert call["url"].endswith("/users/111/tweets")
     assert "since_id" not in call["params"]  # first poll has no watermark
-    assert call["params"]["tweet.fields"] == "created_at"
+    assert call["params"]["tweet.fields"] == "created_at,referenced_tweets"
 
 
 def test_since_id_is_threaded_on_the_next_poll(monkeypatch, tmp_path):

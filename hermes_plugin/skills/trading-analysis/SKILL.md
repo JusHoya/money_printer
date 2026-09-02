@@ -13,10 +13,12 @@ metadata:
 
 ## Current System Posture (2026-09 revival)
 
-- Four registered bots. **weather** paper-trades in the simulator (activated
+- Five registered bots. **weather** paper-trades in the simulator (activated
   2026-09-01 to exercise the settlement leg and build PnL history). **gas**,
-  **mention**, and **crypto_annual** are feed-only harvesters — they record
-  market tape and NEVER emit trades.
+  **mention**, **crypto_annual**, and **tweets** are feed-only harvesters —
+  they record market tape and NEVER emit trades. The tweets bot also polls
+  the X API when the sandbox sets `X_FEED_ENABLED=1` (rows named
+  `@handle (X)` in the data log: price = posts today, volume = new this poll).
 - ALL execution is simulated. The Kalshi client is read-only; real capital is
   structurally impossible. "PnL" always means simulated PnL.
 - There is no per-cycle balance reset and no in-runtime ML retraining (both
@@ -71,7 +73,8 @@ metadata:
 
 1. Call `mp_data_log` — recent rows should include symbols from every active
    bot's series: KXHIGH* (weather), KXAAAGAS* (gas), KX*MENTION (mention),
-   KXBTCY/KXETHY (crypto_annual)
+   KXBTCY/KXETHY (crypto_annual), KXPOTUSTWEETS (tweets; KXELONTWEETS is
+   dormant, so "no active markets returned" for it is normal)
 2. Call `mp_session_log` — look for "FEED-ONLY: N markets recorded" lines and
    "Market Fetch Fail" errors
 3. A series absent from the tape for hours is a harvest gap worth flagging

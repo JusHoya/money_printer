@@ -12,15 +12,18 @@ harvesters: the mention bot (Kalshi Mentions category) and the crypto annual
 bot (KXBTCY/KXETHY range ladders). Both trading flags are ``False`` — see each
 module's docstring for what evidence would flip them. In the same change the
 weather bot's flag flipped to PAPER trading on the sandbox (settlement-leg
-exercise; live capital remains impossible via read_only). Registration is what
-makes a bot appear in ``--bot <name>``, in ``create_all()`` and in the FR-0.4
-cycle status line; without it the bot exists on disk and never runs.
+exercise; live capital remains impossible via read_only). Later the same day
+the FEED-ONLY tweets bot joined: the Kalshi X-settled series plus the X
+timeline tape (``X_FEED_ENABLED``-gated) that would price them. Registration
+is what makes a bot appear in ``--bot <name>``, in ``create_all()`` and in the
+FR-0.4 cycle status line; without it the bot exists on disk and never runs.
 """
 
 from src.bots.crypto_annual_bot import CryptoAnnualBot
 from src.bots.gas_bot import GasBot
 from src.bots.mention_bot import MentionBot
 from src.bots.registry import BotRegistry
+from src.bots.tweets_bot import TweetsBot
 from src.bots.weather_bot import WeatherBot
 
 # Registered HERE rather than with an ``@BotRegistry.register("...")`` decorator
@@ -32,5 +35,6 @@ from src.bots.weather_bot import WeatherBot
 BotRegistry.register("gas")(GasBot)
 BotRegistry.register("mention")(MentionBot)
 BotRegistry.register("crypto_annual")(CryptoAnnualBot)
+BotRegistry.register("tweets")(TweetsBot)
 
-__all__ = ["CryptoAnnualBot", "GasBot", "MentionBot", "WeatherBot"]
+__all__ = ["CryptoAnnualBot", "GasBot", "MentionBot", "TweetsBot", "WeatherBot"]
