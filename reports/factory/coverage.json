@@ -1,0 +1,68 @@
+{
+ "data_events": [
+  {
+   "date": "2026-10-03",
+   "event": "holdout-B retention expiry (backfill before)",
+   "lane": "weather"
+  },
+  {
+   "date": "2026-09-15",
+   "event": "ladders_2026-09 capture timer kill date",
+   "lane": "weather"
+  }
+ ],
+ "floor": 40,
+ "lanes": [
+  {
+   "floor": 40,
+   "independent_unit": "target_date",
+   "lane": "weather",
+   "n_units": 69,
+   "next_data_eta": "2026-10-03",
+   "reason": "69 development target_dates under data/ladders (>= 40)",
+   "searchable": true,
+   "state": "READY"
+  },
+  {
+   "floor": 40,
+   "independent_unit": "settlement_date",
+   "lane": "gas",
+   "n_units": 14,
+   "next_data_eta": null,
+   "reason": "14 settlement events in reports/phase4/gas_quote_tape.csv < 40-unit search floor; Phase 4 HALT stands; F5 lane (gas_backtest.py replay with clock=/gate= injection)",
+   "searchable": false,
+   "state": "NOT_PROMOTABLE"
+  },
+  {
+   "floor": 40,
+   "independent_unit": "event_ticker",
+   "lane": "mention",
+   "n_units": 0,
+   "next_data_eta": null,
+   "reason": "no settleable quote substrate: maia mention tape starts 2026-09-01 (post-cutoff) and the 1,306 finalized markets carry no quotes; see reports/factory/coverage.json",
+   "searchable": false,
+   "state": "NOT_READY"
+  },
+  {
+   "floor": 40,
+   "independent_unit": "event_ticker",
+   "lane": "tweets",
+   "n_units": 0,
+   "next_data_eta": null,
+   "reason": "233 feed-only tape rows, a single live X-settled market and no truth join; see reports/factory/coverage.json",
+   "searchable": false,
+   "state": "NOT_READY"
+  },
+  {
+   "floor": 40,
+   "independent_unit": "event_ticker",
+   "lane": "crypto_annual",
+   "n_units": 0,
+   "next_data_eta": "2027-01-01",
+   "reason": "single settlement event (2027-01-01) and no truth: never a searchable lane; fee multiplier 0 unverified (pinned 1); see reports/factory/coverage.json",
+   "searchable": false,
+   "state": "NOT_READY"
+  }
+ ],
+ "schema_version": 1
+}
