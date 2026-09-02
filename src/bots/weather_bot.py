@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 from src.bots.base import Bot
 from src.bots.registry import BotRegistry
@@ -26,6 +27,24 @@ import os
 # execution is SimulatedExchange). History: disabled 2026-06-03 (LEAN review,
 # fee bleed) and kept off through the feed-only Phases 1-3.
 WEATHER_TRADING_ENABLED = True
+
+# 2026-09-02 (PRD_STRATEGY_FACTORY FR-F0.2): ML Weather is OFF by default and
+# owner-only. On the sandbox every executed ML Weather signal carried
+# confidence=1.000 because src/strategies/ml_weather.py:251 defaults
+# ``hrrr_forecast`` to the NWS high, so the predictor's analytical fallback
+# (src/ml/predictor.py:598, ``confidence = max(0.2, 1 - spread/10)``) compared
+# a forecast to itself: spread 0 -> confidence 1.0 -> Kelly max -> the
+# 50-contract hard cap on every signal, with an implied sigma of 0.5F.
+# When False, MLWeatherStrategy is not constructed and the tick goes straight
+# to WeatherArbitrageStrategyV2 ("Meteorologist V2"). When True the waterfall
+# is exactly what it was before this flag existed. See HANDOFF.md §8.
+ML_WEATHER_ENABLED = False
+
+# Kalshi dates a weather event by its settlement day in New York time
+# (``KXHIGHNY-26SEP01-...``); the tracked-date window must be computed on
+# that clock, not the host's (maia runs TZ=UTC). Same convention as
+# src/strategies/weather_strategy.py and ml_weather.py (commit 98fd8b1).
+ET = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)
@@ -136,11 +155,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # first tick so a fresh session records a baseline immediately).
         self._last_depth_snapshot = 0.0
 
-        # ML-driven primary + V2 rule-based fallback
-        self.strategies = {
-            "ml_weather": MLWeatherStrategy(),
-            "weather": WeatherArbitrageStrategyV2(),
-        }
+        # Waterfall: [ML-driven primary, owner-only via ML_WEATHER_ENABLED]
+        # -> V2 rule-based. Dict order is the waterfall order.
+        self.strategies = {}
+        if ML_WEATHER_ENABLED:
+            self.strategies["ml_weather"] = MLWeatherStrategy()
+        self.strategies["weather"] = WeatherArbitrageStrategyV2()
 
     # ── Config accessors ────────────────────────────────────────────
 
@@ -385,17 +405,21 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 else:
                     risk_manager.update_market_data(f"PRECIP_{station}", pop_prob)
 
-            # Waterfall: ML Weather → V2 rule-based fallback
+            # Waterfall: ML Weather (only when ML_WEATHER_ENABLED built it
+            # into self.strategies) → V2 rule-based fallback.
             # 2026-09-01: paper trading re-enabled on the sandbox (see the
             # WEATHER_TRADING_ENABLED comment). Every signal still runs the
             # full risk/EV/Kelly gauntlet in _process_signals.
             if WEATHER_TRADING_ENABLED:
-                traded = self._process_signals(
-                    self.strategies["ml_weather"].analyze(obs_data),
-                    strategy_name="ML Weather",
-                    risk_manager=risk_manager,
-                    dashboard=dashboard,
-                )
+                traded = False
+                ml_strategy = self.strategies.get("ml_weather")
+                if ml_strategy is not None:
+                    traded = self._process_signals(
+                        ml_strategy.analyze(obs_data),
+                        strategy_name="ML Weather",
+                        risk_manager=risk_manager,
+                        dashboard=dashboard,
+                    )
                 if not traded:
                     self._process_signals(
                         self.strategies["weather"].analyze(obs_data),
@@ -415,19 +439,32 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         """Full-quote ladder for a city's series, filtered to tracked dates.
 
         One /markets list call (via ``fetch_market_ladder``) — no per-market
-        fetches. Tracked = today's and tomorrow's events, mirroring the
-        legacy sentiment resolver's date targeting; if none match, the full
-        active ladder is returned defensively.
+        fetches. Tracked = yesterday's, today's and tomorrow's events on the
+        **Eastern Time** calendar; if none match, the full active ladder is
+        returned defensively.
+
+        ET date policy (2026-09-02, PRD_STRATEGY_FACTORY FR-F0.3). The
+        previous ``datetime.now()`` was the host wall clock, which on maia is
+        UTC: after 00:00Z the "today" fragment rolled to D+1 while the D
+        ladders were still open, so the last 5–8 h of every city-day (up to
+        04:59Z NY/MIA, 05:59Z CHI, 07:59Z LAX) never reached the tape. The
+        ET date alone is not enough either: LAX's D ladder closes 03:59 ET
+        on D+1 and CHI's 01:59 ET, so between 00:00 and 03:59 ET the ET
+        "today" is already D+1 and D would drop out. Hence D-1 is included
+        too. It is one list request either way, and markets that have
+        closed are already excluded upstream by ``fetch_market_ladder``'s
+        status filter (``active``/``initialized``), so the extra fragment
+        can only admit ladders that are genuinely still open.
         """
         if not hasattr(self.kalshi, "fetch_market_ladder"):
             return []
         ladder = self.kalshi.fetch_market_ladder(series_base) or []
         if not ladder:
             return []
-        now = datetime.now()
+        now_et = datetime.now(ET)
         target_dates = [
-            now.strftime("%y%b%d").upper(),
-            (now + timedelta(days=1)).strftime("%y%b%d").upper(),
+            (now_et + timedelta(days=offset)).strftime("%y%b%d").upper()
+            for offset in (-1, 0, 1)
         ]
         tracked = [m for m in ladder if any(d in m.symbol for d in target_dates)]
         return tracked or ladder

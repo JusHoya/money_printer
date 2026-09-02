@@ -93,7 +93,7 @@ Shared dataclasses: `MarketData` (price/bid/ask/volume/extra dict) and `TradeSig
 
 ### Strategies (`src/strategies/`)
 - **weather_strategy.py**: V2 weather arbitrage comparing NWS forecasts to Kalshi temperature markets with city-specific bias correction. Paper-trading in the sandbox since 2026-09-01 (10:00–13:59 ET window, ≥2.0F edge, full risk gauntlet).
-- **ml_weather.py**: ML-driven weather bracket strategy. Paper-trading alongside V2 when models are on disk; silently degrades to V2-only when `ModelPredictor` is unavailable.
+- **ml_weather.py**: ML-driven weather bracket strategy. OFF by default since 2026-09-02 (`ML_WEATHER_ENABLED = False` in `weather_bot.py`, PRD_STRATEGY_FACTORY FR-F0.2 — its fallback confidence was identically 1.000; see HANDOFF.md §8). When enabled it runs ahead of V2 in the waterfall and silently degrades to V2-only when `ModelPredictor` is unavailable.
 - **mention_strategy.py**: Base-rate mention-market scaffold — inert until `data/mention_base_rates.json` exists AND `MENTION_TRADING_ENABLED` flips; activation path in its docstring.
 - **counter_trade.py**: `CounterTradeAnalyzer` — LOG-ONLY hedge analyzer still invoked by the orchestrator's market loop.
 - **latency_arb.py**: MOTHBALLED (2026-07-24, PRD §4 A2) — kept on disk, unregistered, not-for-capital. See its header for revival preconditions (websocket feeds, <1s loop, maker/IOC, realistic fills, ≥200 paper trades).

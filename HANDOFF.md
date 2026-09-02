@@ -291,3 +291,35 @@ the full suite is heavy on this machine. `tests/test_output_cooldown.txt` is bin
 and must be `--ignore`d. If the suite reds with no code change, check for tests
 pinned to absolute dates — five were fixed in `3760211` and two were time bombs set
 for 2027-01-01.
+
+---
+
+## 8. Dated addenda (after 2026-08-22)
+
+### 2026-09-02 — ML Weather taken out of the sandbox waterfall (PRD_STRATEGY_FACTORY FR-F0.2)
+
+`src/bots/weather_bot.py` now carries `ML_WEATHER_ENABLED = False` (owner-only,
+next to `WEATHER_TRADING_ENABLED`). With it off, `MLWeatherStrategy` is not
+constructed and the tick goes straight to `WeatherArbitrageStrategyV2`
+("Meteorologist V2"); with it on, the waterfall is byte-for-byte the old one.
+
+**Why.** Every executed ML Weather signal on maia logged `confidence=1.000`.
+`src/strategies/ml_weather.py:251` reads
+`hrrr_forecast = extra.get("hrrr_forecast", nws_high or 0)` — no HRRR feed
+exists in the live path, so the "second forecast" is the NWS high itself — and the
+predictor's analytical fallback (`src/ml/predictor.py:598`,
+`confidence = max(0.2, 1.0 - forecast_spread / 10.0)`) scores forecast
+agreement. Spread 0 → confidence 1.0 → Kelly at its maximum on every signal →
+the 50-contract hard cap every time; the implied forecast σ is 0.5F against a
+measured day-of NWS σ of ~2.5F, and the resulting positions were never sized
+down or exited. That is not evidence, so it is off until the model has a second
+independent forecast to disagree with. Exit check: no `confidence=1.000` and no
+`[Signal] EMIT strategy=ML Weather` lines in any maia log started after the deploy.
+
+Two sibling fixes landed in the same commit and change how the tape and the log
+should be read: `_ladder_for_city` tracks D-1/D/D+1 on the **ET** calendar
+(FR-F0.3 — a UTC host was dropping the last 5–8 h of every city-day after
+00:00Z), and `[Signal] EXECUTED ... qty=` / `check_order` now see the
+50-contract post-cap quantity that `record_execution` books (FR-F0.4, log-only;
+earlier logs overstate qty/cost by up to 75/50). Tests:
+`tests/test_weather_bot_f0.py`.
