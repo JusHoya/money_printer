@@ -17,6 +17,7 @@ WorkingDirectory=%h/projects/money_printer
 # LAB_UID/LAB_GID are read by compose from deploy/spark/.env (bootstrap_alcyone.sh);
 # the shell values below win when set, so a fresh login still runs as the host uid.
 Environment=TZ=UTC
+ExecStartPre=/usr/bin/env bash -c 'cd %h/projects/money_printer && mkdir -p logs data/factory data/ladders_holdout data/ladders_2026-09'
 ExecStart=/usr/bin/env bash -c 'LAB_UID=$(id -u) LAB_GID=$(id -g) exec docker compose -f %h/projects/money_printer/deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py resume %i'
 Restart=on-failure
 RestartSec=30

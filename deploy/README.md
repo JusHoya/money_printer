@@ -206,7 +206,7 @@ read-only tmpfs mounts) and `factory-holdout` (identical, plus
 
 ```bash
 # ON alcyone, from ~/projects/money_printer
-mkdir -p data/factory          # docker would create a missing bind source as root
+mkdir -p logs data/factory data/ladders_holdout data/ladders_2026-09   # bind sources + nested mountpoints (see the compose header)
 docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py freeze-frame
 docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py gen0 --bench
 docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py board

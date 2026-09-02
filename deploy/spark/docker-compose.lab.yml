@@ -36,9 +36,15 @@
 #   docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory \
 #       python scripts/factory.py gen0 --bench
 #
-# Before the first factory run: `mkdir -p data/factory` in the checkout. Docker
-# creates a missing bind source as root, and the non-root container could then
-# not write its frames/ledgers there. reports/factory/ is tracked, so it exists.
+# Before the first factory run, in the checkout:
+#   mkdir -p logs data/factory data/ladders_holdout data/ladders_2026-09
+# Two reasons (both measured on alcyone 2026-09-02): docker creates a missing
+# bind SOURCE as root, so the non-root container could not write frames/ledgers
+# to data/factory; and because /app is a read-only bind, docker cannot create
+# the nested MOUNTPOINTS (/app/logs tmpfs, the sealed-root masks) inside it --
+# `mkdirat ...: read-only file system` -- so those directories must already
+# exist on the host (logs/ is gitignored; the sealed roots may be absent in a
+# fresh clone). reports/factory/ is tracked, so it exists.
 
 name: money-printer-lab
 
