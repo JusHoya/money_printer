@@ -199,12 +199,23 @@ def attach_spec_to_signals(signals, market_data):
     Non-weather signals and markets whose semantics cannot be established are
     returned untouched — the strategy itself is responsible for rejecting the
     latter (they never reach here with a signal attached).
+
+    PRD FR-F0.1: every weather signal also leaves here with a tz-aware
+    ``expiration_time`` -- the settlement-day close from
+    :func:`src.core.weather_settlement.settlement_close_for`. The exchange's
+    EXPIRATION CHECK only runs for positions that carry one, and no weather
+    strategy ever set it, so the FR-1.2 settlement branch was unreachable from
+    the live path. A caller-supplied non-``None`` value is never overridden;
+    non-weather symbols are not stamped.
     """
     if not signals:
         return signals
+    market_symbol = getattr(market_data, "symbol", "")
+    for signal in signals:
+        _stamp_expiration(signal, market_symbol)
     extra = getattr(market_data, "extra", None)
     try:
-        spec = parse_bracket_spec(getattr(market_data, "symbol", ""), extra)
+        spec = parse_bracket_spec(market_symbol, extra)
     except BracketSpecError:
         return signals
     for signal in signals:
@@ -212,6 +223,22 @@ def attach_spec_to_signals(signals, market_data):
         signal.floor_strike = spec.floor_strike
         signal.cap_strike = spec.cap_strike
     return signals
+
+
+def _stamp_expiration(signal, fallback_symbol: str) -> None:
+    """Set ``signal.expiration_time`` to the settlement-day close, if absent."""
+    if getattr(signal, "expiration_time", None) is not None:
+        return
+    symbol = getattr(signal, "symbol", None) or fallback_symbol
+    if not is_weather_symbol(symbol):
+        return
+    # Deferred: weather_settlement imports this module at load time (see its
+    # module docstring), so a top-level import here would close the cycle.
+    from src.core.weather_settlement import settlement_close_for
+
+    close = settlement_close_for(symbol)
+    if close is not None:
+        signal.expiration_time = close
 
 
 def yes_bounds(spec: BracketSpec) -> tuple:

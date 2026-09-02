@@ -99,6 +99,8 @@ class TestExitPriceSanity(unittest.TestCase):
 
     def test_weather_is_exempt_from_time_limit(self):
         """PRD FR-1.5: weather positions are held to settlement, not timed out."""
+        from datetime import datetime, timedelta
+
         self.exchange.TIME_LIMIT_MIN = 0  # Would fire immediately for anything else
         self.exchange.open_position(
             "KXHIGHNY-26FEB14-T45",
@@ -107,6 +109,10 @@ class TestExitPriceSanity(unittest.TestCase):
             100,
             strike_type="greater",
             floor_strike=45,
+            # FR-F0.1: a weather position with no expiration is backfilled with
+            # its settlement-day close, and 2026-02-14 has long since settled.
+            # This test is about the pre-expiry sweep, so keep the day running.
+            expiration_time=datetime.now().astimezone() + timedelta(days=1),
         )
 
         self.exchange.update_market("NY", 60.0)
@@ -157,6 +163,8 @@ class TestExitPriceSanity(unittest.TestCase):
             stop_loss=0.30,
             strike_type="greater",
             floor_strike=50,
+            # FR-F0.1: see test_weather_is_exempt_from_time_limit.
+            expiration_time=datetime.now().astimezone() + timedelta(days=1),
         )
         self.exchange.positions[0]["open_time"] = datetime.now() - timedelta(minutes=5)
         self.exchange.update_market_price("KXHIGHNY-26FEB14-T50", 0.05)
