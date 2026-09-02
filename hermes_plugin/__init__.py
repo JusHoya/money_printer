@@ -1,7 +1,9 @@
 """Money Printer trading system integration plugin for Hermes Agent.
 
-Provides 13 tools (prefixed mp_*) that let the agent monitor and control
-the trading system via its HTTP API (localhost:8050) and data files.
+Provides 15 tools (prefixed mp_*) that let the agent monitor and control
+the trading system via its HTTP API (localhost:8050) and data files, plus the
+two strategy-factory readers (mp_factory_status / mp_factory_board) over
+$MONEY_PRINTER_FACTORY_DIR (PRD_STRATEGY_FACTORY FR-F1.6).
 
 Deploy:  ln -sf ~/money_printer/hermes_plugin ~/.hermes/plugins/money-printer
 """
@@ -550,9 +552,154 @@ def get_claude_usage(params):
         return json.dumps({"ok": False, "error": str(e)})
 
 
+# ── Strategy factory (F1) ─────────────────────────────────────────
+
+
+def _factory_dir():
+    """reports/factory root. Read at CALL time so the gateway env wins.
+
+    On alcyone the checkout is /home/jushoya/projects/money_printer, so
+    MONEY_PRINTER_FACTORY_DIR must be set explicitly there (the ~/money_printer
+    default of _PROJECT does not exist on that host).
+    """
+    return os.getenv(
+        "MONEY_PRINTER_FACTORY_DIR",
+        os.path.join(
+            os.getenv("MONEY_PRINTER_DIR", _PROJECT), "reports", "factory"
+        ),
+    )
+
+
+def _factory_load_json(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _factory_latest():
+    """(latest_dict, error_string). Never raises."""
+    root = _factory_dir()
+    path = os.path.join(root, "latest.json")
+    if not os.path.isdir(root):
+        return None, f"factory dir not found: {root} (set MONEY_PRINTER_FACTORY_DIR)"
+    if not os.path.exists(path):
+        return None, f"no factory run yet: {path} missing"
+    try:
+        return _factory_load_json(path), None
+    except Exception as e:  # malformed pointer
+        return None, f"latest.json unreadable: {e}"
+
+
+def get_factory_status(params):
+    """Headline numbers of the latest factory run (latest.json -> summary.json)."""
+    latest, err = _factory_latest()
+    if err:
+        return json.dumps({"ok": False, "error": err})
+    root = _factory_dir()
+    rel = latest.get("summary")
+    if not rel:
+        return json.dumps({"ok": False, "error": "latest.json has no 'summary' pointer"})
+    try:
+        summary = _factory_load_json(os.path.join(root, rel))
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"summary unreadable ({rel}): {e}"})
+
+    seeds = summary.get("seeds") or {}
+
+    def _row(r):
+        r = r or {}
+        return {
+            k: r.get(k)
+            for k in ("trades", "dates", "realized", "boot_lo", "boot_hi", "fit", "constraint_reason")
+        }
+
+    def _seed(name):
+        s = seeds.get(name) or {}
+        camps = s.get("campaigns") or {}
+        return {
+            "parity_full": _row(s.get("parity_full")),
+            "search_full": _row(s.get("search_full")),
+            "validation": {c: _row((camps.get(c) or {}).get("validation")) for c in ("A", "B", "C") if c in camps},
+            "phenotype_hash": s.get("phenotype_hash"),
+            "notes": s.get("notes"),
+        }
+
+    fr = (seeds.get("fr31a_taker") or {}).get("parity_full") or {}
+    ref = (seeds.get("fr31a_taker") or {}).get("reference") or {}
+    parity_line = {
+        "expected": {"trades": 181, "dates": 65, "realized": 0.0636},
+        "kernel": {k: fr.get(k) for k in ("trades", "dates", "realized", "boot_lo", "boot_hi")},
+        "matches_1e9": ref.get("matches_1e9"),
+        "fields_differing": ref.get("fields_differing", []),
+    }
+    body = {
+        "ok": True,
+        "factory_dir": root,
+        "run_id": summary.get("run_id", latest.get("run_id")),
+        "kind": summary.get("kind", latest.get("kind")),
+        "family": summary.get("family", latest.get("family")),
+        "registry_status": (summary.get("registry_line") or {}).get("status"),
+        "git_rev": summary.get("git_rev"),
+        "parity_fr31a": parity_line,
+        "seeds": {n: _seed(n) for n in seeds},
+        "brier_skill_vs_market": summary.get("brier_skill_vs_market"),
+        "throughput": summary.get("throughput"),
+        "summary_path": rel,
+        "phase_note": "F1 gen-0: seeds only; evolution/RC/Holm/controls arrive in F2",
+    }
+    return json.dumps(body)
+
+
+def get_factory_board(params):
+    """board.md of the latest factory run plus coverage.json."""
+    latest, err = _factory_latest()
+    if err:
+        return json.dumps({"ok": False, "error": err})
+    root = _factory_dir()
+    rel = latest.get("board")
+    if not rel:
+        return json.dumps({"ok": False, "error": "latest.json has no 'board' pointer"})
+    try:
+        with open(os.path.join(root, rel), encoding="utf-8") as f:
+            board = f.read()
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"board unreadable ({rel}): {e}"})
+    coverage = None
+    cov_path = os.path.join(root, "coverage.json")
+    if os.path.exists(cov_path):
+        try:
+            coverage = _factory_load_json(cov_path)
+        except Exception as e:
+            coverage = {"error": f"coverage.json unreadable: {e}"}
+    return json.dumps(
+        {
+            "ok": True,
+            "run_id": latest.get("run_id"),
+            "board_path": rel,
+            "board_md": board,
+            "coverage": coverage,
+        }
+    )
+
+
 # ── Tool schemas ──────────────────────────────────────────────────
 
 TOOLS = {
+    "mp_factory_status": {
+        "schema": {
+            "name": "mp_factory_status",
+            "description": "Headline numbers of the latest strategy-factory run (reports/factory/latest.json -> summary.json): run id, kind, family, registry status, per-seed parity/search/validation rows (fr31a parity line vs 181/65/+0.0636, nofilter_no, mlweather_fallback), frame-level Brier skill vs market, throughput. Offline lab artefact on alcyone; never a trading signal.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        "handler": get_factory_status,
+    },
+    "mp_factory_board": {
+        "schema": {
+            "name": "mp_factory_board",
+            "description": "The strategy-factory board (board.md of the latest run: one row per lane — status, family, pick, pooled OOS, p_RC, Holm p, vs no-filter, vs fr31a, N phenotypes, controls, coverage — plus the PAPER row) and reports/factory/coverage.json. Post the markdown as-is.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        "handler": get_factory_board,
+    },
     "mp_status": {
         "schema": {
             "name": "mp_status",

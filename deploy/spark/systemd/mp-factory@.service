@@ -1,0 +1,25 @@
+[Unit]
+Description=Money Printer strategy factory run %i (docs/factory/FACTORY_ARCHITECTURE.md section 7.1)
+# systemd --user template. Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/spark/systemd/mp-factory@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user start mp-factory@<run_id>        # journalctl --user -u mp-factory@<run_id>
+# User units need the user's docker group membership and, for runs that must
+# survive logout, `loginctl enable-linger $USER`.
+# Restart=on-failure on a Type=oneshot unit needs systemd >= 244 (Ubuntu 24.04 ships 255).
+StartLimitIntervalSec=1h
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/money_printer
+# LAB_UID/LAB_GID are read by compose from deploy/spark/.env (bootstrap_alcyone.sh);
+# the shell values below win when set, so a fresh login still runs as the host uid.
+Environment=TZ=UTC
+ExecStart=/usr/bin/env bash -c 'LAB_UID=$(id -u) LAB_GID=$(id -g) exec docker compose -f %h/projects/money_printer/deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py resume %i'
+Restart=on-failure
+RestartSec=30
+# The full cycle is < 4 h wall (section 7.2); the ceiling only stops a wedged run.
+TimeoutStartSec=6h
+Nice=10

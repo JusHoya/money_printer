@@ -192,3 +192,64 @@ The unit runs as `jushoya` (must be in the `docker` group) with
 if the checkout lives elsewhere. The search-frame loader refuses this root
 and `data/ladders_holdout/` by path identity and by the `SEALED` marker
 (`src/backtest/sealed_roots.py`, `tests/test_sealed_roots.py`).
+
+## Factory (F1) — offline strategy search on alcyone
+
+`PRD_STRATEGY_FACTORY.md` FR-F1.6 / `docs/factory/FACTORY_ARCHITECTURE.md` §7.1.
+Two services in `deploy/spark/docker-compose.lab.yml` share the lab image:
+`factory` (no network, no GPU, `cpuset 0-3,5-9,10-11,15-19`, `nice -n 10`,
+`mem_limit 24g`, checkout `:ro`, the sealed ladder roots hidden behind empty
+read-only tmpfs mounts) and `factory-holdout` (identical, plus
+`data/ladders_holdout` and `data/ladders_2026-09` read-only — the only place
+`factory.py holdout` / `factory.py score` may run). Only `data/factory/` and
+`reports/factory/` are writable.
+
+```bash
+# ON alcyone, from ~/projects/money_printer
+mkdir -p data/factory          # docker would create a missing bind source as root
+docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py freeze-frame
+docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py gen0 --bench
+docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py board
+docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py coverage
+```
+
+`freeze-frame` writes `data/factory/frames/<lane>_<cutoff>_<sha12>/` (frames,
+`provenance.json`, `frame.sha256`, `run.json`); `gen0` writes
+`data/factory/runs/<run_id>/run.json` and `reports/factory/<run_id>/{summary.json,
+summary.md,board.md,status.json}` plus `reports/factory/latest.json`. `run.json`
+carries the git rev (abort if empty), the `requirements-lab.lock` sha, the frame
+sha256s, the fee-regime sha and the host uid. `run/resume/controls/report/
+holdout/score/promote` exit 2 until F2/F4.
+
+Long runs (F2) go through the user unit template
+`deploy/spark/systemd/mp-factory@.service`:
+
+```bash
+mkdir -p ~/.config/systemd/user && cp deploy/spark/systemd/mp-factory@.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user start mp-factory@<run_id>      # oneshot, Restart=on-failure, StartLimitBurst=5
+journalctl --user -u mp-factory@<run_id> -n 80 --no-pager
+```
+
+**Hermes.** The plugin gains `mp_factory_status` and `mp_factory_board`, which
+read `$MONEY_PRINTER_FACTORY_DIR/latest.json` (default
+`$MONEY_PRINTER_DIR/reports/factory`; on alcyone set it explicitly in
+`~/.hermes/.env` to `/home/jushoya/projects/money_printer/reports/factory` —
+the plugin's `~/money_printer` default does not exist there). The hourly board
+post is a no-agent cron whose script dedupes on the sha256 of `board.md`
+(timestamp-free by construction), in the same style as the `mp-watchdog`
+`mp_watch.sh` job:
+
+```bash
+cp hermes_plugin/scripts/mp_factory_board.sh ~/.hermes/scripts/
+~/.local/bin/hermes cron create 60m --name mp-factory-board --no-agent \
+    --script mp_factory_board.sh --deliver discord:1491982736989093961 \
+    --provider custom --model ykarout/Qwen3.5-9B-NVFP4
+~/.local/bin/hermes cron list
+```
+
+Flags verified 2026-09-02 against `hermes cron add --help` on alcyone (the
+schedule is positional; `add` aliases `create`; `--monitor-script` is the
+agent-gating byte-hash mode and is incompatible with `--no-agent`, hence the
+in-script hash). The state file is
+`${MP_FACTORY_STATE:-~/.hermes/state/mp_factory_board.sha}`.
