@@ -692,7 +692,10 @@ def run_campaign(
     if last_complete >= 0:
         table = ledger.read_all()
         phenotypes = {h for h in table.column("phenotype_hash").to_pylist() if h}
-        evaluations_here = int(table.num_rows)
+        # UNSCORED rows of a crashed generation are recomputed below and must
+        # not be counted twice (red team F2: 10100 vs 10000 after a gen-17 kill).
+        evaluations_here = int(sum(1 for s in table.column("status").to_pylist()
+                                   if s != ledger_mod.STATUS_UNSCORED))
         fits = [f for f in table.column("fitness").to_pylist() if f is not None and math.isfinite(f)]
         best_fit = max(fits) if fits else None
         population = individuals_from_ledger(ledger.read_gen(last_complete).to_pylist(), search)

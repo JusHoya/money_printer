@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 
@@ -117,7 +118,17 @@ def write_json(path: Path, obj: Any) -> None:
     tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
     with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text + "\n")
-    os.replace(tmp, path)
+    # On Windows a concurrent reader (dashboard poller, monitor) holding the
+    # target open makes os.replace fail with a share violation; retry briefly
+    # (red team F2 D1). Linux renames are unaffected.
+    for attempt in range(50):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 49:
+                raise
+            time.sleep(0.02)
 
 
 def write_text(path: Path, text: str) -> None:
@@ -853,7 +864,10 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
         "holm": holm_block,
         "clustered_dsr": dsr,
         "n_phenotypes": dict(n_phen, total=int(sum(n_phen.values())), distinct_abc=len(all_hashes)),
-        "evaluations": status.get("evaluations") or int(sum(t.num_rows for t in ledgers.values())),
+        # From the ledger alone (the report must be recomputable from ledger +
+        # frame); status.json's counter is a cross-check, not a source.
+        "evaluations": int(sum(t.num_rows for t in ledgers.values())),
+        "evaluations_status_json": status.get("evaluations"),
         "paired_vs_nofilter": paired,
         "sensitivity": sens,
         "bss_trades": bss,
