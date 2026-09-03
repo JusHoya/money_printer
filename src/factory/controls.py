@@ -489,8 +489,18 @@ def summarise_controls(
             ks = MP.ks_uniform(pvals)
             ks_all = MP.ks_uniform(pvals_all)
             n_gt0 = sum(1 for r in reps if r["boot_lo_gt0"])
+            # The criterion's intent is "p_RC not concentrated BELOW 0.10" (anti-
+            # conservatism). The two-sided KS also rejects when null picks skew
+            # high (f2local: KS p 0.001 with 3.3 % below 0.10), so report the
+            # direct one-sided test too: P[X >= k], X ~ Binomial(n, 0.10).
+            k_low = sum(1 for p in pvals if p < 0.10)
+            n_p = len(pvals)
+            binom_excess = float(sum(math.comb(n_p, j) * 0.10 ** j * 0.90 ** (n_p - j) for j in range(k_low, n_p + 1))) if n_p else math.nan
             block.update({
                 "n_boot_lo_gt0": n_gt0,
+                "share_p_rc_below_0.10": (k_low / n_p) if n_p else math.nan,
+                "binom_p_excess_below_0.10": binom_excess,
+                "pass_not_concentrated_low": bool(n_p > 0 and binom_excess > 0.05),
                 "ks_p_rc": ks,
                 "p_rc_values": pvals,
                 "ks_p_rc_all": ks_all,

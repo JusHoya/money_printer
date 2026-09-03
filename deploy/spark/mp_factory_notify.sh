@@ -59,7 +59,12 @@ fam = s.get("family") or "n/a"
 v = s.get("verdict")
 if v is None and isinstance(s.get("promotion"), dict):
     v = s["promotion"].get("verdict")
-pooled = s.get("pooled") if isinstance(s.get("pooled"), dict) else None
+if isinstance(v, dict):  # report.evaluate_verdict block: status + failing conditions
+    failing = v.get("failing") or []
+    v = str(v.get("status") or "n/a") + (f" (failing: {', '.join(map(str, failing))})" if failing else "")
+pooled = s.get("pooled_oos") if isinstance(s.get("pooled_oos"), dict) else None
+if pooled is None:
+    pooled = s.get("pooled") if isinstance(s.get("pooled"), dict) else None
 if pooled is None and isinstance(s.get("oos"), dict) and isinstance(s["oos"].get("pooled"), dict):
     pooled = s["oos"]["pooled"]
 if pooled is None:
@@ -75,7 +80,7 @@ if isinstance(pooled, dict) and pooled:
 else:
     line = "n/a"
 print(str(fam).replace(" ", "_"))
-print(str(v or "n/a").replace(" ", "_"))
+print(str(v or "n/a").replace("\n", " "))  # one line; spaces are fine (read back with sed -n 2p)
 print(line)
 PYEOF
 )"
