@@ -48,7 +48,7 @@ FEE_REGIME = REPO_ROOT / "configs" / "fees" / "fee_regime.csv"
 FRAMES_ROOT = REPO_ROOT / "data" / "factory" / "frames"
 RUNS_ROOT = REPO_ROOT / "data" / "factory" / "runs"
 REPORTS_ROOT = REPO_ROOT / "reports" / "factory"
-NOT_IMPLEMENTED = ("run", "resume", "controls", "report", "holdout", "score", "promote")
+NOT_IMPLEMENTED = ("run", "resume", "holdout", "score", "promote")  # controls/report: F2 STATS (below)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +312,152 @@ def cmd_not_implemented(args: argparse.Namespace) -> int:
     return 2
 
 
+# ===========================================================================
+# F2 STATS workstream: `controls <run_id>` and `report <run_id>`
+# ===========================================================================
+def _load_run(run_id: str, config_path: Optional[str], frames: Optional[str]):
+    """(run_dir, run.json, config dict, FrameSet) for a finished/running `factory.py run` directory."""
+    from src.factory.gen0 import load_frameset
+
+    run_dir = RUNS_ROOT / run_id
+    if not run_dir.is_dir():
+        _die(f"run dir missing: {run_dir}")
+    run_json: Dict[str, Any] = {}
+    rj = run_dir / "run.json"
+    if rj.exists():
+        run_json = json.loads(rj.read_text(encoding="utf-8"))
+    cfg_path = Path(config_path) if config_path else DEFAULT_FAMILY_CONFIG
+    if not cfg_path.exists():
+        _die(f"family config missing: {cfg_path}")
+    config = load_family_config(cfg_path)
+    want = run_json.get("config_sha256")
+    if want and config.get("_config_sha256") and str(want) != str(config["_config_sha256"]):
+        _die(f"run {run_id} was made with config sha {str(want)[:12]}, but {cfg_path.name} hashes to {str(config['_config_sha256'])[:12]}")
+    frames_dir = Path(frames) if frames else (Path(run_json["frames_dir"]) if run_json.get("frames_dir") else _latest_frames_dir(str(config.get("lane", "weather"))))
+    if frames_dir is None or not Path(frames_dir).exists():
+        _die("frames dir not found; pass --frames DIR")
+    fs = load_frameset(Path(frames_dir))
+    frame_shas = run_json.get("frames") or {}
+    got = fs.search.provenance.get("frame_sha256")
+    if frame_shas.get("search") and got and frame_shas["search"] != got:
+        _die(f"search frame sha {str(got)[:12]} differs from run.json's {str(frame_shas['search'])[:12]}")
+    config.update({
+        "frames_dir": str(frames_dir),
+        "run_id": run_id,
+        "repo_root": str(REPO_ROOT),
+        "registry_path": str(REPORTS_ROOT / "registry.jsonl"),
+    })
+    return run_dir, run_json, config, fs
+
+
+def _evolve_cfg(config: Dict[str, Any], run_json: Dict[str, Any], workers: Optional[int]):
+    try:
+        from src.factory.evolve import EvolveConfig
+    except ImportError as exc:  # EVOLVE workstream not merged yet
+        _die(f"src.factory.evolve is unavailable ({exc}); controls need the F2 EVOLVE modules")
+    budget = dict(run_json.get("budget") or config.get("budget") or {})
+    kw: Dict[str, Any] = {}
+    if "population" in budget:
+        kw["population"] = int(budget["population"])
+    if "generations" in budget:
+        kw["generations"] = int(budget["generations"])
+    if "bootstrap_draws" in budget:
+        kw["n_boot"] = int(budget["bootstrap_draws"])
+    kw["workers"] = int(workers) if workers else int(budget.get("workers", 16))
+    return EvolveConfig(**kw)
+
+
+def cmd_controls(args: argparse.Namespace) -> int:
+    from src.factory import controls as controls_mod
+
+    run_dir, run_json, config, fs = _load_run(args.run_id, args.config, args.frames)
+    if not (run_dir / "oos" / "pooled.json").exists():
+        _die(f"{run_dir / 'oos' / 'pooled.json'} missing: the real run must finish before its controls")
+    master_seed = int(run_json.get("master_seed") or (config.get("budget") or {}).get("master_seed") or 0)
+    cfg = _evolve_cfg(config, run_json, args.workers)
+    kinds = tuple(k.strip() for k in str(args.kinds).split(",") if k.strip())
+    print(f"controls: run {args.run_id} kinds={kinds} snapshot x{args.n_snapshot} residual x{args.n_residual} planted x1 "
+          f"master_seed={master_seed} workers={cfg.workers}")
+    summary = controls_mod.run_controls(
+        fs, config, run_dir, None, cfg=cfg, master_seed=master_seed, n_snapshot=int(args.n_snapshot),
+        n_residual=int(args.n_residual), kinds=kinds, log=print,
+    )
+    for kind in kinds:
+        blk = summary.get(kind) or {}
+        if kind == "snapshot":
+            print(f"snapshot: boot_lo>0 in {blk.get('n_boot_lo_gt0')}/{blk.get('n_done')}; KS p {blk.get('ks_p_rc', {}).get('p')}; real rank {blk.get('real_rank')}")
+        elif kind == "residual":
+            print(f"residual: p95 {blk.get('p95')}; real pooled mean {summary.get('real_pooled_mean')} rank {blk.get('real_rank')}/{blk.get('n_done')}")
+        else:
+            print(f"planted: captured {blk.get('captured')} ratio {blk.get('capture_ratio')} pass {blk.get('pass')}")
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from src.factory import report as report_mod
+    from src.factory.registry import Registry, RegistryError, TERMINAL
+
+    run_dir, run_json, config, fs = _load_run(args.run_id, args.config, args.frames)
+    family = str(config.get("family"))
+    reg = Registry(REPORTS_ROOT / "registry.jsonl", repo_root=REPO_ROOT)
+    line = reg.family_line(family)
+    if line is None:
+        _die(f"family {family!r} has no registry line; the run must have been registered before it started")
+    registry_line = {k: v for k, v in line.items() if k != "ts"}
+    registry_line["status"] = reg.status(family)
+    summary = report_mod.build_family_summary(run_dir, fs, config, registry_line)
+    verdict = summary["verdict"]["status"]
+
+    # registry transition FIRST, so the written summary carries the post-transition
+    # registry status and a rerun of `report` is byte-identical (idempotent).
+    current = reg.status(family)
+    if args.no_transition:
+        print(f"report: verdict {verdict}; registry left at {current} (--no-transition)")
+    elif current == verdict:
+        print(f"report: verdict {verdict}; registry already {current} (idempotent)")
+    elif current in TERMINAL:
+        print(f"report: verdict {verdict} but family is {current}; no further transitions are possible", file=sys.stderr)
+    else:
+        pooled = summary.get("pooled_oos") or {}
+        evidence = {
+            "run_id": args.run_id,
+            "pooled_mean": pooled.get("mean"), "pooled_boot_lo": pooled.get("boot_lo"), "pooled_boot_hi": pooled.get("boot_hi"),
+            "pooled_n_dates": pooled.get("n_dates"), "pooled_one_sided_p": pooled.get("one_sided_p"),
+            "holm_p_adj": report_mod._g(summary, "holm", "this_family", "p_adj"),
+            "p_rc_all69": report_mod._g(summary, "multiplicity", "ALL69", "p_rc"),
+            "failing": summary["verdict"].get("failing"),
+            "controls_complete": summary["verdict"].get("controls_complete"),
+        }
+        try:
+            reg.transition(family, verdict, genome_id=report_mod._g(summary, "picks", "ALL69", "genome_id"), evidence=evidence)
+            print(f"report: registry {family}: {current} -> {verdict}")
+        except RegistryError as exc:
+            print(f"report: registry transition refused: {exc}", file=sys.stderr)
+    summary["registry_line"]["status"] = reg.status(family)
+
+    out_dir = Path(args.out) if args.out else REPORTS_ROOT / args.run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("run.json", "bench.json"):
+        src = run_dir / name
+        if src.exists():
+            shutil.copyfile(src, out_dir / name)
+    # the report's status.json extends the run's progress document (never replaces its keys)
+    base_status = json.loads((run_dir / "status.json").read_text(encoding="utf-8")) if (run_dir / "status.json").exists() else {}
+    paths = report_mod.write_family_report(summary, out_dir, reports_root=REPORTS_ROOT)
+    merged = dict(base_status)
+    merged.update(json.loads(paths["status_json"].read_text(encoding="utf-8")))
+    if base_status.get("state"):
+        merged["state"] = base_status["state"]
+        merged["reported"] = True
+    report_mod.write_json(paths["status_json"], merged)
+    print(f"report: wrote {paths['summary_json']}")
+    print(report_mod.render_family_md(summary))
+    return 0
+# ===========================================================================
+# end F2 STATS block
+# ===========================================================================
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -350,6 +496,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("status", help="print reports/factory/latest.json")
     s.set_defaults(func=cmd_status)
+
+    # ---- F2 STATS block: controls / report ---------------------------------
+    ct = sub.add_parser("controls", help="run the 41 control replicates of a finished run (resumable) and write controls/summary.json")
+    ct.add_argument("run_id")
+    ct.add_argument("--kinds", default="snapshot,residual,planted", help="comma list of snapshot,residual,planted")
+    ct.add_argument("--n-snapshot", type=int, default=20)
+    ct.add_argument("--n-residual", type=int, default=20)
+    ct.add_argument("--workers", type=int, default=None, help="override the budget's worker count")
+    ct.add_argument("--config", default=None, help=f"family YAML (default {DEFAULT_FAMILY_CONFIG.name})")
+    ct.add_argument("--frames", default=None, help="frozen frame dir (default: run.json's frames_dir)")
+    ct.set_defaults(func=cmd_controls)
+
+    rp = sub.add_parser("report", help="rebuild reports/factory/<run_id>/ from ledger + frames + picks + controls; transition the registry")
+    rp.add_argument("run_id")
+    rp.add_argument("--out", default=None, help="default reports/factory/<run_id>")
+    rp.add_argument("--config", default=None, help=f"family YAML (default {DEFAULT_FAMILY_CONFIG.name})")
+    rp.add_argument("--frames", default=None, help="frozen frame dir (default: run.json's frames_dir)")
+    rp.add_argument("--no-transition", action="store_true", help="do not write the PROPOSED/CLOSED registry line")
+    rp.set_defaults(func=cmd_report)
+    # ---- end F2 STATS block --------------------------------------------------
 
     for name in NOT_IMPLEMENTED:
         ni = sub.add_parser(name, help="F2+/F4 — not implemented in F1")
