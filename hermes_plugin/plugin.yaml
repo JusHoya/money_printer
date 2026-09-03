@@ -1,5 +1,5 @@
 name: money-printer
-version: 2.1.1
+version: 2.2.0
 description: >
   Monitor and control the Money Printer Kalshi trading sandbox: portfolio
   snapshots, trade journal, rolling stats, win rates, logs, and bot
@@ -8,7 +8,12 @@ description: >
   back to the dashboard HTTP API). If the sandbox sets MP_CONTROL_TOKEN,
   set the same value in this agent's environment — the two POST control
   tools send it as X-MP-Token (optional; GET tools never need it).
+  The two mp_factory_* tools read the offline strategy-factory reports from
+  MONEY_PRINTER_FACTORY_DIR (default $MONEY_PRINTER_DIR/reports/factory;
+  set it explicitly on alcyone).
 provides_tools:
+  - mp_factory_status
+  - mp_factory_board
   - mp_status
   - mp_bots
   - mp_start_bot

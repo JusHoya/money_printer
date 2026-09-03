@@ -23,8 +23,54 @@
 #
 # Pinned lab manifest: deploy/spark/requirements-lab.lock (pip freeze inside
 # this image) — the record of what the lab actually ran with.
+#
+# F1 (PRD_STRATEGY_FACTORY FR-F1.6; docs/factory/FACTORY_ARCHITECTURE.md §7.1)
+# adds two services on the SAME image:
+#   factory          the search: no network, no GPU, 16-core cpuset, nice 10,
+#                    checkout read-only, sealed ladder roots NOT visible
+#   factory-holdout  identical, plus the sealed roots read-only — the only
+#                    service that may run `factory.py holdout` / `factory.py score`
+#
+#   docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory \
+#       python scripts/factory.py freeze-frame
+#   docker compose -f deploy/spark/docker-compose.lab.yml run --rm factory \
+#       python scripts/factory.py gen0 --bench
+#
+# Before the first factory run, in the checkout:
+#   mkdir -p logs data/factory data/ladders_holdout data/ladders_2026-09
+# Two reasons (both measured on alcyone 2026-09-02): docker creates a missing
+# bind SOURCE as root, so the non-root container could not write frames/ledgers
+# to data/factory; and because /app is a read-only bind, docker cannot create
+# the nested MOUNTPOINTS (/app/logs tmpfs, the sealed-root masks) inside it --
+# `mkdirat ...: read-only file system` -- so those directories must already
+# exist on the host (logs/ is gitignored; the sealed roots may be absent in a
+# fresh clone). reports/factory/ is tracked, so it exists.
 
 name: money-printer-lab
+
+# Everything the two factory services share (§7.1, "consistent 16 everywhere").
+x-factory-base: &factory-base
+  image: money-printer-lab:latest
+  user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
+  environment:
+    HOME: /tmp
+    TZ: UTC
+    PYTHONPATH: /app
+    PYTHONDONTWRITEBYTECODE: "1"
+  working_dir: /app
+  # The factory never calls an API: ladders are pre-joined, no Kalshi creds
+  # exist in the container. No `gpus` stanza: the kernel is a boolean mask +
+  # bincount + bootstrap, memory-bandwidth-bound, not FLOP-bound.
+  network_mode: none
+  # 16 cores = all 10 fast X925 + 6 A725, leaving {4, 12, 13, 14} for mp-vllm
+  # and the two 1-CPU Hermes containers.
+  cpuset: "0-3,5-9,10-11,15-19"
+  cpu_shares: 512
+  mem_limit: 24g
+  # Every command runs under nice -n 10 (docker compose run ... factory <cmd>
+  # keeps the entrypoint and replaces only the command).
+  entrypoint: ["nice", "-n", "10"]
+  command: ["python", "scripts/factory.py", "--help"]
 
 services:
   lab:
@@ -59,3 +105,49 @@ services:
     # for the backfill scripts, pulls from public APIs — network stays on;
     # the F1+ `factory` service is the one that runs with network_mode: none).
     command: ["python", "-c", "print('mp-lab ready — use docker compose run')"]
+
+  factory:
+    <<: *factory-base
+    volumes:
+      # The whole checkout, READ-ONLY; the two factory roots are re-mounted rw
+      # on top of it. /archive is deliberately not mounted.
+      - ../..:/app:ro
+      - ../../data/factory:/app/data/factory:rw
+      - ../../reports/factory:/app/reports/factory:rw
+      # logs/ on tmpfs, same mode note as the lab service (octal literal!).
+      - type: tmpfs
+        target: /app/logs
+        tmpfs:
+          mode: 0o1777
+      # SEALED ROOTS MUST NOT BE VISIBLE (§4 A3, §7.1). /app is the whole
+      # checkout, so the holdout-B and M0 ladders would otherwise be readable
+      # through the :ro bind. An empty read-only tmpfs is mounted OVER each
+      # path: the directory exists (loaders that stat it get a clean "empty"
+      # instead of an ENOENT surprise) but holds nothing, and nothing can be
+      # written into it. `factory-holdout` is the only service that binds them.
+      - type: tmpfs
+        target: /app/data/ladders_holdout
+        read_only: true
+        tmpfs:
+          size: 4096
+      - type: tmpfs
+        target: /app/data/ladders_2026-09
+        read_only: true
+        tmpfs:
+          size: 4096
+
+  factory-holdout:
+    <<: *factory-base
+    volumes:
+      - ../..:/app:ro
+      - ../../data/factory:/app/data/factory:rw
+      - ../../reports/factory:/app/reports/factory:rw
+      - type: tmpfs
+        target: /app/logs
+        tmpfs:
+          mode: 0o1777
+      # The sealed roots, read-only. Only `factory.py holdout --unseal ...` and
+      # `factory.py score --ladders data/ladders_2026-09` run here (§9); every
+      # look is appended to reports/factory/unseal_log.jsonl.
+      - ../../data/ladders_holdout:/app/data/ladders_holdout:ro
+      - ../../data/ladders_2026-09:/app/data/ladders_2026-09:ro

@@ -118,3 +118,14 @@ vm_snapshot_2026_08_22/archive/
 # archive/*.tgz. The 27 daily reconcile runs are the one irreplaceable piece and
 # are committed separately under vm_snapshot_2026_08_22/reconcile_record/.
 vm_snapshot_2026_08_22/extracted/
+
+# Strategy factory (PRD_STRATEGY_FACTORY FR-F1.6; docs/factory/FACTORY_ARCHITECTURE.md §8).
+# Frozen frames and run state (ledgers, checkpoints) are regenerable from the
+# tracked inputs + run.json; per-generation parquet and the control-run
+# replicates are large. The tracked report surface stays:
+#   reports/factory/registry.jsonl, coverage.json, latest.json, unseal_log.jsonl,
+#   reports/factory/<run_id>/{summary.json,summary.md,board.md,status.json}
+data/factory/
+reports/factory/*/gen_*
+reports/factory/*/controls/
+reports/factory/*/seed_date_pnl.json

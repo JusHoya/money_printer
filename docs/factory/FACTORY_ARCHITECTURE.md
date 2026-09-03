@@ -156,7 +156,9 @@ genomes; the multiplicity unit is the **phenotype** (sha1 of the sorted set of
 Generation-0 seeds (pre-registered, encoded exactly; verified encodable):
 `fr31a_taker` = {NO, taker, windows {≥24h,12-24h}, far_margin 0.08, edge_distance_lo 4,
 all else OFF/full}; `fr31b` = {YES, taker, windows {6-12h,3-6h,1-3h,<1h}, p_win_lo 0.95};
-`nofilter_no` = {NO, taker, all windows, all bands, everything OFF} (the HALT baseline,
+`nofilter_no` = {NO, taker, windows {≥24h,12-24h}, bands {4-5F,5F+}, everything else OFF} — the
+Phase-2 "BASELINE far-bracket NO, no 8pt filter, taker, ≥12h" shape, which is what the +2.09c/664
+exit criterion pins (F1 correction: an earlier draft said "all windows, all bands") (the HALT baseline,
 +2.09c/664 trades); `salvage_5f` = {NO, bands {≥5}, maker — scored as a **diagnostic row
 only**, mode gene forced to taker for any search}; `mlweather_fallback` = the shape the
 sandbox trades today (buy NO on the highest-YES-bid bracket when the forecast is ≥1.2F
@@ -202,7 +204,8 @@ blank Bid/Ask → fake zero-spread book). It is used only for the F3 fill-realis
    registry carries `RATIFIED <date>`); abort with a logged reason otherwise. The sealed
    roots are not mounted into the `factory` service at all (§7.1).
 2. **Truth filter**: keep rows with `result ∈ {yes, no}` AND `payoff_matches_kalshi != False`
-   AND `truth_agrees != False` (None allowed — the 25 markets of 2026-07-25 are kept, so the
+   AND `truth_agrees != False` (None allowed — the 25 `truth_agrees=None` markets, 24 on 2026-07-25 plus
+   `KXHIGHNY-26JUN23-T78` which is also the one `payoff_matches_kalshi=None` market, are kept, so the
    frame has 69 dates and the 181-trade parity target is reachable). Counts of dropped
    rows/markets per reason are written to provenance. `settles_yes` scoring a missing
    result as NO (ev_analysis.py:1027) can therefore never contribute a trade.

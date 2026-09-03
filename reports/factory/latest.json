@@ -1,0 +1,378 @@
+{
+  "board": "gen0_2026-09-02/board.md",
+  "family": "weather/gfs_mex/taker/v1",
+  "headline": {
+    "brier_skill_vs_market": {
+      "parity": {
+        "brier_market": 0.12135897054973828,
+        "brier_model": 0.15173497994967014,
+        "bss": -0.2502988387453602,
+        "ci_hi": -0.19123792402698944,
+        "ci_lo": -0.3149444783614979,
+        "n_dates": 69,
+        "n_rows": 38200
+      },
+      "search": {
+        "brier_market": 0.12162957183286703,
+        "brier_model": 0.14960698506960857,
+        "bss": -0.23002147269897244,
+        "ci_hi": -0.16970440288281147,
+        "ci_lo": -0.2989685027198965,
+        "n_dates": 69,
+        "n_rows": 31448
+      }
+    },
+    "family": "weather/gfs_mex/taker/v1",
+    "git_rev": "1e5391d512632180e7d9ea79b6742b00ba727f3f",
+    "kind": "gen0",
+    "n_phenotypes": 7,
+    "parity_check": {
+      "boot_hi": 0.1086289246794872,
+      "boot_lo": 0.01220677083333332,
+      "dates": 65,
+      "expected": {
+        "dates": 65,
+        "realized": 0.0636,
+        "trades": 181
+      },
+      "fields_differing": [],
+      "label": "FR-3.1(a) far-bracket NO, taker, >=12h to close",
+      "matches_1e9": true,
+      "realized": 0.06362903846153846,
+      "trades": 181
+    },
+    "registry_status": "OPEN",
+    "run_id": "gen0_2026-09-03",
+    "seeds": {
+      "far_yes_taker": {
+        "notes": "Diagnostic: the Phase-2 'far-bracket YES (buy the tail), taker, >=12h' shape (813 trades, -0.062) so all four Phase-2 taker shapes are covered.",
+        "parity_full": {
+          "boot_hi": -0.05061614471239072,
+          "boot_lo": -0.0729224710464656,
+          "constraint_reason": "BSS",
+          "dates": 69,
+          "fit": null,
+          "realized": -0.061995860854476594,
+          "trades": 813
+        },
+        "phenotype_hash": "f02902846f8a5895421d5831ba45eda880afb5b7",
+        "search_full": {
+          "boot_hi": -0.017690854037267084,
+          "boot_lo": -0.04700645272601795,
+          "constraint_reason": "GEFS_TWIN",
+          "dates": 69,
+          "fit": null,
+          "realized": -0.03451411318150449,
+          "trades": 256
+        },
+        "validation": {
+          "A": {
+            "boot_hi": 0.040913732638888894,
+            "boot_lo": -0.050335607638888884,
+            "dates": 12,
+            "realized": -0.01713472222222223,
+            "trades": 49
+          },
+          "B": {
+            "boot_hi": 0.007375972222222221,
+            "boot_lo": -0.054390312499999996,
+            "dates": 12,
+            "realized": -0.029960317460317465,
+            "trades": 53
+          },
+          "C": {
+            "boot_hi": 0.06411574074074074,
+            "boot_lo": -0.06515231481481483,
+            "dates": 9,
+            "realized": -0.014842592592592598,
+            "trades": 26
+          }
+        }
+      },
+      "fr31a_gefs": {
+        "notes": "Same genes as fr31a_taker, scored on the gefs twin frame (source='gefs'); on the gfs_mex parity frame it reproduces fr31a_taker. parity_full is the parity score of the same genes on the gfs_mex parity frame (== fr31a_taker); search_full and the campaigns are scored on the gefs twin frame.",
+        "parity_full": {
+          "boot_hi": 0.1086289246794872,
+          "boot_lo": 0.01220677083333332,
+          "constraint_reason": "WORST_DATE",
+          "dates": 65,
+          "fit": null,
+          "realized": 0.06362903846153846,
+          "trades": 181
+        },
+        "phenotype_hash": "8dc971179448daf1f31a1ab54c065298a7bfc4ad",
+        "search_full": {
+          "boot_hi": 0.07056098710317461,
+          "boot_lo": -0.1395515376984127,
+          "constraint_reason": "WORST_DATE",
+          "dates": 42,
+          "fit": null,
+          "realized": -0.030781746031746042,
+          "trades": 79
+        },
+        "validation": {
+          "A": {
+            "boot_hi": 0.21300000000000002,
+            "boot_lo": -0.519625,
+            "dates": 4,
+            "realized": -0.03695833333333336,
+            "trades": 7
+          },
+          "B": {
+            "boot_hi": 0.10875979166666667,
+            "boot_lo": -0.280545625,
+            "dates": 10,
+            "realized": -0.06160416666666668,
+            "trades": 18
+          },
+          "C": {
+            "boot_hi": 0.269,
+            "boot_lo": -0.048374999999999974,
+            "dates": 4,
+            "realized": 0.107875,
+            "trades": 8
+          }
+        }
+      },
+      "fr31a_taker": {
+        "notes": "PRD FR-3.1(a) far-bracket NO, taker, >=12h to close: == ev_analysis.fr31a_mask & mode==taker row-for-row (margin 0.08 in the evaluator's own arithmetic p_yes <= yes_ask - 0.08 with yes_ask < 1.0; edge_distance_f >= 4).",
+        "parity_full": {
+          "boot_hi": 0.1086289246794872,
+          "boot_lo": 0.01220677083333332,
+          "constraint_reason": "WORST_DATE",
+          "dates": 65,
+          "fit": null,
+          "realized": 0.06362903846153846,
+          "trades": 181
+        },
+        "phenotype_hash": "ddf61bcd6e0548bb3bf2a4f3c80624d0b6e029bd",
+        "search_full": {
+          "boot_hi": 0.12250373903508772,
+          "boot_lo": 0.014537079678362567,
+          "constraint_reason": "WORST_DATE",
+          "dates": 57,
+          "fit": null,
+          "realized": 0.07228684210526316,
+          "trades": 130
+        },
+        "validation": {
+          "A": {
+            "boot_hi": 0.2984458333333334,
+            "boot_lo": 0.05388877314814816,
+            "dates": 9,
+            "realized": 0.17427314814814818,
+            "trades": 18
+          },
+          "B": {
+            "boot_hi": 0.18120662878787885,
+            "boot_lo": 0.0539367424242424,
+            "dates": 11,
+            "realized": 0.12444696969696968,
+            "trades": 24
+          },
+          "C": {
+            "boot_hi": 0.1360125,
+            "boot_lo": -0.16741886574074072,
+            "dates": 9,
+            "realized": 0.008939814814814798,
+            "trades": 24
+          }
+        }
+      },
+      "fr31b": {
+        "notes": "PRD FR-3.1(b) lock-in: buy YES, taker, <12h to close, p_win >= 0.95 (== ev_analysis.fr31b_mask & mode==taker).",
+        "parity_full": {
+          "boot_hi": 0.20125,
+          "boot_lo": -0.0021249999999999897,
+          "constraint_reason": "MIN_TRADES",
+          "dates": 4,
+          "fit": null,
+          "realized": 0.08187500000000002,
+          "trades": 4
+        },
+        "phenotype_hash": "aea84d21ffbc9dcfb103920b247c7acaca1831d4",
+        "search_full": {
+          "boot_hi": 0.256,
+          "boot_lo": -0.021500000000000002,
+          "constraint_reason": "MIN_TRADES",
+          "dates": 3,
+          "fit": null,
+          "realized": 0.09683333333333334,
+          "trades": 3
+        },
+        "validation": {
+          "A": {
+            "boot_hi": null,
+            "boot_lo": null,
+            "dates": 0,
+            "realized": null,
+            "trades": 0
+          },
+          "B": {
+            "boot_hi": 0.05600000000000005,
+            "boot_lo": 0.05600000000000005,
+            "dates": 1,
+            "realized": 0.05600000000000005,
+            "trades": 1
+          },
+          "C": {
+            "boot_hi": null,
+            "boot_lo": null,
+            "dates": 0,
+            "realized": null,
+            "trades": 0
+          }
+        }
+      },
+      "mlweather_fallback": {
+        "notes": "APPROXIMATION of what maia's MLWeatherStrategy analytical fallback traded (src/strategies/ml_weather.py + src/ml/predictor.py:583-604): buy NO, taker, when the predictor's Gaussian P(in bracket)=max(0.05, exp(-0.5 z^2)), z=(forecast-mid)/(width/2) with width = cap-floor = 1 for 'between' brackets, gives no_edge = bid - P >= 0.08. For a forecast >= 1.22F from the bracket midpoint P floors at 0.05 so the rule is 'bid >= 0.13'. GENE_SPEC v1 encoding: bands {1-2F..5F+} (distance_f = |midpoint - mu| >= 1F is the nearest legal value to 1.22F, and mu_f is the calibrated median, not the raw NWS high the sandbox used); quote_hi 0.85 (quote = 1 - bid <= 0.87 -> nearest grid value); windows {>=24h,12-24h,6-12h} (the 10:00-13:59 ET decision window maps to 12-24h/6-12h for same-day and >=24h for next-day markets on the parity tape); p_win OFF (the fallback never used the calibration). NOT encoded: the one-slot-per-city 'highest YES bid first' selection (cross-row), the METAR/NWS source gate, the winner guard, the Yogi-Berra branch, and the fallback's YES branch on open-ended tails (P clipped to 0.95 on a 50F virtual bracket -> BUY YES when ask <= 0.87).",
+        "parity_full": {
+          "boot_hi": -0.029271429043983388,
+          "boot_lo": -0.05404100219325762,
+          "constraint_reason": "BSS",
+          "dates": 69,
+          "fit": null,
+          "realized": -0.04175026278069756,
+          "trades": 780
+        },
+        "phenotype_hash": "02ffb3df1d4e9e8c6afcd4804c32e6b6e4931f4f",
+        "search_full": {
+          "boot_hi": 0.0002758430604218647,
+          "boot_lo": -0.03855662552674781,
+          "constraint_reason": "BSS",
+          "dates": 69,
+          "fit": null,
+          "realized": -0.01886048597135554,
+          "trades": 599
+        },
+        "validation": {
+          "A": {
+            "boot_hi": -0.013751489372895618,
+            "boot_lo": -0.0719708937214406,
+            "dates": 12,
+            "realized": -0.04174457822270323,
+            "trades": 107
+          },
+          "B": {
+            "boot_hi": 0.041750539133898514,
+            "boot_lo": -0.05296852930345117,
+            "dates": 12,
+            "realized": -0.0012843509499759493,
+            "trades": 109
+          },
+          "C": {
+            "boot_hi": 0.04373042929292931,
+            "boot_lo": -0.04734292929292929,
+            "dates": 9,
+            "realized": -0.0015465768799102107,
+            "trades": 88
+          }
+        }
+      },
+      "nofilter_no": {
+        "notes": "The Phase-2 BASELINE shape ('BASELINE far-bracket NO, no 8pt filter, taker, >=12h'): buy NO, taker, windows {>=24h,12-24h}, bands {4-5F,5F+}, no p/margin filter. Pinned to 664 trades / +0.0209 on the parity frame; supersedes the architecture's 'all windows, all bands' wording.",
+        "parity_full": {
+          "boot_hi": 0.03502779168546833,
+          "boot_lo": 0.006533388201472452,
+          "constraint_reason": "BSS",
+          "dates": 69,
+          "fit": null,
+          "realized": 0.020873737564770182,
+          "trades": 664
+        },
+        "phenotype_hash": "3a264cceea5509d02b8f9eb8e5b345d6fd7a5884",
+        "search_full": {
+          "boot_hi": 0.09497290733830846,
+          "boot_lo": 0.02168546863894812,
+          "constraint_reason": null,
+          "dates": 67,
+          "fit": 0.02168546863894812,
+          "realized": 0.06017212153518124,
+          "trades": 241
+        },
+        "validation": {
+          "A": {
+            "boot_hi": 0.2127545454545455,
+            "boot_lo": 0.03578818181818181,
+            "dates": 11,
+            "realized": 0.12603863636363635,
+            "trades": 27
+          },
+          "B": {
+            "boot_hi": 0.15559947916666664,
+            "boot_lo": 0.02172074652777777,
+            "dates": 12,
+            "realized": 0.09603819444444445,
+            "trades": 45
+          },
+          "C": {
+            "boot_hi": 0.08543990410052918,
+            "boot_lo": -0.1417942361111111,
+            "dates": 9,
+            "realized": -0.017908597883597877,
+            "trades": 44
+          }
+        }
+      },
+      "salvage_5f": {
+        "notes": "DIAGNOSTIC ONLY: buy NO, MAKER, bands {5F+}, all windows. mode=maker is legal for encoding but not searchable (Genome.is_searchable() is False; random() never draws it).",
+        "parity_full": {
+          "boot_hi": 0.05600475327812284,
+          "boot_lo": 0.017113851506786303,
+          "constraint_reason": null,
+          "dates": 69,
+          "fit": 0.017113851506786303,
+          "realized": 0.03774143087186566,
+          "trades": 320
+        },
+        "phenotype_hash": "b125eaccc3317fde818e6291c0750f41d762aea3",
+        "search_full": {
+          "boot_hi": 0.10531912202380952,
+          "boot_lo": 0.01314062500000001,
+          "constraint_reason": "WORST_DATE",
+          "dates": 56,
+          "fit": null,
+          "realized": 0.06202678571428572,
+          "trades": 117
+        },
+        "validation": {
+          "A": {
+            "boot_hi": 0.31666666666666665,
+            "boot_lo": 0.11351851851851852,
+            "dates": 9,
+            "realized": 0.20185185185185187,
+            "trades": 15
+          },
+          "B": {
+            "boot_hi": 0.133,
+            "boot_lo": 0.04698750000000002,
+            "dates": 10,
+            "realized": 0.0945,
+            "trades": 18
+          },
+          "C": {
+            "boot_hi": 0.09500462962962965,
+            "boot_lo": -0.08519444444444443,
+            "dates": 9,
+            "realized": 0.02203703703703705,
+            "trades": 20
+          }
+        }
+      }
+    },
+    "throughput": {
+      "elapsed_s": 9.107,
+      "evals_per_s": 6588.6,
+      "host": "3d7365915c40",
+      "n": 60000,
+      "peak_rss_mb": 323.6,
+      "start_method": "fork",
+      "workers": 16
+    }
+  },
+  "kind": "gen0",
+  "run_id": "gen0_2026-09-03",
+  "status": "gen0_2026-09-02/status.json",
+  "summary": "gen0_2026-09-02/summary.json",
+  "summary_md": "gen0_2026-09-02/summary.md"
+}

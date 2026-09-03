@@ -1,0 +1,35 @@
+{
+  "reference": "reports/phase2/ws_e_go_no_go_data_2026-07-26.json",
+  "reference_shape": {
+    "name": "fr31a taker",
+    "trades": 181,
+    "dates": 65,
+    "realized_per_contract": 0.06362903846153846,
+    "boot_lo": 0.01220677083333332,
+    "boot_hi": 0.1086289246794872
+  },
+  "commit": "48618cf654771f1fe6eddafbd61600cb1343b857",
+  "note": "State of the forecast archive and CLI truth at the Phase-2 go/no-go (2026-07-26). F0's backfill (commit 9a8ed2e) appended four 2026-07-25 day-of gfs_mex vintages and post-07-25 truth rows, which moves the current-data fr31a taker result to 182 trades / +0.0649; the parity frame is built from these pinned blobs so the 181 / +0.0636 reference is reproduced exactly (FACTORY_ROADMAP F1 exit criterion 1).",
+  "files": [
+    {
+      "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+      "sha256": "850a2a3f44cae5f4a43071b3cb13a527c721357fe4790da4e8d08174a4a6b1ed"
+    },
+    {
+      "path": "data/weather_truth/cli_daily_high_KNYC.csv",
+      "sha256": "44be692662c194de7a4bb77d3dc22aab1400ab988c98b672a0c0e5a28ce7268b"
+    },
+    {
+      "path": "data/weather_truth/cli_daily_high_KMDW.csv",
+      "sha256": "39c301625435e414b3806f2fe34200c219bc0312578077cb9decbe999251a226"
+    },
+    {
+      "path": "data/weather_truth/cli_daily_high_KLAX.csv",
+      "sha256": "58b543726cdf9ad5ee6d9d5d684647997057d80a625719fd6cd8c747317b8c08"
+    },
+    {
+      "path": "data/weather_truth/cli_daily_high_KMIA.csv",
+      "sha256": "07cb88611415290708e2aefdd9fa1771a604c3654926affe495ca492b0e6c56e"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+# Family config: weather / gfs_mex / taker / GENE_SPEC v1
+# PRD_STRATEGY_FACTORY.md FR-F1.4/F1.6; docs/factory/FACTORY_ARCHITECTURE.md section 6.
+#
+# The registry line (reports/factory/registry.jsonl) is written from THIS file
+# BEFORE any result exists; its sha256 is the family's config_sha256. Editing
+# thresholds after the line is written is a new family (new name), never an
+# edit in place.
+family: weather/gfs_mex/taker/v1
+lane: weather
+source: gfs_mex
+mode: taker
+gene_spec_version: 1
+grouping_unit: target_date      # the independent settlement unit for weather
+family_cap: 6                   # section 6.3: registered families before 2027
+
+frame:
+  cutoff: "2026-07-25"          # until RATIFIED <date> in docs/REVIVAL_2026_09.md
+  availability_lag_min: 240
+  sigma_cap: 4.0
+  contracts: 20
+  adverse_fill: 0.01
+  embargo_days: 1
+
+campaigns: [A, B, C, ALL69]     # section 6.1; 2-day embargo before each validation block
+
+picker: max_boot_lo_ties_fewer_clauses   # pre-registered: highest search-window boot_lo among
+                                         # constraint-satisfying elites; ties -> fewer clauses
+
+thresholds:                     # section 6.3 promotion conditions + section 5 hard constraints
+  pooled_boot_lo_gt: 0.0
+  holm_alpha: 0.05
+  p_rc_all69_lt: 0.10
+  min_trades: 40
+  min_dates_frac: 0.6
+  min_cities: 3
+  worst_date_pnl_min: -0.50
+  bss_trades_min: -0.05
+  max_clauses: 8
+  gefs_twin_min: 0.0
+
+budget:                         # PLACEHOLDERS for F2 (evolve.py); gen-0 scores the seeds only
+  population: 400
+  generations: 60
+  workers: 16
+  bootstrap_draws: 4000
+  master_seed: 20260902
+  placeholder: true             # marked: F2 fixes these before the first `factory.py run`
+
+seeds:                          # FR-F1.5 gen-0 seeds (src/factory/genome.py SEEDS)
+  - fr31a_taker
+  - fr31b
+  - nofilter_no
+  - salvage_5f                  # diagnostic
+  - mlweather_fallback          # what maia trades today
+  - fr31a_gefs                  # scored on the gefs twin
+  - far_yes_taker
