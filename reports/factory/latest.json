@@ -8,7 +8,7 @@
         "brier_model": 0.15173497994967014,
         "bss": -0.2502988387453602,
         "ci_hi": -0.19123792402698944,
-        "ci_lo": -0.3149444783614977,
+        "ci_lo": -0.3149444783614979,
         "n_dates": 69,
         "n_rows": 38200
       },
@@ -17,13 +17,13 @@
         "brier_model": 0.14960698506960857,
         "bss": -0.23002147269897244,
         "ci_hi": -0.16970440288281147,
-        "ci_lo": -0.29896850271989606,
+        "ci_lo": -0.2989685027198965,
         "n_dates": 69,
         "n_rows": 31448
       }
     },
     "family": "weather/gfs_mex/taker/v1",
-    "git_rev": "c38a28f1567934998fac8144a7cf02f0eea49505",
+    "git_rev": "1e5391d512632180e7d9ea79b6742b00ba727f3f",
     "kind": "gen0",
     "n_phenotypes": 7,
     "parity_check": {
@@ -42,7 +42,7 @@
       "trades": 181
     },
     "registry_status": "OPEN",
-    "run_id": "gen0_2026-09-02",
+    "run_id": "gen0_2026-09-03",
     "seeds": {
       "far_yes_taker": {
         "notes": "Diagnostic: the Phase-2 'far-bracket YES (buy the tail), taker, >=12h' shape (813 trades, -0.062) so all four Phase-2 taker shapes are covered.",
@@ -55,7 +55,7 @@
           "realized": -0.061995860854476594,
           "trades": 813
         },
-        "phenotype_hash": "6ae3120e3ccf8729d1ebfb8146f5dbb0087a04b6",
+        "phenotype_hash": "f02902846f8a5895421d5831ba45eda880afb5b7",
         "search_full": {
           "boot_hi": -0.017690854037267084,
           "boot_lo": -0.04700645272601795,
@@ -100,7 +100,7 @@
           "realized": 0.06362903846153846,
           "trades": 181
         },
-        "phenotype_hash": "9a2af918172c7a0e2ab3201c208a74fa0e9797c0",
+        "phenotype_hash": "8dc971179448daf1f31a1ab54c065298a7bfc4ad",
         "search_full": {
           "boot_hi": 0.07056098710317461,
           "boot_lo": -0.1395515376984127,
@@ -145,7 +145,7 @@
           "realized": 0.06362903846153846,
           "trades": 181
         },
-        "phenotype_hash": "aac1f03cb2ee579fe977e09e2251c4995a428d73",
+        "phenotype_hash": "ddf61bcd6e0548bb3bf2a4f3c80624d0b6e029bd",
         "search_full": {
           "boot_hi": 0.12250373903508772,
           "boot_lo": 0.014537079678362567,
@@ -190,7 +190,7 @@
           "realized": 0.08187500000000002,
           "trades": 4
         },
-        "phenotype_hash": "d64e6310c38d09ba615de0df239ef9e454839683",
+        "phenotype_hash": "aea84d21ffbc9dcfb103920b247c7acaca1831d4",
         "search_full": {
           "boot_hi": 0.256,
           "boot_lo": -0.021500000000000002,
@@ -235,7 +235,7 @@
           "realized": -0.04175026278069756,
           "trades": 780
         },
-        "phenotype_hash": "f25cd62d52b5cbe10a6bbce509e8b4f052fbc483",
+        "phenotype_hash": "02ffb3df1d4e9e8c6afcd4804c32e6b6e4931f4f",
         "search_full": {
           "boot_hi": 0.0002758430604218647,
           "boot_lo": -0.03855662552674781,
@@ -280,7 +280,7 @@
           "realized": 0.020873737564770182,
           "trades": 664
         },
-        "phenotype_hash": "7c11bee32ced11a44fc86a883d9048a8ec96cbee",
+        "phenotype_hash": "3a264cceea5509d02b8f9eb8e5b345d6fd7a5884",
         "search_full": {
           "boot_hi": 0.09497290733830846,
           "boot_lo": 0.02168546863894812,
@@ -325,7 +325,7 @@
           "realized": 0.03774143087186566,
           "trades": 320
         },
-        "phenotype_hash": "7c08dc9a4da092a49ee9d822b97f597f04974a9c",
+        "phenotype_hash": "b125eaccc3317fde818e6291c0750f41d762aea3",
         "search_full": {
           "boot_hi": 0.10531912202380952,
           "boot_lo": 0.01314062500000001,
@@ -361,17 +361,17 @@
       }
     },
     "throughput": {
-      "elapsed_s": 1.397,
-      "evals_per_s": 1431.4,
-      "host": "DESKTOP-Hoya",
-      "n": 2000,
-      "peak_rss_mb": 316.6,
-      "start_method": "spawn",
-      "workers": 8
+      "elapsed_s": 9.107,
+      "evals_per_s": 6588.6,
+      "host": "3d7365915c40",
+      "n": 60000,
+      "peak_rss_mb": 323.6,
+      "start_method": "fork",
+      "workers": 16
     }
   },
   "kind": "gen0",
-  "run_id": "gen0_2026-09-02",
+  "run_id": "gen0_2026-09-03",
   "status": "gen0_2026-09-02/status.json",
   "summary": "gen0_2026-09-02/summary.json",
   "summary_md": "gen0_2026-09-02/summary.md"

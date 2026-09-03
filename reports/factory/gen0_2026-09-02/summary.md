@@ -1,10 +1,10 @@
-# Factory gen-0 report -- `gen0_2026-09-02`
+# Factory gen-0 report -- `gen0_2026-09-03`
 
 **Family** `weather/gfs_mex/taker/v1` -- registry status **OPEN** (picker `max_boot_lo_ties_fewer_clauses`, config sha `e679631add8e`, cutoff 2026-07-25)
 
 **Parity check** fr31a_taker on the parity frame: expected 181 / 65 / +0.0636; kernel 181 / 65 / +0.0636 boot [+0.0122, +0.1086] -- matches within 1e-9: **yes**
 
-Frame: parity `749d876362c8` (251728 rows) / search `bfcf94654a3a` (216636 rows) / gefs twin `5d6611a3cbb7`
+Frame: parity `db6fe0ff5aaa` (251728 rows) / search `0fdf39ea506b` (216636 rows) / gefs twin `16aeb10a3608`
 
 ## Seeds (realized c/contract, date-bootstrap 95% CI, trades, dates)
 
@@ -23,6 +23,6 @@ Frame: parity `749d876362c8` (251728 rows) / search `bfcf94654a3a` (216636 rows)
 **Frame-level Brier skill vs market mid** (parity frame, all two-sided rows): BSS -0.2503 CI [-0.3149, -0.1912] over 38200 rows / 69 dates (date-clustered)
 **Frame-level Brier skill vs market mid** (search frame, all two-sided rows): BSS -0.2300 CI [-0.2990, -0.1697] over 31448 rows / 69 dates (date-clustered)
 
-**Throughput** 1431.4 evals/s on 8 workers, peak RSS 317 MB, host `DESKTOP-Hoya`
+**Throughput** 6588.6 evals/s on 16 workers, peak RSS 324 MB, host `3d7365915c40`
 
 Evolution, RC/SPA, Holm, controls: F2 -- not part of gen-0. No genome is proposed by this report.

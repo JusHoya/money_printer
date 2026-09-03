@@ -1,0 +1,88 @@
+{
+  "config": {
+    "bench": true,
+    "budget": {
+      "bootstrap_draws": 4000,
+      "generations": 60,
+      "master_seed": 20260902,
+      "placeholder": true,
+      "population": 400,
+      "workers": 16
+    },
+    "campaigns": [
+      "A",
+      "B",
+      "C",
+      "ALL69"
+    ],
+    "family": "weather/gfs_mex/taker/v1",
+    "family_cap": 6,
+    "fee_regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+    "frame": {
+      "adverse_fill": 0.01,
+      "availability_lag_min": 240,
+      "contracts": 20,
+      "cutoff": "2026-07-25",
+      "embargo_days": 1,
+      "sigma_cap": 4.0
+    },
+    "frames_dir": "data/factory/frames/weather_2026-07-25_0fdf39ea506b",
+    "gene_spec_version": 1,
+    "git_rev": "1e5391d512632180e7d9ea79b6742b00ba727f3f",
+    "grouping_unit": "target_date",
+    "lane": "weather",
+    "lock_sha256": "523a9fe5e5b0ca4f7882dbdd2f2c124e6936898115f745c21dd41dd0242c2c76",
+    "mode": "taker",
+    "picker": "max_boot_lo_ties_fewer_clauses",
+    "registry_path": "/app/reports/factory/registry.jsonl",
+    "repo_root": "/app",
+    "run_id": "gen0_2026-09-03",
+    "seeds": [
+      "fr31a_taker",
+      "fr31b",
+      "nofilter_no",
+      "salvage_5f",
+      "mlweather_fallback",
+      "fr31a_gefs",
+      "far_yes_taker"
+    ],
+    "source": "gfs_mex",
+    "thresholds": {
+      "bss_trades_min": -0.05,
+      "gefs_twin_min": 0.0,
+      "holm_alpha": 0.05,
+      "max_clauses": 8,
+      "min_cities": 3,
+      "min_dates_frac": 0.6,
+      "min_trades": 40,
+      "p_rc_all69_lt": 0.1,
+      "pooled_boot_lo_gt": 0.0,
+      "worst_date_pnl_min": -0.5
+    },
+    "workers": 16
+  },
+  "fee_regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+  "frames": {
+    "gefs_twin": "16aeb10a3608014df4711da1c7bf4955ecb65f29af5459f7674be83979c9e44c",
+    "parity": "db6fe0ff5aaa8e70b2285031401967177a05327dbcb203dc9f1db5e4652be04c",
+    "search": "0fdf39ea506b8d496be3090b9ed2876acb00e0c7dbb8ec1d33b9d32ce93fa83b"
+  },
+  "frames_dir": "data/factory/frames/weather_2026-07-25_0fdf39ea506b",
+  "git_rev": "1e5391d512632180e7d9ea79b6742b00ba727f3f",
+  "host": {
+    "node": "3d7365915c40",
+    "platform": "Linux-6.17.0-1031-nvidia-aarch64-with-glibc2.36",
+    "uid": 1000
+  },
+  "kind": "gen0",
+  "lock_file": "deploy/spark/requirements-lab.lock",
+  "lock_sha256": "523a9fe5e5b0ca4f7882dbdd2f2c124e6936898115f745c21dd41dd0242c2c76",
+  "out_dir": "reports/factory/gen0_2026-09-02",
+  "run_id": "gen0_2026-09-03",
+  "versions": {
+    "numpy": "2.5.2",
+    "pandas": "3.0.5",
+    "pyarrow": "25.0.1",
+    "python": "3.12.14"
+  }
+}

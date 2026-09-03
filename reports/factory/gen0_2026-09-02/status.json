@@ -9,19 +9,19 @@
   "evolution": "not started (F2)",
   "family": "weather/gfs_mex/taker/v1",
   "frame": {
-    "gefs_twin_sha256": "5d6611a3cbb7e6053db15f5793d2ff2f01e5ac1749da9db58b3662b63bdabe4b",
+    "gefs_twin_sha256": "16aeb10a3608014df4711da1c7bf4955ecb65f29af5459f7674be83979c9e44c",
     "parity_rows": 251728,
-    "parity_sha256": "749d876362c8c5d33c80fd4a3c29e0d3e3e1bdc01d38c09d77eb67480a6ace81",
+    "parity_sha256": "db6fe0ff5aaa8e70b2285031401967177a05327dbcb203dc9f1db5e4652be04c",
     "search_rows": 216636,
-    "search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076"
+    "search_sha256": "0fdf39ea506b8d496be3090b9ed2876acb00e0c7dbb8ec1d33b9d32ce93fa83b"
   },
-  "git_rev": "c38a28f1567934998fac8144a7cf02f0eea49505",
+  "git_rev": "1e5391d512632180e7d9ea79b6742b00ba727f3f",
   "kind": "gen0",
   "n_phenotypes": 7,
   "parity_matches_1e9": true,
   "phase": "F1",
   "registry_status": "OPEN",
-  "run_id": "gen0_2026-09-02",
+  "run_id": "gen0_2026-09-03",
   "seeds_scored": [
     "fr31a_taker",
     "fr31b",
