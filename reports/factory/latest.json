@@ -1,6 +1,9 @@
 {
-  "board": "gen0_2026-09-02/board.md",
+  "active_run": "run_2026-09-03b",
+  "board": "run_2026-09-03b/board.md",
   "family": "weather/gfs_mex/taker/v1",
+  "family_status": "run_2026-09-03b/status.json",
+  "family_summary": "run_2026-09-03b/summary.json",
   "headline": {
     "brier_skill_vs_market": {
       "parity": {
@@ -371,8 +374,10 @@
     }
   },
   "kind": "gen0",
+  "run": "run_2026-09-03b",
   "run_id": "gen0_2026-09-03",
-  "status": "gen0_2026-09-02/status.json",
+  "status": "run_2026-09-03b/status.json",
   "summary": "gen0_2026-09-02/summary.json",
-  "summary_md": "gen0_2026-09-02/summary.md"
+  "summary_md": "gen0_2026-09-02/summary.md",
+  "verdict": "CLOSED"
 }

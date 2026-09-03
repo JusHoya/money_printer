@@ -1,0 +1,50 @@
+{
+  "blocked_folds": true,
+  "budget": {
+    "boot_seed": 20260726,
+    "chunksize": 0,
+    "elite_frac": 0.05,
+    "generations": 60,
+    "immigrant_frac": 0.05,
+    "n_boot": 4000,
+    "niche_jaccard": 0.9,
+    "population": 400,
+    "tournament": 4,
+    "workers": 16
+  },
+  "campaigns": [
+    "A",
+    "B",
+    "C",
+    "ALL69"
+  ],
+  "config_path": "/app/configs/factory/weather_gfs_mex_taker_v1.yaml",
+  "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
+  "family": "weather/gfs_mex/taker/v1",
+  "fee_regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+  "fold_k": 5,
+  "fold_purge_days": 2,
+  "frames": {
+    "gefs_twin": "16aeb10a3608014df4711da1c7bf4955ecb65f29af5459f7674be83979c9e44c",
+    "parity": "db6fe0ff5aaa8e70b2285031401967177a05327dbcb203dc9f1db5e4652be04c",
+    "search": "0fdf39ea506b8d496be3090b9ed2876acb00e0c7dbb8ec1d33b9d32ce93fa83b"
+  },
+  "frames_dir": "/app/data/factory/frames/weather_2026-07-25_0fdf39ea506b",
+  "git_rev": "fb91898288c479f68663d188b544f542d67c3664+dirty",
+  "host": {
+    "node": "feeb280ff110",
+    "platform": "Linux-6.17.0-1031-nvidia-aarch64-with-glibc2.36",
+    "uid": 1000
+  },
+  "kind": "run",
+  "lock_file": "deploy/spark/requirements-lab.lock",
+  "lock_sha256": "523a9fe5e5b0ca4f7882dbdd2f2c124e6936898115f745c21dd41dd0242c2c76",
+  "master_seed": 20260902,
+  "run_id": "run_2026-09-03b",
+  "versions": {
+    "numpy": "2.5.2",
+    "pandas": "3.0.5",
+    "pyarrow": "25.0.1",
+    "python": "3.12.14"
+  }
+}
