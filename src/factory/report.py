@@ -479,6 +479,7 @@ ADVERSE_SENSITIVITY = (0.02, 0.03)
 BOARD_MAX_CHARS = 1900
 #: The verdict conditions (FACTORY_ARCHITECTURE section 6.3 promotion + section 5 step 8 gates)
 VERDICT_CONDITIONS = (
+    "headline_picks_present",
     "pooled_boot_lo_gt0",
     "holm_p_lt_alpha",
     "p_rc_all69_lt_threshold",
@@ -627,11 +628,13 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
     mult: Dict[str, Any] = {}
     sr_trials: List[float] = []
     all_hashes = set()
+    picks_missing: Dict[str, Any] = {}
     for c in FAMILY_CAMPAIGNS:
         p = picks.get(c)
         camp = camps.get(c)
-        if not p or camp is None:
-            pick_rows[c] = None
+        if camp is None or not CT.pick_present(p):
+            picks_missing[c] = (p or {}).get("reason") or "MISSING"
+            pick_rows[c] = {"missing": True, "reason": picks_missing[c], "n_candidates": (p or {}).get("n_candidates")}
             continue
         g = CT.pick_genome(p)
         genomes[c] = g
@@ -675,7 +678,7 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
             all_hashes |= hashes
             min_d = int(math.ceil(fitness.MIN_DATE_FRACTION * len(camp.search_dates)))
             sr_trials.extend(float(x) for x in MP.sharpe_from_ledger(table.column("t_stat").to_pylist(), table.column("dates").to_pylist(), min_dates=min_d))
-        M, ids = MP.ledger_matrix(table, camp.search_dates, code_dates=CT.worker_dates(F, camp))
+        M, ids = MP.ledger_matrix(table, camp.search_dates, code_dates=CT.ledger_code_dates(F))
         ph = str(p.get("phenotype_hash") or "")
         if ph in ids:
             rc = MP.reality_check(M, ids.index(ph), n_boot=n_boot, seed=seed)
@@ -702,6 +705,8 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
         if r_v is not None and r_v.trades:
             pooled_cities |= set(int(x) for x in F.visible["city_code"][np.asarray(r_v.trade_rows, dtype=np.int64)].tolist())
     pooled["cities"] = len(pooled_cities)
+    pooled["picks_missing"] = {c: r for c, r in picks_missing.items() if c in POOLED_CAMPAIGNS}
+    pooled["n_calendar_dates"] = int(sum(len(camps[c].validation_dates) for c in POOLED_CAMPAIGNS if c in camps))
 
     # -- Holm across registry entries -------------------------------------------
     reg_path = config.get("registry_path")
@@ -819,7 +824,7 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
                               "n_active_clauses": json.loads(r["genome_json"]).get("n_active_clauses")})
             if len(finalists) == 3:
                 break
-    if pick_rows.get("ALL69") and finalists and finalists[0]["genome_id"] != pick_rows["ALL69"]["genome_id"]:
+    if pick_rows.get("ALL69") and not pick_rows["ALL69"].get("missing") and finalists and finalists[0]["genome_id"] != pick_rows["ALL69"]["genome_id"]:
         finalists.insert(0, {"rank": 0, "genome_id": pick_rows["ALL69"]["genome_id"], "genome_json": pick_rows["ALL69"]["genome_json"],
                              "phenotype_hash": pick_rows["ALL69"]["phenotype_hash"], "note": "the ALL69 pick (picks.json) differs from the ledger order"})
 
@@ -842,6 +847,7 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
         "frame": gen0._frames_summary(fs, Path(frames_dir) if frames_dir else None, config),
         "campaigns": gen0._campaign_block(camps),
         "picks": pick_rows,
+        "picks_missing": picks_missing,
         "pooled_oos": pooled,
         "multiplicity": mult,
         "holm": holm_block,
@@ -886,6 +892,7 @@ def evaluate_verdict(summary: Dict[str, Any]) -> Dict[str, Any]:
         return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else bool(x < y)
 
     conditions: Dict[str, Optional[bool]] = {
+        "headline_picks_present": not (summary.get("picks_missing") or {}),
         "pooled_boot_lo_gt0": _gt(pooled.get("boot_lo"), float(th.get("pooled_boot_lo_gt", 0.0))),
         "holm_p_lt_alpha": _lt(holm_this.get("p_adj"), float(th.get("holm_alpha", 0.05))),
         "p_rc_all69_lt_threshold": _lt(p_rc_all, float(th.get("p_rc_all69_lt", 0.10))),
@@ -909,7 +916,7 @@ def evaluate_verdict(summary: Dict[str, Any]) -> Dict[str, Any]:
         "planted_pass": planted.get("pass"),
         "snapshot_pass": bool((controls.get("snapshot") or {}).get("pass_boot_lo") and (controls.get("snapshot") or {}).get("pass_ks")) if controls else None,
         "residual_real_rank": (controls.get("residual") or {}).get("real_rank") if controls else None,
-        "rule": "PROPOSED iff pooled boot_lo > 0, Holm p < alpha, p_RC(ALL69) < threshold, beats every control pooled validation, and every section 5.8 gate; otherwise CLOSED (section 6.3)",
+        "rule": "PROPOSED iff every headline campaign (A/B/C/ALL69) has a pick, pooled boot_lo > 0, Holm p < alpha, p_RC(ALL69) < threshold, beats every control pooled validation, and every section 5.8 gate; otherwise CLOSED (section 6.3)",
     }
 
 

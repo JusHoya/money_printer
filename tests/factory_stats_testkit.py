@@ -113,6 +113,12 @@ def fake_run_procedure(
                 continue
             led.append_unscored(gen, pop)
             results = [FT.score(s, G.to_mask(g, s), constraints=True, twin=t, genome=g, label=g.name) for g in pop]
+            # like evolve: ledger per_date_codes index the PARENT (full search) frame's dates
+            parent_idx = {str(d): i for i, d in enumerate(fs.search.dates)}
+            cmap = np.asarray([parent_idx[str(d)] for d in s.dates], dtype=np.int64)
+            for r in results:
+                if np.asarray(r.per_date_codes).size:
+                    r.per_date_codes = cmap[np.asarray(r.per_date_codes, dtype=np.int64)].astype(np.int16)
             led.mark_scored(gen, results)
             evaluations += len(pop)
             for i, (g, r) in enumerate(zip(pop, results)):

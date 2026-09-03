@@ -59,6 +59,8 @@ __all__ = [
     "load_json",
     "load_picks",
     "pick_genome",
+    "pick_present",
+    "ledger_code_dates",
     "pick_p_rc",
     "pooled_stats",
     "pooled_validation",
@@ -89,8 +91,15 @@ def load_picks(run_dir: Union[str, Path]) -> Dict[str, Any]:
     return picks
 
 
+def pick_present(pick: Optional[Dict[str, Any]]) -> bool:
+    """True when a picks.json entry carries a genome (NO_FEASIBLE picks have ``genome_json: null``)."""
+    return bool(pick) and bool(pick.get("genome_json"))
+
+
 def pick_genome(pick: Dict[str, Any]) -> G.Genome:
     gj = pick.get("genome_json")
+    if not gj:
+        raise ValueError(f"pick has no genome (reason={pick.get('reason')!r}); guard with pick_present()")
     if isinstance(gj, str):
         return G.Genome.from_json(gj)
     return G.Genome.from_json(dict(gj))
@@ -128,9 +137,16 @@ def pooled_stats(per_date_pnl: Sequence[float], *, n_boot: int = fitness.DEFAULT
 
 
 def worker_dates(F: Frame, campaign: folds.Campaign) -> List[str]:
-    """The dates a campaign's worker frame carries (what the ledger's ``per_date_codes`` index)."""
+    """The dates a campaign's worker frame carries (search window only)."""
     keep = set(campaign.search_dates)
     return [str(d) for d in F.dates if str(d) in keep]
+
+
+def ledger_code_dates(F: Frame) -> List[str]:
+    """What the ledger's ``per_date_codes`` index: the FULL search frame's ``Frame.dates``
+    (``evolve`` remaps worker-frame codes to the parent frame before the ledger write;
+    ``folds.json["dates"]`` lists the same calendar)."""
+    return [str(d) for d in F.dates]
 
 
 def score_validation(fs: FrameSet, genome: G.Genome, campaign: folds.Campaign, *, n_boot: int = fitness.DEFAULT_N_BOOT, seed: int = fitness.DEFAULT_SEED) -> Optional[fitness.FitnessResult]:
@@ -177,7 +193,7 @@ def pooled_validation(fs: FrameSet, genomes: Dict[str, G.Genome], campaigns: Seq
 def pick_p_rc(run_dir: Union[str, Path], campaign: folds.Campaign, F: Frame, phenotype_hash: str, *, n_boot: int = fitness.DEFAULT_N_BOOT, seed: int = fitness.DEFAULT_SEED) -> Dict[str, Any]:
     """RC/SPA of the campaign pick over every distinct phenotype in the campaign's ledger."""
     led = Ledger(run_dir, campaign.name)
-    M, ids = MP.ledger_matrix(led, campaign.search_dates, code_dates=worker_dates(F, campaign))
+    M, ids = MP.ledger_matrix(led, campaign.search_dates, code_dates=ledger_code_dates(F))
     out: Dict[str, Any] = {"p_rc": math.nan, "p_spa": math.nan, "L": int(M.shape[0]), "D": int(M.shape[1]), "n_phenotypes": len(ids), "pick_in_ledger": False}
     if phenotype_hash in ids:
         rc = MP.reality_check(M, ids.index(phenotype_hash), n_boot=n_boot, seed=seed)
@@ -195,9 +211,11 @@ def replicate_summary(rep_dir: Path, fs_k: FrameSet, campaigns: Sequence[str] = 
     camps = folds.campaigns([str(d) for d in fs_k.search.dates])
     genomes: Dict[str, G.Genome] = {}
     picks_out: Dict[str, Any] = {}
+    picks_missing: Dict[str, Any] = {}
     for c in campaigns:
         p = picks.get(c)
-        if not p:
+        if not pick_present(p):
+            picks_missing[c] = (p or {}).get("reason") or "MISSING"
             continue
         g = pick_genome(p)
         genomes[c] = g
@@ -235,6 +253,7 @@ def replicate_summary(rep_dir: Path, fs_k: FrameSet, campaigns: Sequence[str] = 
         "n_phenotypes": n_ph,
         "boot_lo_gt0": bool(lo is not None and lo == lo and lo > 0.0),
         "picks": picks_out,
+        "picks_missing": picks_missing,
     }
 
 
@@ -396,7 +415,7 @@ def summarise_controls(
         elif kind == "planted" and reps:
             r0 = reps[0]
             fs_k = r0.pop("fs_k")
-            genomes = {c: pick_genome({"genome_json": p["genome_json"]}) for c, p in r0["picks"].items()}
+            genomes = {c: pick_genome({"genome_json": p["genome_json"]}) for c, p in r0["picks"].items() if p.get("genome_json")}
             on_planted, _ = pooled_validation(fs_k, genomes, campaigns, n_boot=n_boot, seed=seed)
             on_original, _ = pooled_validation(fs, genomes, campaigns, n_boot=n_boot, seed=seed)
             captured = (float(on_planted["mean"]) - float(on_original["mean"])) if (on_planted["n_dates"] and on_original["n_dates"]) else math.nan

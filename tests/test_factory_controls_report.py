@@ -316,3 +316,50 @@ def test_cli_report_transitions_registry_idempotently(fs, tmp_path, monkeypatch)
     # controls subcommand parses
     a = parser.parse_args(["controls", "f2_cli", "--kinds", "snapshot", "--n-snapshot", "3", "--workers", "2"])
     assert a.n_snapshot == 3 and a.kinds == "snapshot" and a.workers == 2
+
+
+# ---------------------------------------------------------------------------
+# F2 integration regression: a NO_FEASIBLE campaign pick (picks.json genome_json null)
+# must not crash controls or the report; it is recorded and fails the verdict.
+# ---------------------------------------------------------------------------
+def _drop_pick(run_dir: Path, campaign: str) -> None:
+    p = run_dir / "picks.json"
+    picks = json.loads(p.read_text(encoding="utf-8"))
+    picks[campaign] = {"genome_json": None, "genome_id": None, "phenotype_hash": None, "picked_gen": None,
+                       "in_sample": None, "validation": None, "n_candidates": 0, "reason": "NO_FEASIBLE"}
+    p.write_text(json.dumps(picks, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
+def test_no_feasible_pick_tolerated(fs, tmp_path):
+    cfg = SK.base_config(tmp_path)
+    run_dir = tmp_path / "data" / "factory" / "runs" / "f2_nofeasible"
+    res = SK.write_fake_run(fs, run_dir, cfg, master_seed=7, n_random=6, generations=1)
+    _drop_pick(run_dir, "A")
+    assert not CT.pick_present(json.loads((run_dir / "picks.json").read_text(encoding="utf-8"))["A"])
+    with pytest.raises(ValueError):
+        CT.pick_genome({"genome_json": None, "reason": "NO_FEASIBLE"})
+
+    def fake_missing_a(fs_k, config, rd, **kw):
+        out = SK.fake_run_procedure(fs_k, config, rd, n_random=4, generations=1, **kw)
+        _drop_pick(Path(rd), "A")
+        return out
+
+    ctrl = CT.run_controls(fs, cfg, run_dir, res, cfg=None, master_seed=7, n_snapshot=1, n_residual=1,
+                           run_procedure=fake_missing_a, log=lambda s: None)
+    for kind in ("snapshot", "residual", "planted"):
+        rep = ctrl[kind]["replicates"][0]
+        assert rep["picks_missing"] == {"A": "NO_FEASIBLE"} and "A" not in rep["picks"]
+        assert rep["pooled"]["n_dates"] > 0  # B and C still pool
+    assert ctrl["planted"]["capture_ratio"] == ctrl["planted"]["capture_ratio"]  # finite, B/C only
+
+    summary = report_mod.build_family_summary(run_dir, fs, cfg, {"family": cfg["family"], "status": "OPEN"})
+    assert summary["picks_missing"] == {"A": "NO_FEASIBLE"}
+    assert summary["picks"]["A"]["missing"] is True and summary["picks"]["A"]["reason"] == "NO_FEASIBLE"
+    assert summary["pooled_oos"]["picks_missing"] == {"A": "NO_FEASIBLE"}
+    assert "A" not in summary["multiplicity"] and "A" not in summary["phenotype_jaccard"]["markets_per_pick"]
+    assert summary["verdict"]["status"] == "CLOSED" and "headline_picks_present" in summary["verdict"]["failing"]
+    out = tmp_path / "reports" / "factory" / "f2_nofeasible"
+    paths = report_mod.write_family_report(summary, out, reports_root=tmp_path / "reports" / "factory")
+    assert Path(paths["summary_json"]).exists() and "CLOSED" in (out / "board.md").read_text(encoding="utf-8")
+    again = report_mod.build_family_summary(run_dir, fs, cfg, {"family": cfg["family"], "status": "OPEN"})
+    assert json.dumps(report_mod._json_safe(again), sort_keys=True) == json.dumps(report_mod._json_safe(summary), sort_keys=True)

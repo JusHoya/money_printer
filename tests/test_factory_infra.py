@@ -463,9 +463,9 @@ class TestCliAndDeploy:
             assert sub in r.stdout
 
     def test_stubs_exit_2(self):
-        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory.py"), "run", "--config", "x"],
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory.py"), "holdout"],
                            capture_output=True, text=True, cwd=str(REPO), timeout=120)
-        assert r.returncode == 2 and "not implemented in F1" in r.stderr
+        assert r.returncode == 2 and "not implemented" in r.stderr
 
     def test_compose_factory_services(self):
         doc = yaml.safe_load((REPO / "deploy" / "spark" / "docker-compose.lab.yml").read_text(encoding="utf-8"))
