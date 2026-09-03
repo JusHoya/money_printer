@@ -140,7 +140,7 @@ def _empty_result(label: str, n_dates_in_mask: int, n_active: Optional[int], n_c
         n_dates_in_mask=n_dates_in_mask,
         n_active_clauses=n_active,
         fill_opportunity_rate=(0.0 if n_cand > 0 else NAN),
-        phenotype_hash=G.phenotype_hash_from_codes(np.zeros(0, dtype=np.int64)),
+        phenotype_hash=G.phenotype_hash_from_tickers(np.zeros(0, dtype=str)),
     )
 
 
@@ -303,7 +303,7 @@ def score(
         per_date_pnl=values.astype(np.float64),
         per_date_codes=per_date_codes,
         trade_rows=rows,
-        phenotype_hash=G.phenotype_hash_from_codes(vis["market_code"][rows]),
+        phenotype_hash=G.phenotype_hash_from_codes(vis["market_code"][rows], F.markets),
     )
 
     # Brier skill vs the market on the genome's two-sided trades

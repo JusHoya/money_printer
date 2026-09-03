@@ -195,14 +195,21 @@ def _f64(values: Any) -> np.ndarray:
 
 
 def git_rev(repo_root: str = REPO_ROOT) -> str:
-    """``git rev-parse HEAD``; falls back to reading ``.git``; ``""`` when unknown."""
+    """``git rev-parse HEAD`` (+``"+dirty"`` when tracked files differ from HEAD);
+    falls back to reading ``.git``; ``""`` when unknown. ``MP_GIT_REV`` wins so
+    provenance and the registry (``registry.git_rev``) can never disagree."""
+    env = os.getenv("MP_GIT_REV", "").strip()
+    if env:
+        return env
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True,
             timeout=30,
         )
         if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
+            from src.factory.registry import git_dirty_suffix
+
+            return r.stdout.strip() + git_dirty_suffix(repo_root)
     except (OSError, subprocess.SubprocessError):
         pass
     # No git binary (container): read .git/HEAD by hand (worktrees use a gitdir file).

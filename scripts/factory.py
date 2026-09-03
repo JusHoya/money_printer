@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -247,6 +248,10 @@ def cmd_gen0(args: argparse.Namespace) -> int:
     summary = run_gen0(config, out_dir)
     if not isinstance(summary, dict):
         _die("run_gen0 did not return a summary dict")
+    # The tracked report carries its own copy of run.json (data/factory is
+    # ignored) so the git rev / lock hash a red team audits travel with it.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(run_json_dir / "run.json", out_dir / "run.json")
     summary.setdefault("run_id", run_id)
     summary.setdefault("kind", "gen0")
     summary.setdefault("family", config.get("family"))

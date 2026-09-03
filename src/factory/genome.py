@@ -742,15 +742,27 @@ def first_true_per_block(M: np.ndarray, block_starts: np.ndarray) -> np.ndarray:
     return idx[keep].astype(np.int64)
 
 
-def phenotype_hash_from_codes(market_codes: np.ndarray) -> str:
-    """sha1 of the sorted, comma-joined decimal market codes."""
-    codes = np.unique(np.asarray(market_codes, dtype=np.int64))
-    payload = ",".join(str(int(c)) for c in codes).encode("ascii")
+def phenotype_hash_from_tickers(tickers: np.ndarray) -> str:
+    """sha1 of the sorted, comma-joined market TICKERS (the multiplicity unit).
+
+    Hashing tickers rather than dense ``market_code`` ints makes the phenotype
+    portable across frame instances: ``folds.strip_rows`` re-densifies codes,
+    and the gefs twin has its own code space, so a code-based hash gave the
+    same trade set two identities (red-team finding, 2026-09-02).
+    """
+    names = sorted({str(t) for t in np.asarray(tickers).ravel()})
+    payload = ",".join(names).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
 
 
+def phenotype_hash_from_codes(market_codes: np.ndarray, markets: np.ndarray) -> str:
+    """Ticker-based phenotype hash from dense codes plus the frame's ``markets`` table."""
+    codes = np.unique(np.asarray(market_codes, dtype=np.int64))
+    return phenotype_hash_from_tickers(np.asarray(markets)[codes])
+
+
 def phenotype_hash(g: Genome, F: Frame, date_mask: Optional[np.ndarray] = None) -> str:
-    """sha1 of the sorted set of ``market_code`` the genome trades on ``F``.
+    """sha1 of the sorted set of market tickers the genome trades on ``F``.
 
     "Trades" = the first masked EXECUTABLE row per market block (the fitness
     kernel's trade set); ``date_mask`` restricts the rows considered.
@@ -760,7 +772,7 @@ def phenotype_hash(g: Genome, F: Frame, date_mask: Optional[np.ndarray] = None) 
     if date_mask is not None:
         np.logical_and(M, date_mask, out=M)
     rows = first_true_per_block(M, F.block_starts)
-    return phenotype_hash_from_codes(F.visible["market_code"][rows])
+    return phenotype_hash_from_codes(F.visible["market_code"][rows], F.markets)
 
 
 # ---------------------------------------------------------------------------
@@ -951,6 +963,7 @@ __all__ = [
     "first_true_per_block",
     "phenotype_hash",
     "phenotype_hash_from_codes",
+    "phenotype_hash_from_tickers",
     "SEEDS",
     "seed_notes",
     "PHASE2_SHAPE_LABELS",

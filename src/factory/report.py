@@ -355,8 +355,14 @@ def render_board(summary: Optional[Dict[str, Any]], coverage: Optional[Dict[str,
 
     fr = _g(seeds, "fr31a_taker", "parity_full") or {}
     nf = _g(seeds, "nofilter_no", "parity_full") or {}
+    def _with_verdict(row: Dict[str, Any]) -> str:
+        # A KILLED seed's realized number is a diagnostic, never a headline:
+        # carry the constraint verdict into the board cell (red team, 2026-09-02).
+        reason = row.get("constraint_reason")
+        return f"{_fmt(row.get('realized'))}" + (f" KILLED:{reason}" if reason else "")
+
     vs_nofilter = (
-        f"{_fmt(fr.get('realized'))} vs {_fmt(nf.get('realized'))} (parity)"
+        f"{_with_verdict(fr)} vs {_with_verdict(nf)} (parity)"
         if fr.get("realized") is not None and nf.get("realized") is not None else "n/a (F2)"
     )
     pooled = summary.get("pooled_oos") or {}

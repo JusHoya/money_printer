@@ -59,7 +59,33 @@ def git_rev(repo_root: Optional[Union[str, Path]] = None) -> str:
         )
     except (OSError, subprocess.SubprocessError):
         return ""
-    return out.stdout.strip() if out.returncode == 0 else ""
+    rev = out.stdout.strip() if out.returncode == 0 else ""
+    return rev + git_dirty_suffix(root) if rev else ""
+
+
+def git_dirty_suffix(repo_root: Union[str, Path]) -> str:
+    """``"+dirty"`` when tracked files differ from HEAD, else ``""``.
+
+    A rev alone does not identify the code that produced an artifact when the
+    tree was dirty (red-team finding 2026-09-02: the first gen-0 report named
+    a commit that did not yet contain ``gen0.py``). Untracked files are
+    ignored on purpose (ignored data caches, logs). ``""`` when git is
+    unavailable -- the rev is then unverifiable and says so by omission only,
+    which is why the container image ships git.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if out.returncode != 0:
+        return ""
+    return "+dirty" if out.stdout.strip() else ""
 
 
 def _now_iso() -> str:

@@ -274,7 +274,8 @@ def test_synthetic_frame_builds_and_validates(regime):
     f.validate()
     assert f.n_rows == 12 and f.n_markets == 1 and f.n_dates == 1
     assert list(f.dates) == ["2026-07-01"]
-    assert f.provenance["git_rev"] and len(f.provenance["git_rev"]) == 40
+    rev = f.provenance["git_rev"]
+    assert rev and len(rev.split("+")[0]) == 40  # "<sha>" or "<sha>+dirty"
     assert f.provenance["frame_sha256"] == fr.frame_sha256(f)
     assert f.visible["mode_code"].tolist().count(0) == 6  # taker is code 0
     assert np.array_equal(f.block_starts, np.array([0, 12]))
@@ -462,7 +463,7 @@ def test_parity_frame_keeps_every_evaluator_row(parity_opp, parity_frame):
     assert parity_frame.provenance["executable_rows"] == int(parity_opp["executable"].sum())
     assert parity_frame.provenance["fee_regime_vs_evaluator"]["rows_differing"] == 0
     assert parity_frame.provenance["fee_regime_vs_evaluator"]["nan_pattern_equal"]
-    assert len(parity_frame.provenance["git_rev"]) == 40
+    assert len(parity_frame.provenance["git_rev"].split("+")[0]) == 40  # "<sha>[+dirty]"
     assert parity_frame.provenance["lab_lock_sha256"]
     assert len(parity_frame.provenance["ladder_files"]) >= 276
     assert parity_frame.provenance["forecast_csv"]["sha256"].startswith("850a2a3f44ca")

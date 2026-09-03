@@ -306,7 +306,7 @@ def test_phenotype_hash_properties(synth):
     assert FT.score(synth, G.to_mask(g, synth), constraints=False).phenotype_hash == h
     # a date mask restricting to no dates hashes the empty set
     empty = np.zeros(synth.n_rows, dtype=bool)
-    assert G.phenotype_hash(g, synth, date_mask=empty) == G.phenotype_hash_from_codes(np.zeros(0, dtype=np.int64))
+    assert G.phenotype_hash(g, synth, date_mask=empty) == G.phenotype_hash_from_tickers(np.zeros(0, dtype=str))
     # the hash is a function of the traded market SET only: equal sets <-> equal hashes
     for other in (G.SEEDS["far_yes_taker"], G.SEEDS["nofilter_no"].replace(bands=("5F+",)), G.SEEDS["fr31a_taker"]):
         s_g = set(synth.visible["market_code"][FT.score(synth, G.to_mask(g, synth), constraints=False).trade_rows].tolist())
