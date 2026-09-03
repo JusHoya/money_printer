@@ -324,7 +324,9 @@ def _coverage_lanes(coverage: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, A
 
 
 def _lane_status(info: Dict[str, Any]) -> str:
-    st = str(info.get("status", DASH))
+    # coverage.py writes the lane readiness under "state"; accept both spellings
+    # (the first Discord board rendered gas/mention as "—" because of this).
+    st = str(info.get("status") or info.get("state") or DASH)
     n = info.get("n_units", info.get("independent_units", info.get("units")))
     if st.upper().startswith("NOT_PROMOTABLE") and n is not None and "(" not in st:
         return f"{st}({n})"
@@ -376,7 +378,7 @@ def render_board(summary: Optional[Dict[str, Any]], coverage: Optional[Dict[str,
         info = lanes.get(lane, {})
         if lane == weather_lane and summary:
             rows.append([
-                lane, _lane_status(info) if info.get("status") else "READY", str(summary.get("family", DASH)),
+                lane, _lane_status(info) if (info.get("status") or info.get("state")) else "READY", str(summary.get("family", DASH)),
                 f"gen0 seeds only ({summary.get('run_id', DASH)})", pooled_cell,
                 _fmt(pooled.get("dates")) if pooled else "n/a (F2)",
                 _fmt(pooled.get("trades")) if pooled else "n/a (F2)",
