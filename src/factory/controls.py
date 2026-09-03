@@ -16,19 +16,26 @@ makes a control a control.
 
 ``controls/summary.json`` (timestamp-free)::
 
-    snapshot: {n, replicates: [{k, seed, pooled, p_rc_per_campaign, p_spa_per_campaign,
-               boot_lo_gt0, picks}], pooled_means, n_boot_lo_gt0, ks_p_rc: {stat, p, n},
-               real_pooled_mean, real_rank, pass_boot_lo (<= 1 of 20), pass_ks (p > 0.05)}
-    residual: {n, replicates: [...], pooled_means, p95, real_pooled_mean, real_rank,
-               real_exceeds_p95}
+    snapshot: {n, replicates: [{k, seed, pooled, p_rc_per_campaign (feasible set),
+               p_rc_all_per_campaign, p_spa_per_campaign, L_feasible, paired_delta, boot_lo_gt0,
+               picks}], pooled_means, n_boot_lo_gt0, ks_p_rc: {stat, p, n} (feasible p),
+               ks_p_rc_all, real_pooled_mean, real_rank, pass_boot_lo (<= 1 of 20), pass_ks (p > 0.05)}
+    residual: {n, replicates: [...], pooled_means (= raw_means, diagnostic), p95, real_rank,
+               real_exceeds_p95, paired_deltas, paired_p95, real_paired_delta, real_paired_rank,
+               real_exceeds_paired_p95, statistic, note}          -- section 6.4a (2026-09-03)
     planted:  {rule, edge, seed, info, picks: {A: {...}}, pick_pooled_on_planted,
                pick_pooled_on_original, captured, capture_ratio, pass (>= 0.8),
-               rule_pooled_validation_delta}
+               rule_pooled_validation_delta, rule_capture_ratio, pick_validation_trades,
+               pick_flipped_trades, pick_rule_overlap, note}
+    real_paired_delta, real_paired: the real picks' paired delta vs nofilter_no on the real frame
 
 ``real_rank`` = ``1 + #{replicates whose pooled mean > the real run's}`` (1 = the
-real run beats every replicate). Pooled statistics use ``pooled_stats`` --
-``fitness.bootstrap_draws`` with the kernel's seed, identical to
-``procedure.pooled_stats``.
+real run beats every replicate); ``real_paired_rank`` the same on the paired
+deltas. ``p_rc`` is the FEASIBLE-set Reality Check (``multiplicity.pick_multiplicity``:
+dates >= ceil(0.6 D) and trades >= 40, the picker's admissible set); ``p_rc_all``
+competes against every ledger phenotype (p ~ 1 for every pick: no power).
+Pooled statistics use ``pooled_stats`` -- ``fitness.bootstrap_draws`` with the
+kernel's seed, identical to ``procedure.pooled_stats``.
 """
 from __future__ import annotations
 
@@ -198,15 +205,74 @@ def pooled_validation(fs: FrameSet, genomes: Dict[str, G.Genome], campaigns: Seq
 
 
 def pick_p_rc(run_dir: Union[str, Path], campaign: folds.Campaign, F: Frame, phenotype_hash: str, *, n_boot: int = fitness.DEFAULT_N_BOOT, seed: int = fitness.DEFAULT_SEED) -> Dict[str, Any]:
-    """RC/SPA of the campaign pick over every distinct phenotype in the campaign's ledger."""
+    """RC/SPA of the campaign pick: headline on the FEASIBLE competition set, ``*_all`` over every phenotype.
+
+    Feasible = distinct ledger phenotypes with ``dates >= ceil(0.6 * |search dates|)``
+    and ``trades >= MIN_TRADES`` (the picker's admissible set; ``multiplicity``
+    module docstring, 2026-09-03 amendment). ``n_phenotypes`` counts every
+    distinct phenotype (the multiplicity the ledger records).
+    """
     led = Ledger(run_dir, campaign.name)
-    M, ids = MP.ledger_matrix(led, campaign.search_dates, code_dates=ledger_code_dates(F))
-    out: Dict[str, Any] = {"p_rc": math.nan, "p_spa": math.nan, "L": int(M.shape[0]), "D": int(M.shape[1]), "n_phenotypes": len(ids), "pick_in_ledger": False}
+    M, ids, meta = MP.ledger_matrix(led, campaign.search_dates, code_dates=ledger_code_dates(F), with_meta=True)
+    feas = MP.feasible_mask(meta["dates"], meta["trades"], len(campaign.search_dates),
+                            min_date_fraction=fitness.MIN_DATE_FRACTION, min_trades=fitness.MIN_TRADES)
+    out: Dict[str, Any] = {"p_rc": math.nan, "p_spa": math.nan, "p_rc_all": math.nan, "p_spa_all": math.nan,
+                           "L": int(M.shape[0]), "L_all": int(M.shape[0]), "L_feasible": int(np.count_nonzero(feas)),
+                           "D": int(M.shape[1]), "n_phenotypes": len(ids), "pick_in_ledger": False}
     if phenotype_hash in ids:
-        rc = MP.reality_check(M, ids.index(phenotype_hash), n_boot=n_boot, seed=seed)
+        rc = MP.pick_multiplicity(M, ids.index(phenotype_hash), feas, n_boot=n_boot, seed=seed)
         out.update(rc)
         out["pick_in_ledger"] = True
     return out
+
+
+def paired_vs_baseline(
+    fs_k: FrameSet,
+    genomes: Dict[str, G.Genome],
+    campaigns: Sequence[str] = POOLED_CAMPAIGNS,
+    *,
+    baseline: Optional[G.Genome] = None,
+    n_boot: int = fitness.DEFAULT_N_BOOT,
+    seed: int = fitness.DEFAULT_SEED,
+) -> Dict[str, Any]:
+    """Per-date paired difference (pick_k - baseline_k) on the validation dates the pick traded, pooled.
+
+    The baseline (default the ``nofilter_no`` seed) is scored on the SAME frame
+    -- for a control replicate that is the transformed frame, so the market-vs-
+    truth inflation of the residual-shuffle null cancels in the difference
+    (FACTORY_ARCHITECTURE section 6.4a). Baseline contributes 0 on a date it did
+    not trade. The report's ``paired_vs_nofilter`` block uses this function.
+    """
+    base = baseline if baseline is not None else G.SEEDS["nofilter_no"]
+    camps = folds.campaigns([str(d) for d in fs_k.search.dates])
+    per_campaign: Dict[str, Any] = {}
+    diffs: List[float] = []
+    base_means: List[float] = []
+    for c in campaigns:
+        g = genomes.get(c)
+        camp = camps.get(c)
+        if g is None or camp is None or not camp.validation_dates:
+            per_campaign[c] = None
+            continue
+        r_v = score_validation(fs_k, g, camp, n_boot=n_boot, seed=seed)
+        if r_v is None or not r_v.trades:
+            per_campaign[c] = None
+            continue
+        r_b = score_validation(fs_k, base, camp, n_boot=n_boot, seed=seed)
+        b_map = {int(k): float(v) for k, v in zip(r_b.per_date_codes, r_b.per_date_pnl)} if r_b is not None and r_b.trades else {}
+        d = [float(v) - b_map.get(int(k), 0.0) for k, v in zip(r_v.per_date_codes, r_v.per_date_pnl)]
+        diffs.extend(d)
+        if r_b is not None and r_b.trades:
+            base_means.extend(float(x) for x in r_b.per_date_pnl)
+        per_campaign[c] = dict(pooled_stats(d, n_boot=n_boot, seed=seed), baseline_trades=int(r_b.trades) if r_b else 0,
+                               baseline_realized=(r_b.realized if r_b and r_b.trades else None))
+    return {
+        "baseline": base.name or "nofilter_no",
+        "rule": "per-date (pick_k - baseline_k) on the dates the pick traded; baseline 0 where it did not trade",
+        "pooled": pooled_stats(diffs, n_boot=n_boot, seed=seed),
+        "per_campaign": per_campaign,
+        "baseline_pooled_mean": (float(np.mean(base_means)) if base_means else math.nan),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -239,16 +305,25 @@ def replicate_summary(rep_dir: Path, fs_k: FrameSet, campaigns: Sequence[str] = 
     pooled_disk_mean = on_disk.get("mean")
     p_rc: Dict[str, Any] = {}
     p_spa: Dict[str, Any] = {}
+    p_rc_all: Dict[str, Any] = {}
     n_ph: Dict[str, int] = {}
+    l_feas: Dict[str, int] = {}
     for c in campaigns:
         if c not in genomes:
             continue
         rc = pick_p_rc(rep_dir, camps[c], fs_k.search, str(picks_out[c]["phenotype_hash"] or ""), n_boot=n_boot, seed=seed)
         p_rc[c] = rc["p_rc"]
         p_spa[c] = rc["p_spa"]
+        p_rc_all[c] = rc["p_rc_all"]
         n_ph[c] = rc["n_phenotypes"]
+        l_feas[c] = rc["L_feasible"]
+    paired = paired_vs_baseline(fs_k, genomes, campaigns, n_boot=n_boot, seed=seed)
     lo = pooled.get("boot_lo")
     return {
+        "paired_delta": paired["pooled"].get("mean"),
+        "paired": {"pooled": paired["pooled"], "baseline_pooled_mean": paired["baseline_pooled_mean"], "baseline": paired["baseline"]},
+        "p_rc_all_per_campaign": p_rc_all,
+        "L_feasible": l_feas,
         "pooled": {k: pooled[k] for k in ("n_dates", "mean", "se", "t_stat", "boot_lo", "boot_hi", "trades")},
         "pooled_mean_procedure": pooled_disk_mean,
         "pooled_matches_procedure": (
@@ -373,10 +448,17 @@ def summarise_controls(
     """Build the ``controls/summary.json`` document from the replicate directories on disk."""
     run_dir = Path(run_dir)
     plan = {"snapshot": int(n_snapshot), "residual": int(n_residual), "planted": 1}
+    real_picks = load_picks(run_dir)
+    real_genomes = {c: pick_genome(real_picks[c]) for c in campaigns if pick_present(real_picks.get(c))}
+    real_paired = paired_vs_baseline(fs, real_genomes, campaigns, n_boot=n_boot, seed=seed) if real_genomes else None
+    real_paired_delta = float(real_paired["pooled"]["mean"]) if real_paired else math.nan
     out: Dict[str, Any] = {
         "campaigns": list(campaigns),
         "master_seed": int(master_seed),
         "real_pooled_mean": real_pooled_mean,
+        "real_paired_delta": real_paired_delta,
+        "real_paired": ({"pooled": real_paired["pooled"], "baseline_pooled_mean": real_paired["baseline_pooled_mean"],
+                         "baseline": real_paired["baseline"]} if real_paired else None),
         "n_boot": int(n_boot),
         "bootstrap_seed": int(seed),
         "kinds": list(kinds),
@@ -403,12 +485,17 @@ def summarise_controls(
         block: Dict[str, Any] = {"n": plan[kind], "n_done": len(reps), "missing": missing, "replicates": [], "pooled_means": means}
         if kind == "snapshot":
             pvals = [p for r in reps for p in r["p_rc_per_campaign"].values() if p == p]
+            pvals_all = [p for r in reps for p in r["p_rc_all_per_campaign"].values() if p == p]
             ks = MP.ks_uniform(pvals)
+            ks_all = MP.ks_uniform(pvals_all)
             n_gt0 = sum(1 for r in reps if r["boot_lo_gt0"])
             block.update({
                 "n_boot_lo_gt0": n_gt0,
                 "ks_p_rc": ks,
                 "p_rc_values": pvals,
+                "ks_p_rc_all": ks_all,
+                "p_rc_all_values": pvals_all,
+                "p_rc_definition": "feasible competition set (multiplicity.pick_multiplicity); *_all = every ledger phenotype",
                 "real_rank": _rank(real_pooled_mean, means),
                 "pass_boot_lo": bool(len(reps) == plan[kind] and n_gt0 <= 1),
                 "pass_ks": bool(ks["p"] == ks["p"] and ks["p"] > 0.05),
@@ -416,20 +503,66 @@ def summarise_controls(
         elif kind == "residual":
             finite = [m for m in means if m == m]
             p95 = float(np.percentile(finite, 95)) if finite else math.nan
+            deltas = [r.get("paired_delta") if r.get("paired_delta") is not None else math.nan for r in reps]
+            dfin = [d for d in deltas if d == d]
+            dp95 = float(np.percentile(dfin, 95)) if dfin else math.nan
             block.update({
+                "raw_means": means,
                 "p95": p95,
                 "real_rank": _rank(real_pooled_mean, means),
                 "real_exceeds_p95": bool(real_pooled_mean == real_pooled_mean and p95 == p95 and real_pooled_mean > p95),
+                "paired_deltas": deltas,
+                "paired_p95": dp95,
+                "real_paired_delta": real_paired_delta,
+                "real_paired_rank": _rank(real_paired_delta, deltas),
+                "real_exceeds_paired_p95": bool(real_paired_delta == real_paired_delta and dp95 == dp95 and real_paired_delta > dp95),
+                "statistic": "paired: pooled(pick_k) - pooled(nofilter_no on the same shuffled-truth frame), per-date on the pick's validation dates",
+                "note": ("raw pooled means are a diagnostic only: the residual shuffle keeps the market's late-day quotes, "
+                         "which already embed the observed high, so after re-settling on shifted truth every rule that fades a "
+                         "confident late quote wins (buy_no 3-6h longshot +0.64/contract under the null vs -0.05 real; "
+                         "fr31a +0.12 vs +0.07). The paired difference against the no-filter baseline under the SAME truth "
+                         "absorbs that inflation (FACTORY_ARCHITECTURE section 6.4a, 2026-09-03 amendment)."),
             })
         elif kind == "planted" and reps:
             r0 = reps[0]
             fs_k = r0.pop("fs_k")
             genomes = {c: pick_genome({"genome_json": p["genome_json"]}) for c, p in r0["picks"].items() if p.get("genome_json")}
-            on_planted, _ = pooled_validation(fs_k, genomes, campaigns, n_boot=n_boot, seed=seed)
+            on_planted, res_planted = pooled_validation(fs_k, genomes, campaigns, n_boot=n_boot, seed=seed)
             on_original, _ = pooled_validation(fs, genomes, campaigns, n_boot=n_boot, seed=seed)
             captured = (float(on_planted["mean"]) - float(on_original["mean"])) if (on_planted["n_dates"] and on_original["n_dates"]) else math.nan
             ratio = captured / float(edge) if captured == captured and edge else math.nan
+            # disclosure (red team F2 S3): how many of the picks' validation trades the planting touched,
+            # and how much of their trade set lies inside the planted rule region
+            flipped = np.flatnonzero(fs_k.search.hidden["won"] != fs.search.hidden["won"]) if fs_k.search.n_rows == fs.search.n_rows else np.zeros(0, dtype=np.int64)
+            flipped_set = set(int(x) for x in flipped.tolist())
+            rule_json = r0["info"].get("rule")
+            try:
+                rule_g = G.Genome.from_json(rule_json) if rule_json else NULL.PLANTED_RULE
+            except Exception:
+                rule_g = NULL.PLANTED_RULE
+            region = G.to_mask(rule_g, fs.search) & fs.search.visible["executable"]
+            n_tr = 0
+            n_flip = 0
+            n_in = 0
+            for c, r in res_planted.items():
+                if r is None or not r.trades:
+                    continue
+                tr = np.asarray(r.trade_rows, dtype=np.int64)
+                n_tr += int(tr.shape[0])
+                n_flip += int(sum(1 for x in tr.tolist() if int(x) in flipped_set))
+                n_in += int(np.count_nonzero(region[tr]))
+            rule_delta = r0["info"].get("rule_pooled_validation_delta")
             block.update({
+                "pick_validation_trades": n_tr,
+                "pick_flipped_trades": n_flip,
+                "pick_rule_overlap": (n_in / n_tr) if n_tr else math.nan,
+                "rule_capture_ratio": (float(rule_delta) / float(edge)) if (rule_delta is not None and edge) else math.nan,
+                "n_rows_flipped": int(flipped.shape[0]),
+                "note": ("capture_ratio (the section 6.4 gate) is pick-level: (picks pooled on the planted frame - picks pooled on the "
+                         "original frame) / edge. With ~48 pick validation trades each flipped trade moves it by ~0.36, so it has "
+                         "one-trade granularity and a ~78% pass rate across re-plantings of the same picks (red team F2). "
+                         "rule_capture_ratio is the planted rule's own validation delta / edge (deterministic to rounding); "
+                         "pick_rule_overlap says how much of the picks' trade set lies inside the planted region."),
                 "rule": r0["info"].get("rule"),
                 "edge": float(edge),
                 "seed": r0["seed"],

@@ -234,3 +234,29 @@ answers any doubt.
 - To retire the monitor after the sprint: `~/.local/bin/hermes cron delete
   mp-factory-monitor` (or leave it: it is silent while `status.json` is
   unchanged).
+
+## 13. Re-summarise + re-report an existing run (statistics changed, no search rerun)
+
+The 2026-09-03 amendment (FACTORY_ARCHITECTURE §6.4a: feasible-set `p_RC`, robust DSR,
+paired residual null, planted disclosure, embargo-2 frame) is recomputable from the run
+directory alone. On alcyone, after fast-forwarding the checkout:
+
+```bash
+cd ~/projects/money_printer
+RUN_ID=run_2026-09-03b
+C="docker compose -f deploy/spark/docker-compose.lab.yml run --rm -T factory python scripts/factory.py"
+# optional but recommended: the embargo-2 sensitivity frame (~15 s)
+$C freeze-frame --embargo-days 2 --out-root data/factory/frames_emb2
+EMB2=$(ls -d data/factory/frames_emb2/weather_* | tail -n 1)
+# skips all 41 replicates (their oos/pooled.json exist) and only rebuilds controls/summary.json
+$C controls $RUN_ID
+# rebuilds reports/factory/$RUN_ID/{summary.json,summary.md,oos_by_date.csv,finalists.json,board.md}
+$C report $RUN_ID --sensitivity-frames $EMB2
+sha256sum reports/factory/$RUN_ID/summary.json
+$C report $RUN_ID --sensitivity-frames $EMB2     # byte-identical rerun
+sha256sum reports/factory/$RUN_ID/summary.json
+```
+
+`controls` re-summarisation scores every replicate's picks and the `nofilter_no` baseline on
+the rebuilt control frame and recomputes both RC competition sets; expect a few minutes.
+

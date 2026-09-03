@@ -597,7 +597,20 @@ def cmd_report(args: argparse.Namespace) -> int:
         _die(f"family {family!r} has no registry line; the run must have been registered before it started")
     registry_line = {k: v for k, v in line.items() if k != "ts"}
     registry_line["status"] = reg.status(family)
-    summary = report_mod.build_family_summary(run_dir, fs, config, registry_line)
+    sens_fs = None
+    sens_dir = getattr(args, "sensitivity_frames", None)
+    if sens_dir:
+        from src.factory.gen0 import load_frameset
+
+        sd = Path(sens_dir)
+        if not sd.exists():
+            _die(f"--sensitivity-frames {sd} does not exist (freeze one with `factory.py freeze-frame --embargo-days 2 --out-root DIR`)")
+        sens_fs = load_frameset(sd)
+        emb = (sens_fs.provenance.get("config") or {}).get("embargo_days") if isinstance(sens_fs.provenance, dict) else None
+        if emb is not None and int(emb) != 2:
+            _die(f"--sensitivity-frames {sd} was frozen with embargo_days={emb}, want 2")
+    summary = report_mod.build_family_summary(run_dir, fs, config, registry_line, sensitivity_fs=sens_fs,
+                                              sensitivity_frames_dir=str(sens_dir) if sens_dir else None)
     verdict = summary["verdict"]["status"]
 
     # registry transition FIRST, so the written summary carries the post-transition
@@ -731,6 +744,9 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--config", default=None, help=f"family YAML (default {DEFAULT_FAMILY_CONFIG.name})")
     rp.add_argument("--frames", default=None, help="frozen frame dir (default: run.json's frames_dir)")
     rp.add_argument("--no-transition", action="store_true", help="do not write the PROPOSED/CLOSED registry line")
+    rp.add_argument("--sensitivity-frames", default=None,
+                    help="embargo-2 frozen frame dir (`freeze-frame --embargo-days 2 --out-root DIR`) for sensitivity.embargo_2; "
+                         "absent -> the condition is recorded as not applicable")
     rp.set_defaults(func=cmd_report)
     # ---- end F2 STATS block --------------------------------------------------
 

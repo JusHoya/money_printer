@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import importlib.util
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -193,11 +194,33 @@ def test_summary_has_every_roadmap_field(reported, fs):
     assert set(s["holm"]["inputs"]) == {s["family"]} and s["holm"]["this_family"]["p_adj"] == po["one_sided_p"]
     d = s["clustered_dsr"]
     assert d["n"] == po["n_dates"] and d["n_trials"] == s["n_phenotypes"]["distinct_abc"] and 0.0 <= d["dsr"] <= 1.0
+    # S2: the headline DSR is the MAD-robust one and must be finite; the raw-variance companion sits under "raw"
+    assert d["sr_var_source"] in ("ledger_sr_distribution_mad", "single_estimate_sampling_variance")
+    assert math.isfinite(d["expected_max_sr"]) and d["expected_max_sr"] < 1e3, d
+    assert set(d["raw"]) >= {"dsr", "expected_max_sr", "sr_var_trials"} and d["n_sr_trials_clipped"] >= 0 and d["sr_clip"] == 50.0
+    # S1: feasible-set p_RC is the headline, the all-phenotype p sits beside it
+    for c in ("A", "B", "C", "ALL69"):
+        m = s["multiplicity"][c]
+        assert {"p_rc_all", "p_spa_all", "L_feasible", "L_all", "pick_feasible"} <= set(m), c
+        assert 1 <= m["L_feasible"] <= m["L_all"] and 0.0 <= m["p_rc_all"] <= 1.0
     pv = s["paired_vs_nofilter"]
     assert pv["baseline"] == "nofilter_no" and set(pv["per_campaign"]) == {"A", "B", "C"} and "boot_lo" in pv["pooled"]
     for k in ("adverse_0.02", "adverse_0.03", "embargo_2"):
         assert s["sensitivity"][k]["sign"] in ("+", "-", "0", None), k
-    assert "campaign calendar default" in s["sensitivity"]["embargo_2"]["note"]
+    # S4: without a rebuilt embargo-2 frame the sensitivity is NOT copied from the headline
+    emb = s["sensitivity"]["embargo_2"]
+    assert emb["available"] is False and emb["sign"] is None and "not computed" in emb["note"]
+    assert s["verdict"]["not_applicable"] == ["sign_survives_embargo2"]
+    assert "sign_survives_embargo2" not in s["verdict"]["failing"]
+    # D2: residual null carries the paired statistic; S3: planted disclosure fields
+    rs = s["controls"]["residual"]
+    assert {"paired_deltas", "paired_p95", "real_paired_delta", "real_paired_rank", "raw_means", "note"} <= set(rs)
+    assert len(rs["paired_deltas"]) == rs["n_done"] and rs["real_paired_rank"] is not None
+    assert abs(float(rs["real_paired_delta"]) - float(pv["pooled"]["mean"])) < 1e-12
+    pl = s["controls"]["planted"]
+    assert {"rule_capture_ratio", "pick_flipped_trades", "pick_validation_trades", "pick_rule_overlap", "note"} <= set(pl)
+    assert 0 <= pl["pick_flipped_trades"] <= pl["pick_validation_trades"]
+    assert s["verdict"]["residual_real_paired_rank"] == rs["real_paired_rank"]
     assert set(s["bss_trades"]) >= {"A", "B", "C", "pooled"}
     assert set(s["phenotype_jaccard"]["pairs"]) == {"A/B", "A/C", "A/ALL69", "B/C", "B/ALL69", "C/ALL69"}
     assert all(0.0 <= v <= 1.0 for v in s["phenotype_jaccard"]["pairs"].values())
@@ -217,7 +240,8 @@ def test_report_files_and_latest(reported):
         assert p[k].exists(), k
     board = p["board_md"].read_text(encoding="utf-8")
     assert len(board) <= report_mod.BOARD_MAX_CHARS
-    assert "VERDICT: " in board and "RESIDUAL-NULL RANK" in board and reported.summary["verdict"]["status"] in board
+    assert "VERDICT: " in board and "RESIDUAL-NULL paired rank" in board and reported.summary["verdict"]["status"] in board
+    assert "all-phen" in board and "raw rank" in board
     md = p["summary_md"].read_text(encoding="utf-8")
     assert "## VERDICT" in md and "Holm" in md and "Clustered DSR" in md and "planted edge" in md
     csv = p["oos_csv"].read_text(encoding="utf-8").splitlines()
@@ -247,24 +271,50 @@ def test_verdict_rules():
         "holm": {"this_family": {"p_adj": 0.01}},
         "multiplicity": {"ALL69": {"p_rc": 0.05}},
         "controls": {"snapshot": {"n": 1, "n_done": 1, "pooled_means": [-0.02], "pass_boot_lo": True, "pass_ks": True},
-                     "residual": {"n": 1, "n_done": 1, "pooled_means": [0.01], "real_rank": 1},
+                     "residual": {"n": 1, "n_done": 1, "pooled_means": [0.80], "real_rank": 2,
+                                  "paired_deltas": [0.0], "paired_p95": 0.0, "real_paired_delta": 0.02, "real_paired_rank": 1},
                      "planted": {"n": 1, "n_done": 1, "pass": True}},
-        "paired_vs_nofilter": {"pooled": {"boot_lo": 0.005}},
-        "sensitivity": {"adverse_0.02": {"sign": "+"}, "adverse_0.03": {"sign": "+"}, "embargo_2": {"sign": "+"}},
+        "paired_vs_nofilter": {"pooled": {"boot_lo": 0.005, "mean": 0.02}},
+        "sensitivity": {"adverse_0.02": {"sign": "+"}, "adverse_0.03": {"sign": "+"}, "embargo_2": {"sign": "+", "available": True}},
         "bss_trades": {"pooled": 0.02},
     }
+    # the residual null's RAW means (0.80) no longer matter: the paired delta beats the paired p95 (section 6.4a)
     assert report_mod.verdict(base) == "PROPOSED" and report_mod.evaluate_verdict(base)["failing"] == []
+    assert report_mod.evaluate_verdict(base)["not_applicable"] == []
     bad = json.loads(json.dumps(base))
     bad["pooled_oos"]["boot_lo"] = -0.01
     bad["holm"]["this_family"]["p_adj"] = 0.2
     v = report_mod.evaluate_verdict(bad)
     assert v["status"] == "CLOSED" and v["failing"] == ["pooled_boot_lo_gt0", "holm_p_lt_alpha"]
     worse = json.loads(json.dumps(base))
-    worse["controls"]["residual"]["pooled_means"] = [0.09]
+    worse["controls"]["residual"]["paired_p95"] = 0.09
     assert report_mod.evaluate_verdict(worse)["failing"] == ["beats_every_control"]
+    snap = json.loads(json.dumps(base))
+    snap["controls"]["snapshot"]["pooled_means"] = [0.06]
+    assert report_mod.evaluate_verdict(snap)["failing"] == ["beats_every_control"]
     nocontrols = json.loads(json.dumps(base))
     nocontrols["controls"] = None
     assert "beats_every_control" in report_mod.evaluate_verdict(nocontrols)["failing"]
+    # S4: an unavailable embargo-2 sensitivity is not applicable, never a failure and never a pass
+    noemb = json.loads(json.dumps(base))
+    noemb["sensitivity"]["embargo_2"] = {"available": False, "sign": None}
+    v2 = report_mod.evaluate_verdict(noemb)
+    assert v2["status"] == "PROPOSED" and v2["not_applicable"] == ["sign_survives_embargo2"] and v2["conditions"]["sign_survives_embargo2"] is None
+    negemb = json.loads(json.dumps(base))
+    negemb["sensitivity"]["embargo_2"] = {"available": True, "sign": "-"}
+    assert report_mod.evaluate_verdict(negemb)["failing"] == ["sign_survives_embargo2"]
+
+
+def test_embargo2_sensitivity_from_a_rebuilt_frame(reported, real_run, fs):
+    """S4: a second FrameSet (standing in for `freeze-frame --embargo-days 2`) makes embargo_2 available and applicable."""
+    fs2 = SK.synthetic_dev_frameset(n_per_city_date=2, n_snapshots=4, seed=14)
+    s = report_mod.build_family_summary(real_run.run_dir, fs, real_run.cfg, reported.registry_line,
+                                        sensitivity_fs=fs2, sensitivity_frames_dir="C:/frames/emb2")
+    emb = s["sensitivity"]["embargo_2"]
+    assert emb["available"] is True and emb["sign"] in ("+", "-", "0", None) and len(emb["frame_sha256"]) == 64
+    assert emb["frames_dir"] and set(emb["per_campaign"]) <= {"A", "B", "C"}
+    assert s["verdict"]["not_applicable"] == [] and "sign_survives_embargo2" in s["verdict"]["conditions"]
+    _assert_timestamp_free(s)
 
 
 # ---------------------------------------------------------------------------

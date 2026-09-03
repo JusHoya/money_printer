@@ -47,6 +47,27 @@ would make the bootstrap max normal-tailed and the p anti-conservative
 bootstrap-t restores ~10%). A resample in which a phenotype has fewer than
 two traded dates, or zero variance, contributes nothing for that phenotype.
 
+Competition set: feasible phenotypes (2026-09-03 amendment, F2 red team)
+--------------------------------------------------------------------------
+The ledger holds every phenotype ever evaluated, including the thousands a
+hard constraint killed after 2-5 traded dates. Their bootstrap-t is enormous
+(a 2-3-date phenotype with near-constant PnL has ``t`` in the hundreds), so
+the max over ALL ~10k phenotypes is owned by those flukes and ``p_RC`` is
+~1 for every pick, real or null (family #1: real picks p 0.991 / 0.9965 /
+0.999 / 0.99975; every one of 60 snapshot-null picks in [0.956, 1.0]; the
+KS-vs-uniform exit criterion fails with p = 1.9e-51 -- zero power, not
+anti-conservatism). The picker never chooses among those rows: it selects
+from the constraint-satisfying elites only. The honest correction therefore
+competes the pick against what the picker could have chosen -- the
+**feasible set**: distinct phenotypes with ``dates >= ceil(0.6 D)`` and
+``trades >= 40`` (the MIN_DATES / MIN_TRADES hard constraints), the pick
+force-included. ``pick_multiplicity`` reports BOTH: the headline
+``p_rc``/``p_spa`` on the feasible set (real family #1: A 0.400, B 0.762,
+C 0.719, ALL69 0.887; snapshot-null picks spread over [0.03, 1.0]) and
+``p_rc_all``/``p_spa_all`` on every phenotype, with ``L_feasible``/``L_all``.
+Fixed-``se_l`` studentisation on the feasible set is anti-conservative
+(8/18 null picks below 0.10), so the bootstrap-t is kept.
+
 Hansen SPA (Superior Predictive Ability, Hansen 2005), studentised
 --------------------------------------------------------------------
 Same resamples, but "poor" phenotypes are NOT recentred to zero: with
@@ -134,9 +155,12 @@ __all__ = [
     "norm_cdf",
     "norm_ppf",
     "one_sided_p",
+    "feasible_mask",
+    "pick_multiplicity",
     "reality_check",
     "robust_variance",
     "row_stats",
+    "sharpe_clip_count",
     "sharpe_from_ledger",
 ]
 
@@ -294,6 +318,73 @@ def reality_check(
     return out
 
 
+def feasible_mask(
+    dates: Sequence[int],
+    trades: Sequence[int],
+    n_search_dates: int,
+    *,
+    min_date_fraction: float = 0.6,
+    min_trades: int = 40,
+) -> np.ndarray:
+    """Boolean mask of the picker's admissible set: ``dates >= ceil(f D)`` and ``trades >= min_trades``."""
+    d = np.asarray([int(x) if x is not None else 0 for x in dates], dtype=np.int64)
+    t = np.asarray([int(x) if x is not None else 0 for x in trades], dtype=np.int64)
+    min_d = int(math.ceil(float(min_date_fraction) * int(n_search_dates)))
+    return (d >= min_d) & (t >= int(min_trades))
+
+
+def pick_multiplicity(
+    per_date_matrix: np.ndarray,
+    pick_index: int,
+    feasible: Optional[np.ndarray],
+    *,
+    n_boot: int = DEFAULT_N_BOOT,
+    seed: int = DEFAULT_SEED,
+    chunk: int = 256,
+) -> Dict[str, Any]:
+    """Headline (feasible-set) and all-phenotype RC/SPA of ``pick_index`` (module docstring).
+
+    ``feasible`` is a boolean row mask (``None`` -> every row); the pick is
+    always included in its own competition set. Returns ``p_rc``/``p_spa``
+    (feasible), ``p_rc_all``/``p_spa_all`` (all rows), ``L_all``,
+    ``L_feasible``, ``pick_feasible``, and the all-set bookkeeping
+    (``L_used``, ``L_excluded``, ``t_pick``, ``n_pick``, ``D``).
+    """
+    M = np.asarray(per_date_matrix, dtype=np.float64)
+    L = int(M.shape[0]) if M.ndim == 2 else 0
+    rc_all = reality_check(M, pick_index, n_boot=n_boot, seed=seed, chunk=chunk)
+    if feasible is None:
+        fmask = np.ones(L, dtype=bool)
+    else:
+        fmask = np.asarray(feasible, dtype=bool).copy()
+        if fmask.shape[0] != L:
+            raise ValueError(f"feasible mask has {fmask.shape[0]} rows, matrix has {L}")
+    pick_feasible = bool(fmask[int(pick_index)])
+    fmask[int(pick_index)] = True
+    idx = np.flatnonzero(fmask)
+    rc_f = reality_check(M[idx], int(np.searchsorted(idx, int(pick_index))), n_boot=n_boot, seed=seed, chunk=chunk)
+    out: Dict[str, Any] = {
+        "p_rc": rc_f["p_rc"],
+        "p_spa": rc_f["p_spa"],
+        "p_rc_all": rc_all["p_rc"],
+        "p_spa_all": rc_all["p_spa"],
+        "L": int(L),
+        "L_all": int(L),
+        "L_feasible": int(idx.shape[0]),
+        "L_feasible_used": rc_f["L_used"],
+        "pick_feasible": pick_feasible,
+        "D": rc_all["D"],
+        "L_used": rc_all["L_used"],
+        "L_excluded": rc_all["L_excluded"],
+        "t_pick": rc_all["t_pick"],
+        "n_pick": rc_all["n_pick"],
+        "n_boot": int(n_boot),
+        "seed": int(seed),
+        "competition_set": "feasible: dates >= ceil(0.6 D) and trades >= 40, pick included; *_all: every distinct ledger phenotype",
+    }
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Holm
 # ---------------------------------------------------------------------------
@@ -336,17 +427,37 @@ def _moments(x: np.ndarray) -> Tuple[float, float, float, float]:
     return mu, std, skew, kurt
 
 
-def sharpe_from_ledger(t_stat: Sequence[float], dates: Sequence[int], *, min_dates: int = _MIN_DATES) -> np.ndarray:
+SR_CLIP = 50.0  # |SR| per date beyond this is a near-constant-payoff artefact, not a trial
+
+
+def sharpe_from_ledger(t_stat: Sequence[float], dates: Sequence[int], *, min_dates: int = _MIN_DATES,
+                       clip: Optional[float] = SR_CLIP) -> np.ndarray:
     """Per-row non-annualised SR ``t / sqrt(n)`` for rows with ``n >= min_dates`` and finite ``t``.
 
     The report passes ``min_dates = ceil(0.6 * D)`` (the MIN_DATES hard
     constraint) so the cross-trial SR variance is estimated over the
-    phenotypes that actually competed for the pick, not over two-date flukes.
+    phenotypes that actually competed for the pick, not over two-date flukes;
+    rows with ``|SR| > clip`` (default 50: a phenotype whose per-date PnL is
+    almost constant, SR ~1e13 in family #1) are excluded -- see
+    ``sharpe_clip_count`` for how many.
     """
     t = np.asarray(t_stat, dtype=np.float64)
     n = np.asarray(dates, dtype=np.float64)
     ok = np.isfinite(t) & (n >= max(int(min_dates), _MIN_DATES))
-    return t[ok] / np.sqrt(n[ok])
+    sr = t[ok] / np.sqrt(n[ok])
+    if clip is not None:
+        sr = sr[np.abs(sr) <= float(clip)]
+    return sr
+
+
+def sharpe_clip_count(t_stat: Sequence[float], dates: Sequence[int], *, min_dates: int = _MIN_DATES,
+                      clip: float = SR_CLIP) -> int:
+    """How many otherwise-eligible SR trials ``sharpe_from_ledger`` dropped for ``|SR| > clip``."""
+    t = np.asarray(t_stat, dtype=np.float64)
+    n = np.asarray(dates, dtype=np.float64)
+    ok = np.isfinite(t) & (n >= max(int(min_dates), _MIN_DATES))
+    sr = t[ok] / np.sqrt(n[ok])
+    return int(np.count_nonzero(np.abs(sr) > float(clip)))
 
 
 def robust_variance(values: Sequence[float]) -> float:
@@ -482,8 +593,14 @@ def ledger_matrix(
     dates: Sequence[str],
     *,
     code_dates: Optional[Sequence[str]] = None,
-) -> Tuple[np.ndarray, List[str]]:
+    with_meta: bool = False,
+) -> Any:
     """``(L x D matrix, phenotype_hashes)`` from a ``Ledger`` (or an arrow table / list of rows).
+
+    With ``with_meta=True`` a third element ``{"dates", "trades", "t_stat",
+    "fitness", "status"}`` (arrays aligned with the rows, from each phenotype's
+    FIRST ledger occurrence) is returned so callers can build the feasible
+    competition set without re-reading the ledger.
 
     Rows are deduplicated by ``phenotype_hash`` keeping the FIRST occurrence
     (ledger order: generation, then idx); rows with an empty hash (UNSCORED,
@@ -505,10 +622,16 @@ def ledger_matrix(
     seen: Dict[str, int] = {}
     ids: List[str] = []
     entries: List[Tuple[int, List[int], List[float]]] = []
+    meta: Dict[str, List[Any]] = {"dates": [], "trades": [], "t_stat": [], "fitness": [], "status": []}
     for r in rows:
         ph = str(r.get("phenotype_hash") or "")
         if not ph or ph in seen:
             continue
+        meta["dates"].append(int(r.get("dates") or 0))
+        meta["trades"].append(int(r.get("trades") or 0))
+        meta["t_stat"].append(float(r.get("t_stat")) if r.get("t_stat") is not None else math.nan)
+        meta["fitness"].append(float(r.get("fitness")) if r.get("fitness") is not None else math.nan)
+        meta["status"].append(str(r.get("status") or ""))
         codes = [int(c) for c in (r.get("per_date_codes") or [])]
         pnl = [float(v) for v in (r.get("per_date_pnl") or [])]
         if len(codes) != len(pnl):
@@ -527,4 +650,13 @@ def ledger_matrix(
             j = col_of.get(cd[c])
             if j is not None:
                 M[l, j] = v
+    if with_meta:
+        out_meta: Dict[str, Any] = {
+            "dates": np.asarray(meta["dates"], dtype=np.int64),
+            "trades": np.asarray(meta["trades"], dtype=np.int64),
+            "t_stat": np.asarray(meta["t_stat"], dtype=np.float64),
+            "fitness": np.asarray(meta["fitness"], dtype=np.float64),
+            "status": meta["status"],
+        }
+        return M, ids, out_meta
     return M, ids

@@ -383,6 +383,66 @@ every entry window. It is replaced by:
 
 ---
 
+### 6.4a — 2026-09-03 amendment (F2 red team): the RC competition set and the residual null
+
+Two findings of the Phase-F2 red team on family #1 (`run_2026-09-03`, 400×60, 41 control
+replicates) change how §6.3 and §6.4 are *computed*; the promotion conditions themselves are
+unchanged. The owner ratifies or overrides both at F4 (`docs/REVIVAL_2026_09.md`).
+
+**§6.3 — `p_RC` is computed on the feasible competition set (headline), and on every
+phenotype (secondary).** The ledger holds every phenotype ever evaluated, including the
+thousands a hard constraint killed after 2–5 traded dates. Their bootstrap-t is enormous
+(near-constant PnL over 2–3 dates), so the max over all ~10k phenotypes is owned by those
+flukes and `p_RC ≈ 1` for every pick, real or null: real picks 0.991 / 0.9965 / 0.999 /
+0.99975 (A/B/C/ALL69), all 60 snapshot-null picks in [0.956, 1.0], KS-vs-uniform
+p = 1.9e-51 — zero power, not anti-conservatism. The picker never chooses among killed rows;
+the honest correction competes the pick against what the picker could have chosen: distinct
+phenotypes with `dates ≥ ceil(0.6·D)` and `trades ≥ 40` (the MIN_DATES/MIN_TRADES
+constraints), the pick force-included, bootstrap-t studentised (fixed-`se_l` on the feasible
+set is anti-conservative: 8/18 null picks below 0.10). Real family #1 on the feasible set:
+A 0.400, B 0.762, C 0.719, ALL69 0.887; snapshot-null picks spread over [0.03, 1.0].
+`summary.json` carries `multiplicity.<c>.p_rc/p_spa` (feasible, the headline and the
+`p_RC(ALL69) < 0.10` condition), `p_rc_all/p_spa_all`, `L_feasible`, `L_all`; the snapshot
+KS exit criterion uses the feasible p (`multiplicity.py`, `pick_multiplicity`).
+
+**§6.3 — clustered DSR headline uses the MAD-robust cross-trial SR variance over distinct
+phenotypes.** The plain variance is owned by near-constant-payoff phenotypes (SR ~1e13 →
+`E[max SR]` ~1e14, DSR identically 0); SR trials are now one per distinct phenotype
+(first ledger occurrence), MIN_DATES-eligible, `|SR| ≤ 50` (clipped count reported); the
+raw-variance companion stays under `clustered_dsr.raw`. Reported, never gated.
+
+**§6.4 #2 — the residual-shuffle null is scored as a PAIRED difference against the
+`nofilter_no` baseline under the same shuffled truth.** The shuffle keeps the market's
+quotes, which late in the day already embed the observed high; after re-settling on shifted
+truth every rule that fades a confident late quote wins almost surely. Measured (5 replicates
+vs real, executable taker rows): buy_no 3–6h longshot **+0.642 vs −0.051**/contract, buy_no
+6–12h longshot +0.555 vs −0.037, buy_no 12–24h mid +0.156 vs −0.005, even ≥24h buy_no mid
++0.093 vs −0.021; fixed seeds gain under the null (fr31a +0.122 vs +0.072, fr31b +0.430,
+mlweather_fallback +0.083 vs −0.019). The 20 replicates' pooled means were 0.60–0.885 (p95
+0.87) against a real pick at 0.031 — the "real pick must exceed the null's p95" condition was
+unreachable by construction, for any window bucket. The baseline scored on the same frame
+absorbs the market-vs-truth inflation, so the statistic is now
+`Δ_k = pooled(pick_k) − pooled(nofilter_no on frame k)` per replicate (per-date paired on the
+pick's validation dates, baseline 0 where it did not trade) versus
+`Δ_real = pooled(real picks) − pooled(nofilter_no on the real frame)` (the existing
+paired-vs-no-filter number); the promotion condition "beats every control" is: real pooled
+mean > every snapshot replicate's pooled mean AND `Δ_real > p95(Δ_k)`. Raw residual pooled
+means remain in `controls.residual.raw_means` as a labelled diagnostic. The alternative —
+shifting whole city-days (prices + forecasts + truth) jointly — tests cross-city date-luck
+only and was not adopted.
+
+**§5.8 — embargo-2 sensitivity is a rebuilt frame, never a copy of the headline.**
+`factory.py report --sensitivity-frames DIR` scores the same picks on the validation dates of
+a frame frozen with `freeze-frame --embargo-days 2`; without it `sensitivity.embargo_2`
+reads `available: false` and the verdict lists that condition as not applicable.
+
+**Planted-edge disclosure (§6.4 #3).** The pick-level `capture_ratio` gate has one-trade
+granularity (~0.36 per flipped trade at ~48 pick validation trades; ~78 % pass rate across
+re-plantings of the same picks). The report now also carries the planted rule's own
+`rule_capture_ratio`, `pick_flipped_trades / pick_validation_trades` and
+`pick_rule_overlap`; widening the planted region so the pick-level delta is not 2–3 discrete
+events is an open F4 decision.
+
 ## 7. Compute plan on the GB10
 
 ### 7.1 Process model and coexistence with mp-vllm

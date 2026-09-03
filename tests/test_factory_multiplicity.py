@@ -194,3 +194,75 @@ def test_ledger_matrix_dedupes_and_maps_codes(tmp_path):
     assert ids2 == ids and M2[2, 0] == 2.0 and M2[2, 1] == 1.0 and np.isnan(M2[2, 2])
     with pytest.raises(ValueError):
         MP.ledger_matrix(led, worker_dates, code_dates=worker_dates[:2])
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-03 amendment (red team F2 S1): the competition set
+# ---------------------------------------------------------------------------
+def _ragged_ledger(rng, D=40, n_feasible=30, n_fluke=30):
+    """30 phenotypes that trade every date (iid noise) + 30 killed flukes: 2-4 dates, near-constant PnL (huge t)."""
+    M = np.full((n_feasible + n_fluke, D), np.nan)
+    M[:n_feasible] = rng.standard_normal((n_feasible, D))
+    dates = np.full(M.shape[0], D, dtype=np.int64)
+    trades = np.full(M.shape[0], 200, dtype=np.int64)
+    for l in range(n_feasible, n_feasible + n_fluke):
+        k = int(rng.integers(2, 5))
+        cols = rng.choice(D, size=k, replace=False)
+        M[l, cols] = 0.8 + 1e-3 * rng.standard_normal(k)  # t ~ hundreds
+        dates[l] = k
+        trades[l] = k
+    return M, dates, trades
+
+
+def test_feasible_mask_and_clip():
+    m = MP.feasible_mask([5, 24, 40, 44], [10, 50, 39, 60], 40)
+    assert m.tolist() == [False, True, False, True]  # ceil(0.6*40)=24 dates and >= 40 trades
+    assert MP.sharpe_clip_count([1e15, 3.0, -2.0], [30, 30, 30], min_dates=2) == 1
+    assert MP.sharpe_from_ledger([1e15, 3.0], [30, 30], min_dates=2).shape == (1,)
+
+
+def test_rc_feasible_set_has_power_where_all_set_has_none():
+    """On ragged ledgers the all-phenotype max is owned by the 2-4-date flukes (p ~ 1 for every pick, zero power);
+    the feasible-set p of the best feasible phenotype is roughly uniform on iid noise."""
+    rng = np.random.default_rng(20260903)
+    p_feas, p_all = [], []
+    for i in range(80):
+        M, dates, trades = _ragged_ledger(rng)
+        feas = MP.feasible_mask(dates, trades, M.shape[1])
+        st = MP.row_stats(M)
+        t = np.where(feas & np.isfinite(st["t"]), st["t"], -np.inf)
+        pick = int(np.argmax(t))  # the picker only chooses among feasible phenotypes
+        r = MP.pick_multiplicity(M, pick, feas, n_boot=300, seed=5000 + i)
+        assert r["L_feasible"] == 30 and r["L_all"] == 60 and r["pick_feasible"] is True
+        assert r["p_spa"] <= r["p_rc"] + 1e-12 and r["p_spa_all"] <= r["p_rc_all"] + 1e-12
+        p_feas.append(r["p_rc"])
+        p_all.append(r["p_rc_all"])
+    share_feas = float(np.mean(np.asarray(p_feas) < 0.10))
+    assert 0.03 <= share_feas <= 0.20, (share_feas, MP.ks_uniform(p_feas))
+    assert MP.ks_uniform(p_feas)["p"] > 0.01
+    # documented: (almost) no power on the all set -- the flukes own the max in most resamples
+    assert float(np.mean(p_all)) > 0.75 and float(np.mean(p_all)) > float(np.mean(p_feas)) + 0.2, (float(np.mean(p_all)), float(np.mean(p_feas)))
+
+
+def test_pick_multiplicity_forces_the_pick_into_its_competition_set():
+    rng = np.random.default_rng(7)
+    M = rng.standard_normal((10, 25))
+    feas = np.zeros(10, dtype=bool)
+    r = MP.pick_multiplicity(M, 3, feas, n_boot=200, seed=1)
+    assert r["L_feasible"] == 1 and r["pick_feasible"] is False and 0.0 <= r["p_rc"] <= 1.0
+    r_none = MP.pick_multiplicity(M, 3, None, n_boot=200, seed=1)
+    assert r_none["L_feasible"] == 10 and r_none["p_rc"] == r_none["p_rc_all"]
+    with pytest.raises(ValueError):
+        MP.pick_multiplicity(M, 3, np.ones(4, dtype=bool), n_boot=50, seed=1)
+
+
+def test_ledger_matrix_with_meta(tmp_path):
+    rows = [
+        {"row_id": "A/g000/0", "phenotype_hash": "h1", "per_date_codes": [0, 1], "per_date_pnl": [0.1, -0.2], "dates": 2, "trades": 5, "t_stat": 0.3, "fitness": -1.0, "status": "KILLED"},
+        {"row_id": "A/g000/1", "phenotype_hash": "h1", "per_date_codes": [0], "per_date_pnl": [9.0], "dates": 1, "trades": 1, "t_stat": None, "fitness": None, "status": "SCORED"},
+        {"row_id": "A/g000/2", "phenotype_hash": "h2", "per_date_codes": [2], "per_date_pnl": [0.5], "dates": 1, "trades": 2, "t_stat": None, "fitness": 0.2, "status": "SCORED"},
+    ]
+    M, ids, meta = MP.ledger_matrix(rows, ["d0", "d1", "d2"], with_meta=True)
+    assert ids == ["h1", "h2"] and M.shape == (2, 3)
+    assert meta["dates"].tolist() == [2, 1] and meta["trades"].tolist() == [5, 2]  # first occurrence wins
+    assert math.isnan(meta["t_stat"][1]) and meta["status"] == ["KILLED", "SCORED"]

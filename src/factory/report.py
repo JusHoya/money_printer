@@ -603,8 +603,16 @@ def _registry_entries(path: Optional[Path]) -> List[Dict[str, Any]]:
 
 
 def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, Any], registry_line: Optional[Dict[str, Any]], *,
-                         n_boot: int = 4000, seed: Optional[int] = None, coverage: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """The family ``summary.json`` with every field of FACTORY_ROADMAP section F2 exit bullet 5 (module block comment)."""
+                         n_boot: int = 4000, seed: Optional[int] = None, coverage: Optional[Dict[str, Any]] = None,
+                         sensitivity_fs: Any = None, sensitivity_frames_dir: Optional[str] = None) -> Dict[str, Any]:
+    """The family ``summary.json`` with every field of FACTORY_ROADMAP section F2 exit bullet 5 (module block comment).
+
+    ``sensitivity_fs`` is the OPTIONAL embargo-2 ``FrameSet`` (``factory.py
+    freeze-frame --embargo-days 2``): the headline picks are re-scored on its
+    validation dates for ``sensitivity.embargo_2``; without it the block says
+    ``available: false`` and the verdict records that condition as not
+    applicable (never copied from the headline).
+    """
     import numpy as np
 
     from src.factory import controls as CT
@@ -638,6 +646,7 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
     n_phen: Dict[str, int] = {}
     mult: Dict[str, Any] = {}
     sr_trials: List[float] = []
+    sr_clipped = 0
     all_hashes = set()
     picks_missing: Dict[str, Any] = {}
     for c in FAMILY_CAMPAIGNS:
@@ -685,16 +694,21 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
         ledgers[c] = table
         hashes = {h for h in table.column("phenotype_hash").to_pylist() if h}
         n_phen[c] = len(hashes)
+        M, ids, meta = MP.ledger_matrix(table, camp.search_dates, code_dates=CT.ledger_code_dates(F), with_meta=True)
+        min_d = int(math.ceil(fitness.MIN_DATE_FRACTION * len(camp.search_dates)))
         if c in POOLED_CAMPAIGNS:
             all_hashes |= hashes
-            min_d = int(math.ceil(fitness.MIN_DATE_FRACTION * len(camp.search_dates)))
-            sr_trials.extend(float(x) for x in MP.sharpe_from_ledger(table.column("t_stat").to_pylist(), table.column("dates").to_pylist(), min_dates=min_d))
-        M, ids = MP.ledger_matrix(table, camp.search_dates, code_dates=CT.ledger_code_dates(F))
+            # SR trials over DISTINCT phenotypes (first ledger occurrence), MIN_DATES-eligible, |SR| <= clip
+            sr_trials.extend(float(x) for x in MP.sharpe_from_ledger(meta["t_stat"], meta["dates"], min_dates=min_d))
+            sr_clipped += MP.sharpe_clip_count(meta["t_stat"], meta["dates"], min_dates=min_d)
+        feas = MP.feasible_mask(meta["dates"], meta["trades"], len(camp.search_dates),
+                                min_date_fraction=fitness.MIN_DATE_FRACTION, min_trades=fitness.MIN_TRADES)
         ph = str(p.get("phenotype_hash") or "")
         if ph in ids:
-            rc = MP.reality_check(M, ids.index(ph), n_boot=n_boot, seed=seed)
+            rc = MP.pick_multiplicity(M, ids.index(ph), feas, n_boot=n_boot, seed=seed)
         else:
-            rc = {"p_rc": math.nan, "p_spa": math.nan, "L": int(M.shape[0]), "D": int(M.shape[1]), "t_pick": math.nan}
+            rc = {"p_rc": math.nan, "p_spa": math.nan, "p_rc_all": math.nan, "p_spa_all": math.nan, "L": int(M.shape[0]),
+                  "L_all": int(M.shape[0]), "L_feasible": int(np.count_nonzero(feas)), "D": int(M.shape[1]), "t_pick": math.nan}
         rc["pick_in_ledger"] = ph in ids
         rc["n_phenotypes"] = n_phen[c]
         rc["n_ledger_rows"] = int(table.num_rows)
@@ -740,34 +754,26 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
                   "this_family": holm_adj.get(family), "m": len(holm_inputs)}
 
     # -- clustered DSR on the pooled validation date series -------------------------
-    dsr = MP.deflated_sharpe(np.asarray([r["pnl"] for r in per_date], dtype=np.float64), max(len(all_hashes), 1),
-                             sr_trials=np.asarray(sr_trials, dtype=np.float64))
+    series = np.asarray([r["pnl"] for r in per_date], dtype=np.float64)
+    n_trials = max(len(all_hashes), 1)
+    raw = MP.deflated_sharpe(series, n_trials, sr_trials=np.asarray(sr_trials, dtype=np.float64))
+    rv = MP.robust_variance(sr_trials)
+    dsr = MP.deflated_sharpe(series, n_trials, sr_var=rv) if rv == rv else MP.deflated_sharpe(series, n_trials)
+    dsr["sr_var_source"] = "ledger_sr_distribution_mad" if rv == rv else dsr.get("sr_var_source")
     dsr["n_trials_definition"] = "distinct phenotype hashes across the A, B, C ledgers"
     dsr["clustering"] = "target_date (the series is the per-date cluster mean)"
     dsr["n_sr_trials"] = len(sr_trials)
-    robust = MP.deflated_sharpe(np.asarray([r["pnl"] for r in per_date], dtype=np.float64), max(len(all_hashes), 1),
-                                sr_var=MP.robust_variance(sr_trials))
-    dsr["robust"] = {k: robust.get(k) for k in ("dsr", "expected_max_sr", "sr_var_trials")}
-    dsr["robust"]["sr_var_source"] = "ledger_sr_distribution_mad"
+    dsr["n_sr_trials_clipped"] = int(sr_clipped)
+    dsr["sr_clip"] = MP.SR_CLIP
+    dsr["headline"] = "MAD-robust cross-trial SR variance (red team F2 S2: the plain variance is owned by near-constant-payoff phenotypes, E[max SR] ~1e14, DSR identically 0)"
+    dsr["raw"] = {k: raw.get(k) for k in ("dsr", "psr", "expected_max_sr", "sr_var_trials", "sr_var_source")}
+    dsr["robust"] = {k: dsr.get(k) for k in ("dsr", "expected_max_sr", "sr_var_trials")}
+    dsr["robust"]["sr_var_source"] = dsr["sr_var_source"]
 
     # -- paired vs no-filter -------------------------------------------------------
-    base = G.SEEDS["nofilter_no"]
-    paired_per: Dict[str, Any] = {}
-    diffs: List[float] = []
-    for c in POOLED_CAMPAIGNS:
-        r_v = val_results.get(c)
-        camp = camps.get(c)
-        if r_v is None or camp is None or not r_v.trades:
-            paired_per[c] = None
-            continue
-        r_b = CT.score_validation(fs, base, camp, n_boot=n_boot, seed=seed)
-        b_map = {int(k): float(v) for k, v in zip(r_b.per_date_codes, r_b.per_date_pnl)} if r_b is not None and r_b.trades else {}
-        d = [float(v) - b_map.get(int(k), 0.0) for k, v in zip(r_v.per_date_codes, r_v.per_date_pnl)]
-        diffs.extend(d)
-        paired_per[c] = dict(CT.pooled_stats(d, n_boot=n_boot, seed=seed), baseline_trades=int(r_b.trades) if r_b else 0,
-                             baseline_realized=(r_b.realized if r_b and r_b.trades else None))
-    paired = {"baseline": "nofilter_no", "rule": "per-date (pick_k - baseline_k) on the dates the pick traded; baseline 0 where it did not trade",
-              "pooled": CT.pooled_stats(diffs, n_boot=n_boot, seed=seed), "per_campaign": paired_per}
+    paired = CT.paired_vs_baseline(fs, {c: genomes[c] for c in POOLED_CAMPAIGNS if c in genomes}, POOLED_CAMPAIGNS,
+                                   baseline=G.SEEDS["nofilter_no"], n_boot=n_boot, seed=seed)
+    paired["baseline"] = "nofilter_no"
 
     # -- sensitivity: 2c / 3c adverse fill, embargo 2 --------------------------------------
     sens: Dict[str, Any] = {}
@@ -787,8 +793,33 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
         st = CT.pooled_stats(vals, n_boot=n_boot, seed=seed)
         sens[f"adverse_{adv:.2f}"] = dict(_stats_only(dict(st, trades=sum(x["trades"] for x in per_c.values()))), sign=_sign(st["mean"]),
                                           per_campaign=per_c, price_rule=f"price_paid = quote + {adv:.2f}; fee held at the frame's value")
-    sens["embargo_2"] = dict(_stats_only(pooled), sign=_sign(pooled["mean"]),
-                             note="embargo_days = 2 IS the campaign calendar default (section 6.1: two embargo dates before every validation block); the headline pooled OOS already satisfies it")
+    if sensitivity_fs is not None:
+        from src.factory import frame as _frame_mod
+
+        F2 = sensitivity_fs.search
+        camps2 = _folds.campaigns([str(d) for d in F2.dates])
+        vals2: List[float] = []
+        per_c2: Dict[str, Any] = {}
+        for c in POOLED_CAMPAIGNS:
+            g = genomes.get(c)
+            camp2 = camps2.get(c)
+            if g is None or camp2 is None or not camp2.validation_dates:
+                continue
+            r = fitness.score(F2, G.to_mask(g, F2), date_mask=_folds.date_mask(F2, camp2.validation_dates), constraints=False,
+                              n_boot=n_boot, seed=seed)
+            per_c2[c] = {"trades": int(r.trades), "dates": int(r.dates), "realized": r.realized if r.trades else None}
+            if r.trades:
+                vals2.extend(float(x) for x in r.per_date_pnl)
+        st2 = CT.pooled_stats(vals2, n_boot=n_boot, seed=seed)
+        sens["embargo_2"] = dict(_stats_only(dict(st2, trades=sum(x["trades"] for x in per_c2.values()))), sign=_sign(st2["mean"]),
+                                 available=True, per_campaign=per_c2,
+                                 frames_dir=_norm_paths(str(sensitivity_frames_dir)) if sensitivity_frames_dir else None,
+                                 frame_sha256=_frame_mod.frame_sha256(F2),
+                                 embargo_days=(sensitivity_fs.provenance.get("config") or {}).get("embargo_days") if isinstance(sensitivity_fs.provenance, dict) else None,
+                                 note="the same picks scored on the validation dates of a frame REBUILT with calibration embargo_days = 2 (section 5.8 sensitivity); the run's frame uses embargo_days = 1")
+    else:
+        sens["embargo_2"] = {"available": False, "sign": None,
+                             "note": "not computed: pass `factory.py report --sensitivity-frames DIR` with a frame frozen by `freeze-frame --embargo-days 2`; the verdict records this condition as not applicable (it is never copied from the headline)"}
 
     # -- BSS_trades per pick on validation ------------------------------------------
     bss = {c: (val_results[c].bss_trades if val_results.get(c) is not None else None) for c in POOLED_CAMPAIGNS}
@@ -870,6 +901,7 @@ def build_family_summary(run_dir: Union[str, Path], fs: Any, config: Dict[str, A
         "evaluations_status_json": status.get("evaluations"),
         "paired_vs_nofilter": paired,
         "sensitivity": sens,
+        "sensitivity_frames_dir": _norm_paths(str(sensitivity_frames_dir)) if sensitivity_frames_dir else None,
         "bss_trades": bss,
         "phenotype_jaccard": jac,
         "tail_ratio": _tail_ratio(fs, pooled_dates) if pooled_dates else None,
@@ -890,11 +922,18 @@ def evaluate_verdict(summary: Dict[str, Any]) -> Dict[str, Any]:
     holm_this = _g(summary, "holm", "this_family") or {}
     p_rc_all = _g(summary, "multiplicity", "ALL69", "p_rc")
     controls = summary.get("controls") or {}
-    ctrl_means = [m for k in ("snapshot", "residual") for m in ((controls.get(k) or {}).get("pooled_means") or []) if m is not None and m == m]
+    snap_means = [m for m in ((controls.get("snapshot") or {}).get("pooled_means") or []) if m is not None and m == m]
+    resid = controls.get("residual") or {}
     controls_complete = bool(controls) and all(
         (controls.get(k) or {}).get("n_done") == (controls.get(k) or {}).get("n") for k in ("snapshot", "residual", "planted") if k in controls
     )
     mean = pooled.get("mean")
+    paired_delta = resid.get("real_paired_delta")
+    if paired_delta is None:
+        paired_delta = _g(summary, "paired_vs_nofilter", "pooled", "mean")
+    paired_p95 = resid.get("paired_p95")
+    emb = _g(summary, "sensitivity", "embargo_2") or {}
+    emb_available = bool(emb.get("available", bool(emb.get("sign"))))
 
     def _gt(x: Any, y: float) -> Optional[bool]:
         return None if x is None or (isinstance(x, float) and not math.isfinite(x)) else bool(x > y)
@@ -910,7 +949,14 @@ def evaluate_verdict(summary: Dict[str, Any]) -> Dict[str, Any]:
         "pooled_boot_lo_gt0": _gt(pooled.get("boot_lo"), float(th.get("pooled_boot_lo_gt", 0.0))),
         "holm_p_lt_alpha": _lt(holm_this.get("p_adj"), float(th.get("holm_alpha", 0.05))),
         "p_rc_all69_lt_threshold": _lt(p_rc_all, float(th.get("p_rc_all69_lt", 0.10))),
-        "beats_every_control": (bool(mean is not None and mean == mean and ctrl_means and mean > max(ctrl_means)) if controls_complete and ctrl_means else None),
+        # section 6.4a: snapshot replicates on the raw pooled mean; residual replicates on the PAIRED delta
+        # (pick - nofilter_no under the same truth), whose raw means are inflated by the market's late-day information
+        "beats_every_control": (
+            bool(mean is not None and mean == mean and snap_means and mean > max(snap_means)
+                 and paired_delta is not None and paired_delta == paired_delta and paired_p95 is not None and paired_p95 == paired_p95
+                 and paired_delta > paired_p95)
+            if (controls_complete and snap_means and "residual" in controls) else None
+        ),
         "paired_vs_nofilter_lo_gt0": _gt(_g(summary, "paired_vs_nofilter", "pooled", "boot_lo"), 0.0),
         "sign_survives_2c": (_g(summary, "sensitivity", "adverse_0.02", "sign") == "+") if _g(summary, "sensitivity", "adverse_0.02", "sign") else None,
         "sign_survives_3c": (_g(summary, "sensitivity", "adverse_0.03", "sign") == "+") if _g(summary, "sensitivity", "adverse_0.03", "sign") else None,
@@ -919,18 +965,24 @@ def evaluate_verdict(summary: Dict[str, Any]) -> Dict[str, Any]:
         "point_estimate_ge_4c": _ge(mean, 0.04),
         "cities_ge3": _ge(pooled.get("cities"), 3),
     }
-    failing = [k for k in VERDICT_CONDITIONS if conditions.get(k) is not True]
+    not_applicable = [] if emb_available else ["sign_survives_embargo2"]
+    failing = [k for k in VERDICT_CONDITIONS if conditions.get(k) is not True and k not in not_applicable]
     status = "PROPOSED" if not failing else "CLOSED"
     planted = (controls.get("planted") or {}) if controls else {}
     return {
         "status": status,
         "conditions": conditions,
         "failing": failing,
+        "not_applicable": not_applicable,
         "controls_complete": controls_complete,
         "planted_pass": planted.get("pass"),
         "snapshot_pass": bool((controls.get("snapshot") or {}).get("pass_boot_lo") and (controls.get("snapshot") or {}).get("pass_ks")) if controls else None,
-        "residual_real_rank": (controls.get("residual") or {}).get("real_rank") if controls else None,
-        "rule": "PROPOSED iff every headline campaign (A/B/C/ALL69) has a pick, pooled boot_lo > 0, Holm p < alpha, p_RC(ALL69) < threshold, beats every control pooled validation, and every section 5.8 gate; otherwise CLOSED (section 6.3)",
+        "residual_real_rank": resid.get("real_rank") if controls else None,
+        "residual_real_paired_rank": resid.get("real_paired_rank") if controls else None,
+        "rule": ("PROPOSED iff every headline campaign (A/B/C/ALL69) has a pick, pooled boot_lo > 0, Holm p < alpha, "
+                 "p_RC(ALL69) < threshold on the feasible competition set, beats every snapshot replicate's pooled validation "
+                 "and the residual null's paired-delta p95 (section 6.4a), and every section 5.8 gate; embargo-2 is not "
+                 "applicable unless a rebuilt embargo-2 frame was supplied; otherwise CLOSED (section 6.3)"),
     }
 
 
@@ -978,6 +1030,11 @@ def render_family_md(summary: Dict[str, Any]) -> str:
                      f"{_row_cell(p.get('in_sample'))} | {_row_cell(val) if val else 'none (deployment genome)'} | "
                      f"{_p((val or {}).get('bss_trades'))} | {(summary.get('n_phenotypes') or {}).get(c, DASH)} | {_p(m.get('p_rc'))} | {_p(m.get('p_spa'))} |")
     lines.append("")
+    mm = summary.get("multiplicity") or {}
+    lines.append("p_RC / p_SPA above: feasible competition set (dates >= ceil(0.6 D), trades >= 40; section 6.3 amendment). "
+                 "All-phenotype p_RC A/B/C/ALL69: " + " / ".join(_p((mm.get(c) or {}).get("p_rc_all")) for c in FAMILY_CAMPAIGNS)
+                 + "; L_feasible/L_all: " + " / ".join(f"{(mm.get(c) or {}).get('L_feasible', DASH)}/{(mm.get(c) or {}).get('L_all', DASH)}" for c in FAMILY_CAMPAIGNS))
+    lines.append("")
     lines.append(f"## Pooled OOS ({pooled.get('n_dates', DASH)} validation dates, {pooled.get('trades', DASH)} trades, {pooled.get('cities', DASH)} cities)")
     lines.append("")
     lines.append(f"mean {_fmt(pooled.get('mean'))} se {_fmt(pooled.get('se'))} t {_fmt(pooled.get('t_stat'), 2)} boot 95% [{_fmt(pooled.get('boot_lo'))}, {_fmt(pooled.get('boot_hi'))}] "
@@ -988,8 +1045,9 @@ def render_family_md(summary: Dict[str, Any]) -> str:
                  + (f"; families without a recorded p: {', '.join(h.get('families_without_p'))}" if h.get("families_without_p") else ""))
     d = summary.get("clustered_dsr") or {}
     lines.append(f"Clustered DSR: SR {_p(d.get('sr'))} DSR {_p(d.get('dsr'))} PSR(0) {_p(d.get('psr'))} E[max SR] {_p(d.get('expected_max_sr'))} "
-                 f"(N_trials {d.get('n_trials')} phenotypes, skew {_p(d.get('skew'), 2)} kurt {_p(d.get('kurt'), 2)}, V[SR] {_p(d.get('sr_var_trials'), 4)} from {d.get('sr_var_source')}); "
-                 f"MAD-robust V[SR] {_p(_g(d, 'robust', 'sr_var_trials'), 4)} -> E[max SR] {_p(_g(d, 'robust', 'expected_max_sr'))} DSR {_p(_g(d, 'robust', 'dsr'))}")
+                 f"(N_trials {d.get('n_trials')} phenotypes, skew {_p(d.get('skew'), 2)} kurt {_p(d.get('kurt'), 2)}, MAD-robust V[SR] {_p(d.get('sr_var_trials'), 4)} "
+                 f"over {d.get('n_sr_trials', DASH)} distinct SR trials, {d.get('n_sr_trials_clipped', DASH)} clipped at |SR| > {d.get('sr_clip', DASH)}); "
+                 f"raw-variance companion: V[SR] {_p(_g(d, 'raw', 'sr_var_trials'), 4)} -> E[max SR] {_p(_g(d, 'raw', 'expected_max_sr'))} DSR {_p(_g(d, 'raw', 'dsr'))}")
     lines.append("")
     lines.append("## Gates (section 5.8)")
     lines.append("")
@@ -1018,11 +1076,16 @@ def render_family_md(summary: Dict[str, Any]) -> str:
         lines.append(f"- snapshot-efficient null: {sn.get('n_done', 0)}/{sn.get('n', DASH)} replicates, pooled boot_lo > 0 in {sn.get('n_boot_lo_gt0', DASH)} "
                      f"(<= 1 required: {sn.get('pass_boot_lo')}); KS of the picks' p_RC vs U(0,1): D {_p((sn.get('ks_p_rc') or {}).get('stat'))} p {_p((sn.get('ks_p_rc') or {}).get('p'))} "
                      f"(> 0.05 required: {sn.get('pass_ks')}); real pooled mean rank {sn.get('real_rank', DASH)} of {sn.get('n_done', DASH)}")
-        lines.append(f"- residual-shuffle null: {rs.get('n_done', 0)}/{rs.get('n', DASH)} replicates, p95 of pooled means {_fmt(rs.get('p95'))}; "
-                     f"real pick {_fmt(ctl.get('real_pooled_mean'))} rank {rs.get('real_rank', DASH)} of {rs.get('n_done', DASH)} (exceeds p95: {rs.get('real_exceeds_p95')})")
+        lines.append(f"- residual-shuffle null (section 6.4a, PAIRED vs nofilter_no under the same truth): {rs.get('n_done', 0)}/{rs.get('n', DASH)} replicates, "
+                     f"p95 of paired deltas {_fmt(rs.get('paired_p95'))}; real paired delta {_fmt(rs.get('real_paired_delta'))} "
+                     f"rank {rs.get('real_paired_rank', DASH)} of {rs.get('n_done', DASH)} (exceeds p95: {rs.get('real_exceeds_paired_p95')}). "
+                     f"Raw pooled means (diagnostic, inflated by late-day market information): p95 {_fmt(rs.get('p95'))}, "
+                     f"real {_fmt(ctl.get('real_pooled_mean'))} rank {rs.get('real_rank', DASH)} of {rs.get('n_done', DASH)}")
         lines.append(f"- planted edge (+{pl.get('edge', DASH)}): recovered pick pooled on planted {_fmt((pl.get('pick_pooled_on_planted') or {}).get('mean'))} "
                      f"vs original {_fmt((pl.get('pick_pooled_on_original') or {}).get('mean'))}; captured {_fmt(pl.get('captured'))} "
-                     f"ratio {_p(pl.get('capture_ratio'), 2)} (>= 0.8: {pl.get('pass')}); the rule's own validation delta {_fmt(pl.get('rule_pooled_validation_delta'))}")
+                     f"ratio {_p(pl.get('capture_ratio'), 2)} (>= 0.8: {pl.get('pass')}); the rule's own validation delta {_fmt(pl.get('rule_pooled_validation_delta'))} "
+                     f"(rule ratio {_p(pl.get('rule_capture_ratio'), 2)}); {pl.get('pick_flipped_trades', DASH)} of the picks' {pl.get('pick_validation_trades', DASH)} "
+                     f"validation trades were flipped rows, {_p(pl.get('pick_rule_overlap'), 2)} of them inside the planted region (one-trade granularity, see controls.planted.note)")
     lines.append("")
     bf = summary.get("blocked_folds") or {}
     lines.append(f"## Blocked 5-fold diagnostic ({bf.get('label')})")
@@ -1062,11 +1125,13 @@ def render_family_board(summary: Dict[str, Any], coverage: Optional[Dict[str, An
     out.append(f"pooled OOS {_fmt(pooled.get('mean'))} [{_fmt(pooled.get('boot_lo'))}, {_fmt(pooled.get('boot_hi'))}] t {_fmt(pooled.get('t_stat'), 2)} "
                f"n {pooled.get('n_dates', DASH)}d/{pooled.get('trades', DASH)}t | p_RC A/B/C/ALL69 "
                + "/".join(_p((m.get(c) or {}).get("p_rc"), 2) for c in FAMILY_CAMPAIGNS)
+               + " (all-phen " + "/".join(_p((m.get(c) or {}).get("p_rc_all"), 2) for c in FAMILY_CAMPAIGNS) + ")"
                + f" | Holm p {_p(h.get('p_adj'), 3)} | DSR {_p(_g(summary, 'clustered_dsr', 'dsr'), 2)} | N_phen {nph.get('total', DASH)}")
     if ctl:
-        out.append(f"RESIDUAL-NULL RANK {rs.get('real_rank', DASH)}/{rs.get('n_done', DASH)} (p95 {_fmt(rs.get('p95'))}) | "
+        out.append(f"RESIDUAL-NULL paired rank {rs.get('real_paired_rank', DASH)}/{rs.get('n_done', DASH)} "
+                   f"(p95 delta {_fmt(rs.get('paired_p95'))}; raw rank {rs.get('real_rank', DASH)}/{rs.get('n_done', DASH)} p95 {_fmt(rs.get('p95'))}) | "
                    f"snapshot boot_lo>0 {sn.get('n_boot_lo_gt0', DASH)}/{sn.get('n_done', DASH)} KS p {_p((sn.get('ks_p_rc') or {}).get('p'), 2)} rank {sn.get('real_rank', DASH)} | "
-                   f"planted capture {_p(pl.get('capture_ratio'), 2)} {'PASS' if pl.get('pass') else 'FAIL'}")
+                   f"planted capture {_p(pl.get('capture_ratio'), 2)} {'PASS' if pl.get('pass') else 'FAIL'} (rule {_p(pl.get('rule_capture_ratio'), 2)}, {pl.get('pick_flipped_trades', DASH)}/{pl.get('pick_validation_trades', DASH)} flipped)")
     else:
         out.append("controls: not run")
     out.append("")
@@ -1078,7 +1143,7 @@ def render_family_board(summary: Dict[str, Any], coverage: Optional[Dict[str, An
     pk = (summary.get("picks") or {}).get("ALL69") or {}
     pv = _g(summary, "paired_vs_nofilter", "pooled") or {}
     info = lanes.get(weather, {})
-    ctrl_cell = (f"snap {sn.get('n_boot_lo_gt0', DASH)}/{sn.get('n_done', DASH)} res#{rs.get('real_rank', DASH)} plant {_p(pl.get('capture_ratio'), 2)}") if ctl else "none"
+    ctrl_cell = (f"snap {sn.get('n_boot_lo_gt0', DASH)}/{sn.get('n_done', DASH)} res#{rs.get('real_paired_rank', DASH)} plant {_p(pl.get('capture_ratio'), 2)}") if ctl else "none"
     out.append("| " + " | ".join([
         weather, _lane_status(info) if (info.get("status") or info.get("state")) else "READY", str(summary.get("family", DASH)),
         f"{status_word} `{str(pk.get('genome_id', DASH))[:8]}`", f"{_fmt(pooled.get('boot_lo'))}..{_fmt(pooled.get('boot_hi'))}",
