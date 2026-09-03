@@ -221,14 +221,41 @@ carries the git rev (abort if empty), the `requirements-lab.lock` sha, the frame
 sha256s, the fee-regime sha and the host uid. `run/resume/controls/report/
 holdout/score/promote` exit 2 until F2/F4.
 
-Long runs (F2) go through the user unit template
-`deploy/spark/systemd/mp-factory@.service`:
+## Factory (F2) — the evolutionary run on alcyone
+
+**Runbook: `docs/factory/F2_RUNBOOK.md`** (the exact alcyone sequence, what to
+commit, how the Discord evidence is collected). The pieces:
+
+- `deploy/spark/systemd/mp-factory@.service` — user unit template, `%i` = run id,
+  oneshot + `Restart=on-failure`, journald. Installed by
+  `bash deploy/spark/install_factory_unit.sh` (copies into
+  `~/.config/systemd/user`, `daemon-reload`, warns about docker group / linger).
+- `deploy/spark/mp_factory_run.sh <run_id>` — the host wrapper the unit runs:
+  `factory.py run --run-id <run_id>` (auto-`--resume` when
+  `data/factory/runs/<run_id>/run.json` exists) → `controls` → `report`, with a
+  60-s `free -g` sampler into `reports/factory/<run_id>/resources.log`
+  (gitignored), a bench.json merge of the factory throughput + host numbers,
+  then `deploy/spark/mp_factory_notify.sh <run_id> DONE|FAILED`, which always
+  writes `reports/factory/<run_id>/completion.txt` and tries
+  `hermes send --to discord:… --subject … --file completion.txt`.
+- `scripts/factory_bench_coexist.py` — host-side (stdlib) mp-vllm latency bench:
+  `--label idle` before the run, `--label running` mid-run, `--compare` (pass =
+  |Δ p50 inter-token| ≤ 10 %), all merged into `reports/factory/<run_id>/bench.json`.
+- `hermes_plugin/scripts/mp_factory_monitor.sh` — 10-min no-agent cron: one
+  compact progress line from the active run's `status.json`, posted only on
+  sha change, plus `completion.txt` once when it appears.
 
 ```bash
-mkdir -p ~/.config/systemd/user && cp deploy/spark/systemd/mp-factory@.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user start mp-factory@<run_id>      # oneshot, Restart=on-failure, StartLimitBurst=5
-journalctl --user -u mp-factory@<run_id> -n 80 --no-pager
+# ON alcyone, from ~/projects/money_printer (see the runbook for the full sequence)
+bash deploy/spark/install_factory_unit.sh
+cp hermes_plugin/scripts/mp_factory_monitor.sh ~/.hermes/scripts/
+~/.local/bin/hermes cron create 10m --name mp-factory-monitor --no-agent \
+    --script mp_factory_monitor.sh --deliver discord:1491982736989093961 \
+    --provider custom --model ykarout/Qwen3.5-9B-NVFP4
+RUN_ID=run_$(date -u +%F)
+python3 scripts/factory_bench_coexist.py --label idle --out reports/factory/$RUN_ID/bench.json
+systemctl --user start mp-factory@$RUN_ID
+journalctl --user -u mp-factory@$RUN_ID -f
 ```
 
 **Hermes.** The plugin gains `mp_factory_status` and `mp_factory_board`, which

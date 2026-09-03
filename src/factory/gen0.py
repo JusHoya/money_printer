@@ -165,6 +165,40 @@ def _config_sha256(config: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
+def refuse_overwrite(out_dir: Path, run_id: str, reports_root: Optional[Path] = None, *, force: bool = False) -> None:
+    """Refuse to overwrite a same-day gen-0 report unless ``force`` (F1 red-team carry-over).
+
+    ``scripts/factory.py gen0`` defaults ``run_id`` to ``gen0_<today>``, so a
+    second invocation on the same day would silently replace
+    ``reports/factory/<run_id>/summary.json`` and repoint ``latest.json`` at the
+    new numbers with no trace of the first run. Raises ``Gen0Error`` when
+    ``<out_dir>/summary.json`` exists, or when ``<reports_root>/latest.json``
+    already names this ``run_id``, unless ``force=True`` (``--force``).
+    """
+    if force:
+        return
+    out_dir = Path(out_dir)
+    summary = out_dir / "summary.json"
+    if summary.exists():
+        raise Gen0Error(
+            f"{summary} exists; refusing to overwrite the gen-0 report for {run_id!r} "
+            "(pass --run-id for a new run, or --force to replace it on purpose)"
+        )
+    root = Path(reports_root) if reports_root else out_dir.parent
+    latest = root / "latest.json"
+    if latest.exists():
+        try:
+            with open(latest, "r", encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except (OSError, ValueError):
+            doc = {}
+        if isinstance(doc, dict) and doc.get("run_id") == run_id:
+            raise Gen0Error(
+                f"{latest} already points at run {run_id!r}; refusing to overwrite it "
+                "(pass --run-id for a new run, or --force to replace it on purpose)"
+            )
+
+
 def ensure_family_line(config: Dict[str, Any], repo_root: Optional[Path] = None) -> Dict[str, Any]:
     """Write the family line (or reuse the existing one) and return it WITHOUT its ``ts``.
 
@@ -547,6 +581,7 @@ __all__ = [
     "ensure_family_line",
     "load_frameset",
     "load_phase2_shapes",
+    "refuse_overwrite",
     "run_gen0",
     "save_frameset_like_freeze",
 ]
