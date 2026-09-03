@@ -73,9 +73,13 @@ def git_dirty_suffix(repo_root: Union[str, Path]) -> str:
     unavailable -- the rev is then unverifiable and says so by omission only,
     which is why the container image ships git.
     """
+    # The `factory` service masks the sealed roots with empty tmpfs (compose
+    # section 7.1), so inside the container git sees their tracked CSVs as
+    # deleted. That is the sandbox, not drift: exclude them by pathspec.
+    pathspec = ["--", ".", ":!data/ladders_holdout", ":!data/ladders_2026-09"]
     try:
         out = subprocess.run(
-            ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no"],
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=no", *pathspec],
             capture_output=True,
             text=True,
             timeout=20,
