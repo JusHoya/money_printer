@@ -1,0 +1,318 @@
+"""``src.factory.controls`` + the F2 report (``report.build_family_summary`` & co.) with a fake ``run_procedure``.
+
+The fake (``tests/factory_stats_testkit.fake_run_procedure``) writes real
+ledgers / picks.json / oos/pooled.json in the contract layout, so everything
+here exercises the disk contract the EVOLVE workstream must honour.
+"""
+from __future__ import annotations
+
+import functools
+import importlib.util
+import json
+import re
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from src.factory import controls as CT
+from src.factory import folds
+from src.factory import gen0
+from src.factory import registry as registry_mod
+from src.factory import report as report_mod
+from tests import factory_stats_testkit as SK
+
+REPO = Path(__file__).resolve().parents[1]
+TIMESTAMP_KEYS = {"ts", "timestamp", "generated_at", "created_at", "updated_at", "as_of", "now", "time", "wall_clock"}
+ISO_DATETIME = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+
+
+def _walk(obj, path=""):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield path + "/" + str(k), k, v
+            yield from _walk(v, path + "/" + str(k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _walk(v, f"{path}[{i}]")
+
+
+def _assert_timestamp_free(doc):
+    for path, key, value in _walk(doc):
+        assert key not in TIMESTAMP_KEYS, path
+        if isinstance(value, str):
+            assert not ISO_DATETIME.search(value), (path, value)
+
+
+@pytest.fixture(scope="module")
+def fs():
+    return SK.synthetic_dev_frameset(n_per_city_date=2, n_snapshots=4, seed=13)
+
+
+@pytest.fixture(scope="module")
+def real_run(fs, tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("f2run")
+    cfg = SK.base_config(tmp)
+    run_dir = tmp / "data" / "factory" / "runs" / "f2_test"
+    res = SK.write_fake_run(fs, run_dir, cfg, master_seed=20260902, n_random=8, generations=2)
+    return SimpleNamespace(tmp=tmp, cfg=cfg, run_dir=run_dir, result=res)
+
+
+# ---------------------------------------------------------------------------
+# fake procedure sanity (the disk contract)
+# ---------------------------------------------------------------------------
+def test_fake_run_layout(real_run):
+    rd = real_run.run_dir
+    picks = json.loads((rd / "picks.json").read_text(encoding="utf-8"))
+    assert set(picks) == {"A", "B", "C", "ALL69"}
+    for c, p in picks.items():
+        for k in ("genome_json", "genome_id", "phenotype_hash", "picked_gen", "in_sample", "validation", "n_candidates"):
+            assert k in p, (c, k)
+        assert (p["validation"] is None) == (c == "ALL69")
+    pooled = json.loads((rd / "oos" / "pooled.json").read_text(encoding="utf-8"))
+    assert pooled["n_dates"] == len(pooled["per_date"]) and pooled["n_dates"] > 0
+    assert {"date", "campaign", "pnl", "trades"} <= set(pooled["per_date"][0])
+    assert sorted((rd / "ledger").iterdir()) and (rd / "ledger" / "A" / "gen_000.parquet").exists()
+    assert real_run.result.pooled["mean"] == pooled["mean"]
+
+
+# ---------------------------------------------------------------------------
+# controls
+# ---------------------------------------------------------------------------
+def test_run_controls_and_resume(fs, real_run):
+    rd = real_run.run_dir
+    fake = functools.partial(SK.fake_run_procedure, n_random=4, generations=1)
+    calls = []
+
+    def counting(*a, **k):
+        calls.append(k.get("campaigns"))
+        return fake(*a, **k)
+
+    summary = CT.run_controls(fs, real_run.cfg, rd, real_run.result, cfg=None, master_seed=20260902,
+                              n_snapshot=2, n_residual=2, run_procedure=counting, log=lambda s: None)
+    assert len(calls) == 5 and all(c == ("A", "B", "C") for c in calls)
+    assert (rd / "controls" / "summary.json").exists()
+    on_disk = json.loads((rd / "controls" / "summary.json").read_text(encoding="utf-8"))
+    _assert_timestamp_free(on_disk)
+    for kind, n in (("snapshot", 2), ("residual", 2), ("planted", 1)):
+        blk = on_disk[kind]
+        assert blk["n"] == n and blk["n_done"] == n and blk["missing"] == []
+        assert len(blk["replicates"]) == n and len(blk["pooled_means"]) == n
+        for r in blk["replicates"]:
+            assert set(r["p_rc_per_campaign"]) == {"A", "B", "C"} and set(r["picks"]) == {"A", "B", "C"}
+            assert r["pooled_matches_procedure"] is True
+            assert isinstance(r["boot_lo_gt0"], bool)
+            for c in ("A", "B", "C"):
+                assert (CT.replicate_dir(rd, kind, r["k"]) / "ledger" / c / "gen_000.parquet").exists()
+    sn = on_disk["snapshot"]
+    assert {"n_boot_lo_gt0", "ks_p_rc", "real_rank", "pass_boot_lo", "pass_ks", "p_rc_values"} <= set(sn)
+    assert sn["ks_p_rc"]["n"] == len(sn["p_rc_values"]) and sn["real_rank"] in (1, 2, 3)
+    rs = on_disk["residual"]
+    assert {"p95", "real_rank", "real_exceeds_p95"} <= set(rs)
+    pl = on_disk["planted"]
+    for k in ("rule", "edge", "pick_pooled_on_planted", "pick_pooled_on_original", "captured", "capture_ratio", "pass", "rule_pooled_validation_delta"):
+        assert k in pl, k
+    assert pl["edge"] == 0.05 and pl["rule"]["name"] == "planted_no_win3_bands3_sig4"
+    assert abs(pl["captured"] - (pl["pick_pooled_on_planted"]["mean"] - pl["pick_pooled_on_original"]["mean"])) < 1e-12
+    assert on_disk["real_pooled_mean"] == real_run.result.pooled["mean"]
+    # status.json carries controls_done (timestamp-free)
+    st = json.loads((rd / "status.json").read_text(encoding="utf-8"))
+    assert st["controls_done"] == {"snapshot": 2, "residual": 2, "planted": 1} and st["phase"] == "controls"
+    _assert_timestamp_free(st)
+
+    # resume: every replicate is skipped, the summary is byte-identical
+    def boom(*a, **k):
+        raise AssertionError("a finished replicate was re-run")
+
+    before = (rd / "controls" / "summary.json").read_bytes()
+    CT.run_controls(fs, real_run.cfg, rd, None, cfg=None, master_seed=20260902, n_snapshot=2, n_residual=2,
+                    run_procedure=boom, log=lambda s: None)
+    assert (rd / "controls" / "summary.json").read_bytes() == before
+
+    # a partially-done kind reports the missing replicate instead of crashing
+    part = CT.summarise_controls(rd, fs, 0.0, kinds=("snapshot",), n_snapshot=3, master_seed=20260902, log=lambda s: None)
+    assert part["snapshot"]["n_done"] == 2 and part["snapshot"]["missing"] == [2] and part["snapshot"]["pass_boot_lo"] is False
+
+
+def test_pooled_stats_matches_kernel():
+    from src.factory import fitness
+
+    v = np.array([0.1, -0.05, 0.02, 0.07, -0.01])
+    st = CT.pooled_stats(v)
+    draws = fitness.bootstrap_draws(v, n_boot=4000, seed=fitness.DEFAULT_SEED)
+    assert st["mean"] == float(v.mean()) and st["n_dates"] == 5
+    assert st["boot_lo"] == float(np.percentile(draws, 2.5)) and st["boot_hi"] == float(np.percentile(draws, 97.5))
+    assert CT.pooled_stats([])["n_dates"] == 0
+
+
+# ---------------------------------------------------------------------------
+# report
+# ---------------------------------------------------------------------------
+REQUIRED_TOP = ("picks", "pooled_oos", "multiplicity", "holm", "clustered_dsr", "n_phenotypes", "paired_vs_nofilter",
+                "sensitivity", "bss_trades", "phenotype_jaccard", "controls", "blocked_folds", "verdict", "finalists",
+                "registry_line", "frame", "campaigns", "evaluations", "tail_ratio")
+
+
+@pytest.fixture(scope="module")
+def reported(fs, real_run, tmp_path_factory):
+    # make sure the controls exist (module order independence)
+    if not (real_run.run_dir / "controls" / "summary.json").exists():
+        CT.run_controls(fs, real_run.cfg, real_run.run_dir, real_run.result, cfg=None, master_seed=20260902, n_snapshot=2,
+                        n_residual=2, run_procedure=functools.partial(SK.fake_run_procedure, n_random=4, generations=1), log=lambda s: None)
+    reg_path = Path(real_run.cfg["registry_path"])
+    reg = registry_mod.Registry(reg_path)
+    line = reg.write_family_line(real_run.cfg["family"], lane="weather", source="gfs_mex", mode="taker", gene_spec_version=1,
+                                 config_sha256="c" * 64, budget=real_run.cfg["budget"], picker=real_run.cfg["picker"],
+                                 thresholds=real_run.cfg["thresholds"], cutoff="2026-07-25")
+    registry_line = {k: v for k, v in line.items() if k != "ts"}
+    registry_line["status"] = "OPEN"
+    summary = report_mod.build_family_summary(real_run.run_dir, fs, real_run.cfg, registry_line)
+    out = real_run.tmp / "reports" / "factory" / "f2_test"
+    paths = report_mod.write_family_report(summary, out, reports_root=real_run.tmp / "reports" / "factory")
+    return SimpleNamespace(summary=summary, paths=paths, out=out, registry_line=registry_line)
+
+
+def test_summary_has_every_roadmap_field(reported, fs):
+    s = reported.summary
+    for k in REQUIRED_TOP:
+        assert k in s, k
+    for c in ("A", "B", "C", "ALL69"):
+        p = s["picks"][c]
+        for k in ("genes", "genome_json", "phenotype_hash", "in_sample", "n_candidates", "picked_gen", "genome_id"):
+            assert k in p, (c, k)
+        assert p["in_sample"]["boot_lo"] is not None and p["in_sample_matches_picks_json"] is True
+        m = s["multiplicity"][c]
+        assert {"p_rc", "p_spa", "L", "D", "n_phenotypes"} <= set(m) and m["pick_in_ledger"] is True
+        assert 0.0 <= m["p_rc"] <= 1.0 and m["p_spa"] <= m["p_rc"] + 1e-12
+        assert s["n_phenotypes"][c] >= 1
+    assert s["picks"]["ALL69"]["validation"] is None and s["picks"]["A"]["validation"] is not None
+    po = s["pooled_oos"]
+    assert po["n_dates"] == len(po["per_date"]) and po["matches_procedure"] is True and 0.0 <= po["one_sided_p"] <= 1.0
+    assert set(s["holm"]["inputs"]) == {s["family"]} and s["holm"]["this_family"]["p_adj"] == po["one_sided_p"]
+    d = s["clustered_dsr"]
+    assert d["n"] == po["n_dates"] and d["n_trials"] == s["n_phenotypes"]["distinct_abc"] and 0.0 <= d["dsr"] <= 1.0
+    pv = s["paired_vs_nofilter"]
+    assert pv["baseline"] == "nofilter_no" and set(pv["per_campaign"]) == {"A", "B", "C"} and "boot_lo" in pv["pooled"]
+    for k in ("adverse_0.02", "adverse_0.03", "embargo_2"):
+        assert s["sensitivity"][k]["sign"] in ("+", "-", "0", None), k
+    assert "campaign calendar default" in s["sensitivity"]["embargo_2"]["note"]
+    assert set(s["bss_trades"]) >= {"A", "B", "C", "pooled"}
+    assert set(s["phenotype_jaccard"]["pairs"]) == {"A/B", "A/C", "A/ALL69", "B/C", "B/ALL69", "C/ALL69"}
+    assert all(0.0 <= v <= 1.0 for v in s["phenotype_jaccard"]["pairs"].values())
+    assert s["controls"]["planted"]["edge"] == 0.05 and s["blocked_folds"]["label"].startswith("in-sample blocks")
+    v = s["verdict"]
+    assert v["status"] in ("PROPOSED", "CLOSED") and set(v["conditions"]) == set(report_mod.VERDICT_CONDITIONS)
+    assert v["status"] == report_mod.verdict(s)
+    assert v["controls_complete"] is True and v["residual_real_rank"] == s["controls"]["residual"]["real_rank"]
+    assert s["finalists"] and s["finalists"][0]["genome_id"] == s["picks"]["ALL69"]["genome_id"]
+    assert s["tail_ratio"]["gate_applicable"] is False
+    _assert_timestamp_free(s)
+
+
+def test_report_files_and_latest(reported):
+    p = reported.paths
+    for k in ("summary_json", "summary_md", "board_md", "oos_csv", "finalists_json", "status_json", "latest_json"):
+        assert p[k].exists(), k
+    board = p["board_md"].read_text(encoding="utf-8")
+    assert len(board) <= report_mod.BOARD_MAX_CHARS
+    assert "VERDICT: " in board and "RESIDUAL-NULL RANK" in board and reported.summary["verdict"]["status"] in board
+    md = p["summary_md"].read_text(encoding="utf-8")
+    assert "## VERDICT" in md and "Holm" in md and "Clustered DSR" in md and "planted edge" in md
+    csv = p["oos_csv"].read_text(encoding="utf-8").splitlines()
+    assert csv[0] == "date,campaign,pnl,trades" and len(csv) == 1 + reported.summary["pooled_oos"]["n_dates"]
+    fin = json.loads(p["finalists_json"].read_text(encoding="utf-8"))
+    assert fin["all69_pick"]["genome_id"] == reported.summary["picks"]["ALL69"]["genome_id"] and 1 <= len(fin["finalists"]) <= 3
+    latest = json.loads(p["latest_json"].read_text(encoding="utf-8"))
+    assert latest["run"] == "f2_test" and latest["board"] == "f2_test/board.md" and latest["verdict"] == reported.summary["verdict"]["status"]
+    status = json.loads(p["status_json"].read_text(encoding="utf-8"))
+    assert status["verdict"] == reported.summary["verdict"]["status"]
+    _assert_timestamp_free(status)
+    _assert_timestamp_free(json.loads(p["summary_json"].read_text(encoding="utf-8")))
+
+
+def test_report_twice_is_byte_identical(reported, fs, real_run):
+    first = reported.paths["summary_json"].read_bytes()
+    again = report_mod.build_family_summary(real_run.run_dir, fs, real_run.cfg, reported.registry_line)
+    paths = report_mod.write_family_report(again, reported.out, reports_root=real_run.tmp / "reports" / "factory")
+    assert paths["summary_json"].read_bytes() == first
+    assert paths["board_md"].read_text(encoding="utf-8") == reported.paths["board_md"].read_text(encoding="utf-8")
+
+
+def test_verdict_rules():
+    base = {
+        "thresholds": {"pooled_boot_lo_gt": 0.0, "holm_alpha": 0.05, "p_rc_all69_lt": 0.10},
+        "pooled_oos": {"mean": 0.05, "boot_lo": 0.01, "cities": 4},
+        "holm": {"this_family": {"p_adj": 0.01}},
+        "multiplicity": {"ALL69": {"p_rc": 0.05}},
+        "controls": {"snapshot": {"n": 1, "n_done": 1, "pooled_means": [-0.02], "pass_boot_lo": True, "pass_ks": True},
+                     "residual": {"n": 1, "n_done": 1, "pooled_means": [0.01], "real_rank": 1},
+                     "planted": {"n": 1, "n_done": 1, "pass": True}},
+        "paired_vs_nofilter": {"pooled": {"boot_lo": 0.005}},
+        "sensitivity": {"adverse_0.02": {"sign": "+"}, "adverse_0.03": {"sign": "+"}, "embargo_2": {"sign": "+"}},
+        "bss_trades": {"pooled": 0.02},
+    }
+    assert report_mod.verdict(base) == "PROPOSED" and report_mod.evaluate_verdict(base)["failing"] == []
+    bad = json.loads(json.dumps(base))
+    bad["pooled_oos"]["boot_lo"] = -0.01
+    bad["holm"]["this_family"]["p_adj"] = 0.2
+    v = report_mod.evaluate_verdict(bad)
+    assert v["status"] == "CLOSED" and v["failing"] == ["pooled_boot_lo_gt0", "holm_p_lt_alpha"]
+    worse = json.loads(json.dumps(base))
+    worse["controls"]["residual"]["pooled_means"] = [0.09]
+    assert report_mod.evaluate_verdict(worse)["failing"] == ["beats_every_control"]
+    nocontrols = json.loads(json.dumps(base))
+    nocontrols["controls"] = None
+    assert "beats_every_control" in report_mod.evaluate_verdict(nocontrols)["failing"]
+
+
+# ---------------------------------------------------------------------------
+# CLI: factory.py report <run_id> (in-process, roots monkeypatched into tmp)
+# ---------------------------------------------------------------------------
+def _load_cli():
+    spec = importlib.util.spec_from_file_location("factory_cli", REPO / "scripts" / "factory.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_cli_report_transitions_registry_idempotently(fs, tmp_path, monkeypatch):
+    monkeypatch.setenv("MP_GIT_REV", "deadbeef" * 5)
+    cli = _load_cli()
+    frames_dir, _ = gen0.save_frameset_like_freeze(fs, tmp_path / "frames", "weather", "2026-07-25")
+    cfg = cli.load_family_config(cli.DEFAULT_FAMILY_CONFIG)
+    runs_root = tmp_path / "runs"
+    reports_root = tmp_path / "reports"
+    monkeypatch.setattr(cli, "RUNS_ROOT", runs_root)
+    monkeypatch.setattr(cli, "REPORTS_ROOT", reports_root)
+    run_dir = runs_root / "f2_cli"
+    SK.write_fake_run(fs, run_dir, cfg, master_seed=1, frames_dir=frames_dir, n_random=6, generations=1)
+    CT.run_controls(fs, cfg, run_dir, None, cfg=None, master_seed=1, n_snapshot=1, n_residual=1,
+                    run_procedure=functools.partial(SK.fake_run_procedure, n_random=3, generations=1), log=lambda s: None)
+    reg = registry_mod.Registry(reports_root / "registry.jsonl")
+    reg.write_family_line(cfg["family"], lane="weather", source="gfs_mex", mode="taker", gene_spec_version=1,
+                          config_sha256=cfg["_config_sha256"], budget=cfg["budget"], picker=cfg["picker"],
+                          thresholds=cfg["thresholds"], cutoff="2026-07-25")
+    parser = cli.build_parser()
+    assert "controls" in parser.format_help() and "report" in parser.format_help()
+    args = parser.parse_args(["report", "f2_cli"])
+    assert cli.cmd_report(args) == 0
+    out = reports_root / "f2_cli"
+    first = (out / "summary.json").read_bytes()
+    status = reg.status(cfg["family"])
+    assert status in ("PROPOSED", "CLOSED")
+    assert json.loads((out / "summary.json").read_text(encoding="utf-8"))["verdict"]["status"] == status
+    assert (out / "run.json").exists() and (out / "board.md").exists() and (out / "oos_by_date.csv").exists()
+    st = json.loads((out / "status.json").read_text(encoding="utf-8"))
+    assert st["state"] == "DONE" and st["reported"] is True and st["verdict"] == status
+    # second report: byte-identical, no second transition line
+    n_lines = len(reg.lines())
+    assert cli.cmd_report(parser.parse_args(["report", "f2_cli"])) == 0
+    assert (out / "summary.json").read_bytes() == first
+    assert len(reg.lines()) == n_lines and reg.status(cfg["family"]) == status
+    latest = json.loads((reports_root / "latest.json").read_text(encoding="utf-8"))
+    assert latest["run"] == "f2_cli" and latest["board"] == "f2_cli/board.md"
+    # controls subcommand parses
+    a = parser.parse_args(["controls", "f2_cli", "--kinds", "snapshot", "--n-snapshot", "3", "--workers", "2"])
+    assert a.n_snapshot == 3 and a.kinds == "snapshot" and a.workers == 2
