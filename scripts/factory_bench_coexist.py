@@ -137,10 +137,16 @@ def content_of(chunk: Any) -> str:
     if not choices or not isinstance(choices[0], dict):
         return ""
     delta = choices[0].get("delta") or {}
-    text = delta.get("content") if isinstance(delta, dict) else None
-    if text is None and isinstance(delta, dict):
-        text = delta.get("reasoning_content")  # thinking models stream this first
-    return text if isinstance(text, str) else ""
+    if not isinstance(delta, dict):
+        return ""
+    # Thinking models stream their reasoning first: vLLM <= 0.10 under
+    # ``reasoning_content``, vLLM 0.28 (alcyone, verified 2026-09-03) under
+    # ``reasoning``. A chunk carrying any of the three is one generated token.
+    for key in ("content", "reasoning_content", "reasoning"):
+        text = delta.get(key)
+        if isinstance(text, str) and text:
+            return text
+    return ""
 
 
 def time_stream(lines: Iterable[bytes], t_send: float, clock: Callable[[], float]) -> Dict[str, Any]:
