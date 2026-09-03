@@ -571,6 +571,8 @@ def cmd_controls(args: argparse.Namespace) -> int:
     summary = controls_mod.run_controls(
         fs, config, run_dir, None, cfg=cfg, master_seed=master_seed, n_snapshot=int(args.n_snapshot),
         n_residual=int(args.n_residual), kinds=kinds, log=print,
+        # the tracked mirror the Hermes monitor cron hashes (FR-F2.6 "≥3 posts during the run")
+        status_mirror=REPORTS_ROOT / args.run_id / "status.json",
     )
     for kind in kinds:
         blk = summary.get(kind) or {}

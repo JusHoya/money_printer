@@ -84,8 +84,13 @@ try:
     bf = f"{float(bf):+.4f}"
 except (TypeError, ValueError):
     bf = "-"
+cd_ = s.get("controls_done") or {}
+ctl = ""
+if cd_ or s.get("control"):
+    ctl = (f" controls s{cd_.get('snapshot', 0)}/20 r{cd_.get('residual', 0)}/20 p{cd_.get('planted', 0)}/1"
+           + (f" now {s.get('control')}" if s.get("control") else ""))
 print(f"factory {g('run_id', sys.argv[2])} {g('state')} {g('phase')} {g('campaign')} "
-      f"gen {g('gen')}/{g('n_gens')} best_fit {bf} phenotypes {g('n_phenotypes')} evals {g('evaluations')}")
+      f"gen {g('gen')}/{g('n_gens')} best_fit {bf} phenotypes {g('n_phenotypes')} evals {g('evaluations')}{ctl}")
 PYEOF
 )
 else

@@ -109,11 +109,18 @@ def replicate_dir(run_dir: Union[str, Path], kind: str, k: int) -> Path:
     return Path(run_dir) / "controls" / str(kind) / str(int(k))
 
 
-def _update_status(run_dir: Path, **fields: Any) -> None:
+def _update_status(run_dir: Path, mirror: Optional[Path] = None, **fields: Any) -> None:
+    """Timestamp-free status.json update (+ the tracked mirror the Hermes monitor hashes).
+
+    Without the mirror the monitor cron saw the same bytes for the whole controls
+    phase and posted nothing (alcyone run_2026-09-03): every replicate must change it.
+    """
     p = run_dir / "status.json"
     doc = load_json(p) or {"run_id": run_dir.name, "state": "RUNNING"}
     doc.update(fields)
     write_json(p, doc)
+    if mirror is not None:
+        write_json(Path(mirror), doc)
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +297,7 @@ def run_controls(
     edge: float = 0.05,
     n_boot: int = fitness.DEFAULT_N_BOOT,
     seed: int = fitness.DEFAULT_SEED,
+    status_mirror: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """Run every replicate of every kind (resumable) and write ``controls/summary.json``.
 
@@ -319,10 +327,11 @@ def run_controls(
             rep.mkdir(parents=True, exist_ok=True)
             write_json(rep / "control.json", {"kind": kind, "k": k, "seed": s, "info": info})
             log(f"controls: {kind}/{k}: running the procedure on campaigns {list(campaigns)}")
+            _update_status(run_dir, status_mirror, phase="controls", control=f"{kind}/{k}")
             rp(fs_k, config, rep, campaigns=tuple(campaigns), blocked_folds=False, cfg=cfg,
                master_seed=master_seed, frame_dir=None, resume=True, log=log)
             done = {kk: sum(1 for j in range(plan[kk]) if (replicate_dir(run_dir, kk, j) / "oos" / "pooled.json").exists()) for kk in kinds}
-            _update_status(run_dir, phase="controls", controls_done=done)
+            _update_status(run_dir, status_mirror, phase="controls", control=None, controls_done=done)
     real_mean = _real_pooled_mean(real, run_dir)
     summary = summarise_controls(
         run_dir, fs, real_mean, kinds=kinds, n_snapshot=n_snapshot, n_residual=n_residual,
