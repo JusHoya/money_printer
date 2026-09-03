@@ -3,7 +3,9 @@
 Provides 15 tools (prefixed mp_*) that let the agent monitor and control
 the trading system via its HTTP API (localhost:8050) and data files, plus the
 two strategy-factory readers (mp_factory_status / mp_factory_board) over
-$MONEY_PRINTER_FACTORY_DIR (PRD_STRATEGY_FACTORY FR-F1.6).
+$MONEY_PRINTER_FACTORY_DIR (PRD_STRATEGY_FACTORY FR-F1.6). Since 2.3.0 (F2)
+mp_factory_status also returns the ACTIVE run's timestamp-free status.json
+(latest.json "active_run" / "status" pointers) beside the gen-0 headline.
 
 Deploy:  ln -sf ~/money_printer/hermes_plugin ~/.hermes/plugins/money-printer
 """
@@ -15,6 +17,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import requests
+
+PLUGIN_VERSION = "2.3.0"  # keep in step with plugin.yaml
 
 # ── Configuration ─────────────────────────────────────────────────
 
@@ -589,14 +593,83 @@ def _factory_latest():
         return None, f"latest.json unreadable: {e}"
 
 
+def _factory_active_run(latest, root):
+    """The ACTIVE run's status.json (F2), or None when latest.json has no 'status' pointer.
+
+    EVOLVE writes ``"active_run": <run_id>, "status": "<run_id>/status.json"``
+    into latest.json at run start; the gen-0 report carries a ``status``
+    pointer too. status.json is timestamp-free by contract. completion.txt
+    (deploy/spark/mp_factory_notify.sh) and bench.json's mp_vllm.compare are
+    surfaced when present. Never raises.
+    """
+    rel = latest.get("status")
+    if not rel:
+        return None
+    path = os.path.join(root, rel)
+    out = {"run_id": latest.get("active_run") or latest.get("run_id"), "status_path": rel}
+    if not os.path.exists(path):
+        out["error"] = "status.json missing"
+        return out
+    try:
+        st = _factory_load_json(path)
+    except Exception as e:
+        out["error"] = f"status.json unreadable: {e}"
+        return out
+    if isinstance(st, dict):
+        if not out["run_id"]:
+            out["run_id"] = st.get("run_id")
+        out["state"] = st.get("state")
+        out["phase"] = st.get("phase")
+        out["campaign"] = st.get("campaign")
+        out["gen"] = st.get("gen")
+        out["n_gens"] = st.get("n_gens")
+        out["best_fit"] = st.get("best_fit")
+        out["n_phenotypes"] = st.get("n_phenotypes")
+        out["evaluations"] = st.get("evaluations")
+        out["picks_done"] = st.get("picks_done")
+        out["controls_done"] = st.get("controls_done")
+    out["status"] = st
+    run_dir = os.path.dirname(path)
+    comp = os.path.join(run_dir, "completion.txt")
+    if os.path.exists(comp):
+        try:
+            with open(comp, encoding="utf-8") as f:
+                out["completion"] = f.read()
+        except Exception as e:
+            out["completion"] = f"completion.txt unreadable: {e}"
+    bench = os.path.join(run_dir, "bench.json")
+    if os.path.exists(bench):
+        try:
+            b = _factory_load_json(bench)
+            out["bench"] = {
+                "mp_vllm_compare": (b.get("mp_vllm") or {}).get("compare"),
+                "factory_throughput": (b.get("factory") or {}).get("throughput"),
+            }
+        except Exception as e:
+            out["bench"] = {"error": f"bench.json unreadable: {e}"}
+    return out
+
+
 def get_factory_status(params):
-    """Headline numbers of the latest factory run (latest.json -> summary.json)."""
+    """Headline numbers of the latest factory run (latest.json -> summary.json)
+    plus the ACTIVE run's status.json (latest.json -> status) when present."""
     latest, err = _factory_latest()
     if err:
         return json.dumps({"ok": False, "error": err})
     root = _factory_dir()
+    active = _factory_active_run(latest, root)
     rel = latest.get("summary")
     if not rel:
+        if active is not None:
+            # A run has started but no summary exists yet (F2: report is the last step).
+            return json.dumps({
+                "ok": True,
+                "factory_dir": root,
+                "run_id": latest.get("run_id"),
+                "active_run": active,
+                "summary_path": None,
+                "phase_note": "F2 run in progress: no summary.json yet; see active_run.status",
+            })
         return json.dumps({"ok": False, "error": "latest.json has no 'summary' pointer"})
     try:
         summary = _factory_load_json(os.path.join(root, rel))
@@ -644,7 +717,16 @@ def get_factory_status(params):
         "brier_skill_vs_market": summary.get("brier_skill_vs_market"),
         "throughput": summary.get("throughput"),
         "summary_path": rel,
-        "phase_note": "F1 gen-0: seeds only; evolution/RC/Holm/controls arrive in F2",
+        # F2 family summaries (report.build_family_summary) carry these; gen-0 ones do not.
+        "verdict": summary.get("verdict"),
+        "pooled": summary.get("pooled"),
+        "active_run": active,
+        "phase_note": (
+            "F2: active_run is the evolving run's timestamp-free status.json; "
+            "verdict/pooled are null until `factory.py report` has run"
+            if summary.get("kind") != "gen0"
+            else "F1 gen-0 headline; active_run (if any) is the F2 run in progress"
+        ),
     }
     return json.dumps(body)
 
@@ -687,7 +769,7 @@ TOOLS = {
     "mp_factory_status": {
         "schema": {
             "name": "mp_factory_status",
-            "description": "Headline numbers of the latest strategy-factory run (reports/factory/latest.json -> summary.json): run id, kind, family, registry status, per-seed parity/search/validation rows (fr31a parity line vs 181/65/+0.0636, nofilter_no, mlweather_fallback), frame-level Brier skill vs market, throughput. Offline lab artefact on alcyone; never a trading signal.",
+            "description": "Headline numbers of the latest strategy-factory run (reports/factory/latest.json -> summary.json): run id, kind, family, registry status, per-seed parity/search/validation rows (fr31a parity line vs 181/65/+0.0636, nofilter_no, mlweather_fallback), frame-level Brier skill vs market, throughput; plus active_run = the evolving F2 run's status.json (state RUNNING|DONE|FAILED, phase, campaign, gen/n_gens, best_fit, n_phenotypes, evaluations, picks_done, controls_done), its completion.txt and the mp-vllm coexistence compare when present. Offline lab artefact on alcyone; never a trading signal.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         "handler": get_factory_status,

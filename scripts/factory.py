@@ -205,7 +205,7 @@ def cmd_freeze_frame(args: argparse.Namespace) -> int:
 
 def cmd_gen0(args: argparse.Namespace) -> int:
     from src.factory import report as report_mod
-    from src.factory.gen0 import run_gen0
+    from src.factory.gen0 import Gen0Error, refuse_overwrite, run_gen0
 
     cfg_path = Path(args.config) if args.config else DEFAULT_FAMILY_CONFIG
     if not cfg_path.exists():
@@ -217,6 +217,12 @@ def cmd_gen0(args: argparse.Namespace) -> int:
         _die("no frozen frames found; run `factory.py freeze-frame` first or pass --frames DIR")
     run_id = args.run_id or f"gen0_{_today()}"
     out_dir = Path(args.out) if args.out else REPORTS_ROOT / run_id
+    # Same-day rerun guard: never replace an existing summary.json / latest.json
+    # pointer for this run_id without --force (src.factory.gen0.refuse_overwrite).
+    try:
+        refuse_overwrite(out_dir, run_id, REPORTS_ROOT, force=bool(args.force))
+    except Gen0Error as e:
+        _die(str(e))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     frame_shas: Dict[str, Any] = {}
@@ -339,6 +345,8 @@ def build_parser() -> argparse.ArgumentParser:
     g0.add_argument("--workers", type=int, default=16)
     g0.add_argument("--bench", action="store_true", help="measure evals/s with a fork pool")
     g0.add_argument("--bench-n", type=int, default=2000)
+    g0.add_argument("--force", action="store_true",
+                    help="overwrite an existing reports/factory/<run_id>/summary.json and the latest.json pointer")
     g0.set_defaults(func=cmd_gen0)
 
     b = sub.add_parser("board", help="print board.md rendered from the latest summary + coverage")

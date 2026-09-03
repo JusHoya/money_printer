@@ -175,13 +175,26 @@ class Registry:
         grouping_unit: str = "target_date",
         family_cap: int = 6,
         notes: str = "",
+        allow_reopen: bool = False,
     ) -> Dict[str, Any]:
-        """Append the pre-run family line; refuses a second OPEN line per family."""
+        """Append the pre-run family line; refuses a second line per family.
+
+        An OPEN/PROPOSED/RATIFIED family is refused outright. A CLOSED or HALT
+        family is refused too (F1 red-team carry-over: re-registering a dead
+        name would let a rerun inherit its thresholds and hide the earlier
+        verdict) unless ``allow_reopen=True`` is passed on purpose -- a rerun
+        is a NEW family name (``.../v2``), never a second line.
+        """
         current = self.status(family)
         if current is not None and current not in TERMINAL:
             raise RegistryError(
                 f"family {family!r} already has an open registry line (status {current}); "
                 "a rerun is a NEW family name, never a second line"
+            )
+        if current in TERMINAL and not allow_reopen:
+            raise RegistryError(
+                f"family {family!r} is {current}; re-registering a closed family name is refused "
+                "(use a new family name such as .../v2, or allow_reopen=True on purpose)"
             )
         others = [f for f in self.families() if f != family]
         if len(others) + 1 > int(family_cap):

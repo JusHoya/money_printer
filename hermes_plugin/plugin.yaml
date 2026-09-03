@@ -1,5 +1,5 @@
 name: money-printer
-version: 2.2.0
+version: 2.3.0
 description: >
   Monitor and control the Money Printer Kalshi trading sandbox: portfolio
   snapshots, trade journal, rolling stats, win rates, logs, and bot
@@ -10,7 +10,9 @@ description: >
   tools send it as X-MP-Token (optional; GET tools never need it).
   The two mp_factory_* tools read the offline strategy-factory reports from
   MONEY_PRINTER_FACTORY_DIR (default $MONEY_PRINTER_DIR/reports/factory;
-  set it explicitly on alcyone).
+  set it explicitly on alcyone). mp_factory_status also returns the active
+  F2 run's status.json (latest.json active_run/status), completion.txt and
+  the mp-vllm coexistence compare from bench.json when they exist.
 provides_tools:
   - mp_factory_status
   - mp_factory_board

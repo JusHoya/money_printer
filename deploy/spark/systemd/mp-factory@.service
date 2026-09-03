@@ -1,26 +1,35 @@
 [Unit]
-Description=Money Printer strategy factory run %i (docs/factory/FACTORY_ARCHITECTURE.md section 7.1)
-# systemd --user template. Install:
+Description=Money Printer strategy factory run %i (docs/factory/FACTORY_ARCHITECTURE.md section 7.1; docs/factory/F2_RUNBOOK.md)
+# systemd --user template. Install ON alcyone with deploy/spark/install_factory_unit.sh, or by hand:
 #   mkdir -p ~/.config/systemd/user
 #   cp deploy/spark/systemd/mp-factory@.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user start mp-factory@<run_id>        # journalctl --user -u mp-factory@<run_id>
+#   systemctl --user start mp-factory@<run_id>        # journalctl --user -u mp-factory@<run_id> -f
 # User units need the user's docker group membership and, for runs that must
-# survive logout, `loginctl enable-linger $USER`.
+# survive logout / an SSH drop, `loginctl enable-linger jushoya` (once).
 # Restart=on-failure on a Type=oneshot unit needs systemd >= 244 (Ubuntu 24.04 ships 255).
+# %i is the run_id (data/factory/runs/%i, reports/factory/%i).
 StartLimitIntervalSec=1h
 StartLimitBurst=5
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/projects/money_printer
-# LAB_UID/LAB_GID are read by compose from deploy/spark/.env (bootstrap_alcyone.sh);
-# the shell values below win when set, so a fresh login still runs as the host uid.
 Environment=TZ=UTC
-ExecStartPre=/usr/bin/env bash -c 'cd %h/projects/money_printer && mkdir -p logs data/factory data/ladders_holdout data/ladders_2026-09'
-ExecStart=/usr/bin/env bash -c 'LAB_UID=$(id -u) LAB_GID=$(id -g) exec docker compose -f %h/projects/money_printer/deploy/spark/docker-compose.lab.yml run --rm factory python scripts/factory.py resume %i'
+Environment=MP_REPO_DIR=%h/projects/money_printer
+# The wrapper (deploy/spark/mp_factory_run.sh) does the whole cycle:
+#   factory.py run --run-id %i (auto-resume if data/factory/runs/%i/run.json exists)
+#   -> controls %i -> report %i -> bench merge -> mp_factory_notify.sh %i DONE|FAILED
+# and samples `free -g` every 60 s into reports/factory/%i/resources.log.
+# LAB_UID/LAB_GID are exported by the wrapper from id -u / id -g (no shell profile here).
+ExecStart=/usr/bin/env bash %h/projects/money_printer/deploy/spark/mp_factory_run.sh %i
+# A resumable failure (OOM, docker hiccup) restarts from the last SCORED generation;
+# the wrapper's FAILED completion.txt is posted by the monitor cron each time.
 Restart=on-failure
 RestartSec=30
 # The full cycle is < 4 h wall (section 7.2); the ceiling only stops a wedged run.
 TimeoutStartSec=6h
 Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mp-factory

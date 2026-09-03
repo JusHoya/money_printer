@@ -129,3 +129,10 @@ data/factory/
 reports/factory/*/gen_*
 reports/factory/*/controls/
 reports/factory/*/seed_date_pnl.json
+# F2 (PRD_STRATEGY_FACTORY FR-F2.6; F2_CONTRACT run layout): the host wrapper's
+# 60-s `free -g` tape and any frame copy a control run leaves beside a report
+# are regenerable/bulky. The F2 tracked surface per run stays: summary.json,
+# summary.md, oos_by_date.csv, finalists.json, board.md, status.json, run.json,
+# bench.json, completion.txt.
+reports/factory/*/resources.log
+reports/factory/*/frames/
