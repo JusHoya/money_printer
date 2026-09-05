@@ -216,8 +216,15 @@ weekly lab-vs-paper reconciliation.
    `TradeOutcome.target_date`; `gate_registration.json` template.
 7. `scripts/factory_paper_reconcile.py` (weekly; re-prices sandbox fills with the lab
    formula; lists REJECT codes for lab-admissible trades the sandbox skipped).
-8. `scripts/measure_fill_realism.py` on the 14-s maia tape: distribution of bid/ask drift
-   within the 20-s cadence at hourly decision points; recommends `adverse_fill`.
+8. `scripts/measure_fill_realism.py` on the maia tape: distribution of **taker ask**
+   drift between the hourly decision poll and the follow-up polls (20 s and 60 s
+   windows); recommends `adverse_fill`. **This REPLACED the script of the same name**
+   rather than extending it — 178 of F3's 198 deleted lines are that one file. The
+   2026-06-03 original assumed penny-floor fill probabilities and measured a PnL
+   haircut on closed `ML BTC 15m` trades; it is recoverable with
+   `git show 38d5fdd:scripts/measure_fill_realism.py`. The two answer different
+   questions, and **neither reports a resting-fill rate** — which is what the F5 maker
+   gate below was written to wait for.
 9. Tests: `tests/test_genome_strategy.py` (parity, tz-aware expiration, no `datetime.now`
    / `time.time` in module, works with source='replay' and live), `tests/test_factory_isolation.py`
    (import graph of `run_dashboard`/`run_web_dashboard` contains only `src.factory.genome`
@@ -225,9 +232,12 @@ weekly lab-vs-paper reconciliation.
 
 **Exit criteria (falsifiable).**
 - Replay parity: 0 discrepancies between `GenomeStrategy`'s emitted set and the offline
-  search-frame trade set over 1,656 markets for each of the six gen-0 seeds and the F2
-  family-#1 picks; `p_yes` from the live path equals the frame's within 1e-9 for the same
-  calibration payload.
+  search-frame trade set over 1,656 markets for each of the **ten taker genomes** — six
+  of the seven gen-0 seeds and the four F2 family-#1 picks; `p_yes` from the live path
+  equals the frame's within 1e-9 for the same calibration payload. The maker seed
+  `salvage_5f` is excluded and carries all 148 discrepancies the report contains, and
+  the run used the frame's walk-forward calibration rather than the bot's frozen one:
+  both registered, with the numbers, in `PRD_STRATEGY_FACTORY.md` section 8 / Phase F3.
 - `grep -nE 'datetime\.now|time\.time' src/strategies/genome_strategy.py
   src/factory/features.py src/factory/genome.py` returns nothing.
 - Every emitted signal has tz-aware `expiration_time` equal to the market's settlement-day
@@ -236,9 +246,12 @@ weekly lab-vs-paper reconciliation.
   one EXECUTED or REJECT line (FR-0.4); `limit_price` equals the logged quote + 0.01.
 - `tests/test_v3_risk_rules.py`, `tests/test_weather_lifecycle.py` green; `git diff` on
   `risk_manager.py`, `mixins.py` (except the CONTRA-3 log fix), `matching_engine.py`
-  (except `_load_state` backfill) is empty.
-- The sandbox image builds without lightgbm/scipy/pyarrow and `python -c "import
-  src.strategies.genome_strategy"` succeeds inside it.
+  (except the `_load_state` backfill **and the NO-side settlement hunk, 724d93c,
+  owner-ratified 2026-09-05**) is empty.
+- The sandbox image builds without lightgbm/scipy and `python -c "import
+  src.strategies.genome_strategy"` succeeds inside it. (Not pyarrow: the image pins
+  `pyarrow>=23.0` for the harvester's parquet writes — the genome path simply never
+  imports it. Registered in `PRD_STRATEGY_FACTORY.md` section 8 / Phase F3.)
 - `gate.py` on a synthetic journal of 60 settled trades over 50 target_dates returns the
   exact binomial p and the PASS/FAIL verdict matching a hand computation in the test.
 - `measure_fill_realism.py` report exists with the 90th-percentile drift; if it exceeds
@@ -301,8 +314,9 @@ statistics today, without changing the fitness definition.
 3. Mention: settled-markets harvester `scripts/harvest_settled.py`
    (`/markets?series_ticker&status=settled` → `data/<lane>_truth/settled_<SERIES>.jsonl`,
    ≥6 h); lane frame builder once ≥40 joined events exist (post-ratification tape).
-4. Maker mode gene gated on maia resting-fill evidence; sizing gene {5,10,20,50} with
-   per-size fee recomputation.
+4. Maker mode gene gated on maia resting-fill evidence — **which nothing currently
+   collects; see the gate below**; sizing gene {5,10,20,50} with per-size fee
+   recomputation.
 5. `coverage.py` weekly cron; new-epoch trigger when a lane gains ≥7 independent units.
 
 **Exit criteria (falsifiable).**
@@ -316,7 +330,22 @@ statistics today, without changing the fitness definition.
   lagged-feature test: shuffling later rows of a market cannot change earlier rows'
   features.
 - Any maker-mode genome in a search carries `fill_model=traversal_proxy` and is excluded
-  from PROPOSED until the fill-realism study reports resting-fill rates on ≥30 city-days.
+  from PROPOSED. **As of 2026-09-05 that exclusion is unconditional and its stated
+  unblocking condition is un-instrumented**, so this criterion is not falsifiable as it
+  stands. Two facts, both checkable: `scripts/factory.py` refuses `mode == maker`
+  outright at promotion, reading no evidence at all; and the "fill-realism study" this
+  criterion pointed at no longer measures resting fills, because F3 replaced that script
+  with a taker ask-drift measurement (F3 deliverable 8 above; the prior version, which
+  estimated a penny-floor PnL haircut and is not a resting-fill rate either, is at
+  `git show 38d5fdd:scripts/measure_fill_realism.py`). No tool in the repo answers the
+  question this gate asks, so the honest status is **maker mode is closed, not gated**.
+  Lifting it needs two new deliverables, and this criterion should be rewritten to name
+  them once they are scoped:
+  - a resting-fill collector — placing nothing, recording per KXHIGH* market and hour
+    whether a limit resting at the then-best bid/ask would have been traversed and how
+    long the book stayed there — over ≥30 city-days; and
+  - the `factory.py` refusal changed from unconditional to reading that evidence, so the
+    gate has an input to open on.
 
 ---
 
