@@ -375,15 +375,27 @@ R3 reserve), never a new seed on the same 69 dates.
 ### 2026-09-05 — Phase F3 shipped; the NO-side settlement sign bug (ratified engine change)
 
 `GenomeStrategy` (`src/strategies/genome_strategy.py`) now exists and reproduces the
-factory's offline trade set exactly: replay parity over the 1,656 archived ladder markets
-is 0 discrepancies for the six gen-0 seeds and the four family-#1 picks, with `p_yes`
-bit-identical. Because family #1 is CLOSED, only **shadow** specs exist
+factory's offline trade set: replay parity over the 1,656 archived ladder markets is
+0 discrepancies for the ten **taker** genomes under test — six of the seven gen-0 seeds
+plus the four family-#1 picks — with `p_yes` bit-identical. Two things that number does
+not say, both registered inline in `PRD_STRATEGY_FACTORY.md` section 8. The seventh seed
+`salvage_5f` is the maker diagnostic and carries all 148 discrepancies the report
+actually contains (`ok_strict` is **false**; the quoted 0 is `discrepancies_gating`) —
+a permanent exclusion, because maker executability folds fill flags no live path can know
+at decision time, which is also why `factory.py` refuses to promote a maker genome at all.
+And parity was measured with the *frame's* walk-forward calibration, not the
+`FrozenCalibrationProvider` that `weather_bot.py:280` builds: substituting the real
+provider gives **60 discrepancies** for the deployed genome. That is an F4 blocker, not
+an F3 one, but it is the reason the parity claim must not be repeated unqualified.
+
+Because family #1 is CLOSED, only **shadow** specs exist
 (`configs/factory/promoted/*.json`): the bot logs the EMIT line, then rejects
 `GENOME_SHADOW`; nothing reaches the exchange. `scripts/gate.py` (FR-5.2, exact
 Poisson-binomial over `target_date` units), `scripts/factory_paper_reconcile.py`,
-`scripts/measure_fill_realism.py` (two maia :00 boundaries: next-poll p90 drift 0.00,
-`adverse_fill` stays 0.01) and the accelerated dry run `scripts/genome_dry_run.py` are in.
-Runbook: `docs/factory/F3_RUNBOOK.md`; one-command maia deploy: `deploy/pi/deploy_f3_shadow.sh`.
+`scripts/measure_fill_realism.py` (the 02:00Z and 03:00Z maia boundaries: next-poll
+p90 drift 0.00, `adverse_fill` stays 0.01 — see the coverage gap below) and the
+accelerated dry run `scripts/genome_dry_run.py` are in. Runbook:
+`docs/factory/F3_RUNBOOK.md`; one-command maia deploy: `deploy/pi/deploy_f3_shadow.sh`.
 
 **The bug.** The dry run found that `SimulatedExchange._close_position` booked the YES-leg
 payoff (1.00/0.00) against NO entries at binary settlement, so **every settled NO paper
@@ -399,7 +411,53 @@ sandbox stopped and `.bak-n` backups), and `gate.py` refuses to run over unrepai
 Read the F0 paper record accordingly: positions did settle, but their booked NO-side PnL
 was wrong until the repair.
 
-Still open for F4: a daytime fill-realism collector (maia polls each market every ~35 s,
-so the 20-s window is empty), the registration commit time must be filled before the
-first paper trade, and a fresh deploy's first hour is the one missed-hour case the
-strategy cannot prove (the weekly reconcile flags it).
+**It emitted — the maia exit criterion is MET.** Genome `0c4b20502f2daf65`
+(`fr31a_taker`, mode=shadow) has run on maia since 2026-09-05T03:49:28Z and produced its
+first EMIT lines at **15:00:23Z and 15:00:33Z**: four signals on
+`KXHIGHLAX-26SEP06-T76`, `KXHIGHLAX-26SEP06-B78.5`, `KXHIGHLAX-26SEP06-B76.5` and
+`KXHIGHMIA-26SEP06-B88.5`, each followed by exactly one `GENOME_SHADOW` reject, each with
+`limit = quote + 0.01`, `verified_ok 4`, `emit_executed []` — nothing reached the
+exchange. At 18:00Z those same four markets returned `GENOME_ALREADY_TRADED`, so
+`entries_per_market: 1` survives a state reload. (The log-tail endpoint is capped at 500
+lines, an 8-16 minute window, so these lines are no longer retrievable from it.)
+
+**Correction to this entry as first written.** The fresh-deploy case does not cost "the
+first hour". A late first tick marks every *visible city-day* for that city missed, not
+one hour, and the bot walks all four cities — so it costs a whole market-day across
+NY/CHI/LAX/MIA, and the marks persist in `state_dict()` for `STATE_KEEP_DAYS = 7` days
+before `_prune` drops them. The weekly reconcile flags it; it is a lost day of tape, not
+a lost tick.
+
+**The open decision for F4: the genome's own signals size to zero at cold start.**
+`RiskManager.calculate_kelly_size` blends recent win rate with signal confidence as
+`p = 0.6 * wr + 0.4 * p_win`, and below `MIN_WIN_SAMPLES` closed trades in the window it
+uses the neutral prior `wr = 0.50` — so a cold-start `p` cannot exceed 0.70 no matter how
+confident the signal. `fr31a_taker` buys NO at a median quote of 0.83 (min 0.37, max
+0.94), and `f = p - q/b` is negative for any price above ~0.50 under that ceiling.
+Replaying the genome's 130 offline trades through the real sizing arithmetic,
+**117 of 130 (90 %) return 0 contracts with `KELLY_ZERO`** — identically at $100 (Seed),
+$1,000 (Early) and $10,000 (Scale), because what binds is the blend, not the balance.
+Shadow mode hides this: `GENOME_SHADOW` rejects before sizing is ever reached. Flip the
+genome to paper as-is and it books almost nothing, and the ~10 % it does book is the cheap
+tail of its distribution rather than the strategy — while FR-5.2 wants >= 50 settled
+`target_date`s. The choice is the owner's: seed the win-rate window from the offline
+record, give the genome its own sizing path, or accept a paper record that accrues at a
+tenth of the modelled rate. Nothing should be promoted to paper before it is made.
+
+Still open for F4, completely:
+1. **Calibration-provider transfer gap (blocker).** Parity proven under walk-forward, bot
+   runs frozen; 60 discrepancies and `p_yes` off by up to 0.336 when the real provider is
+   substituted. The promoted spec's calibration block is `{dir, sha256}` with no `kind`,
+   and the construction guard hashes only the directory, so the swap is undetectable.
+2. **Fill realism measures the wrong hours.** Both runs cover 02Z/03Z; the genome's 130
+   offline trades contain none there (15Z 34.6 %, 04Z 27.7 %, 16Z 16.2 %). The declared
+   20-s primary window has n=0 in both runs — maia's per-market cadence is p50 35 s — so
+   `adverse_fill = 0.01` is assumed, not measured. A daytime collector is owed.
+3. **The maker gate is orphaned.** F3 replaced `measure_fill_realism.py` wholesale, and
+   the new script reports no resting-fill rate of any kind, so the F5 condition that was
+   meant to unblock maker genomes is un-instrumented (see `FACTORY_ROADMAP.md` F5).
+4. **`gate_registration.json`** — the registration commit time must be filled in before
+   the first paper trade, or `gate.py` has no pre-registered window to score.
+5. **The fresh-deploy missed day** is the one missed-hour case the strategy cannot prove
+   from its own state; the weekly reconcile is what catches it.
+6. **The cold-start sizing ceiling above** — the decision that gates everything else.
