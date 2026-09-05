@@ -180,6 +180,13 @@ def _iso_or_none(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt is not None else None
 
 
+def _repo_relative(path: str) -> str:
+    try:
+        return os.path.relpath(os.path.abspath(path), REPO_ROOT).replace(os.sep, "/")
+    except ValueError:  # Windows: other drive
+        return path.replace(os.sep, "/")
+
+
 def market_ticker(symbol: str) -> Optional[str]:
     """``'KXHIGHNY-26SEP04-B84.5 (Market)'`` -> ticker; ``None`` for non-market rows."""
     s = str(symbol or "")
@@ -393,6 +400,11 @@ def render_markdown(rep: Mapping[str, Any], label: str) -> str:
         "",
         f"**{rep['statement']}**",
         "",
+        *(
+            [f"Note: {rep['inputs']['note']}", ""]
+            if rep.get("inputs", {}).get("note")
+            else []
+        ),
         f"- tape rows {t['rows']}, {rep['series_prefix']} market rows {t['market_rows_in_series']}, "
         f"markets {t['markets']}, first {t['first_ts']}, last {t['last_ts']}",
         f"- UTC hours with a decision point: {len(t['hours_utc'])} ({', '.join(h[11:16] for h in t['hours_utc'])})",
@@ -470,6 +482,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--tz", default="UTC", help="zone of naive tape timestamps (deploy/pi: UTC)")
     ap.add_argument("--date", default=None, help="report label (default: UTC date of the last row)")
     ap.add_argument("--out-dir", default=os.path.join(REPO_ROOT, "reports", "factory"))
+    ap.add_argument("--note", default=None, help="free-text provenance note recorded in the report")
     return ap
 
 
@@ -501,7 +514,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         max_decision_lag=args.max_decision_lag,
         tz=tz,
     )
-    rep["inputs"] = {"csv": paths, "url": args.url}
+    rep["inputs"] = {"csv": [_repo_relative(p) for p in paths], "url": args.url, "note": args.note}
     label = args.date or (
         rep["tape"]["last_ts"][:10] if rep["tape"]["last_ts"] else "undated"
     )
