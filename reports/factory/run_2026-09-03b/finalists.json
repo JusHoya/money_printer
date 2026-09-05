@@ -1,0 +1,110 @@
+{
+  "all69_pick": {
+    "describe": "direction_code == 0 & mode_code == 0 & window_code in bits(0b1) & band_code in bits(0b110010) & lead_bucket_code in bits(0b1) & quote >= 0.1 & quote <= 0.95 & sigma_f <= 4.0",
+    "genes": {
+      "bands": [
+        "1-2F",
+        "4-5F",
+        "5F+"
+      ],
+      "direction": "buy_yes",
+      "edge_distance_lo": "OFF",
+      "entries_per_market": 1,
+      "far_margin": "OFF",
+      "lead_buckets": [
+        "short"
+      ],
+      "mode": "taker",
+      "p_win_hi": "OFF",
+      "p_win_lo": "OFF",
+      "quote_hi": 0.95,
+      "quote_lo": 0.1,
+      "sigma_cap": 4.0,
+      "windows": [
+        ">=24h"
+      ]
+    },
+    "genome_id": "4b5acfa1055e4250",
+    "genome_json": "{\"encoding\":[0,0,1,50,0,0,0,3,11,5,1,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"1-2F\",\"4-5F\",\"5F+\"],\"direction\":\"buy_yes\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":0.95,\"quote_lo\":0.1,\"sigma_cap\":4.0,\"windows\":[\">=24h\"]},\"n_active_clauses\":6,\"name\":\"\",\"notes\":\"\",\"source\":\"gfs_mex\"}",
+    "in_sample": {
+      "boot_hi": 0.31784500473484856,
+      "boot_lo": 0.08689024621212121,
+      "bss_trades": 0.10282793238747578,
+      "cities": 4,
+      "city_days": 70,
+      "constraint_reason": null,
+      "dates": 44,
+      "fill_opportunity_rate": 0.22365988909426987,
+      "fit": 0.08689024621212121,
+      "gefs_twin_realized": 0.17285937499999998,
+      "label": "ALL69/in_sample",
+      "losing_dates": 18,
+      "markets": 71,
+      "mean_fee": 0.011204225352112672,
+      "mean_market_yes_ask": 0.25112676056338024,
+      "mean_model_p_yes": 0.40899126407992853,
+      "mean_price_paid": 0.26112676056338024,
+      "modelled_ev": 0.13666027816443557,
+      "n_active_clauses": 6,
+      "n_dates_in_mask": 69,
+      "passed": true,
+      "phenotype_hash": "6d315b31630746251e19e3f24e14d1d6d7cc9a2d",
+      "realized": 0.20213636363636364,
+      "realized_se": 0.06086117413697406,
+      "realized_yes_rate": 0.4507042253521127,
+      "t_stat": 3.321269536822209,
+      "trades": 71,
+      "win_rate": 0.4507042253521127,
+      "worst_date_pnl": -0.29400000000000004
+    },
+    "in_sample_boot_lo_picks_json": 0.08689024621212121,
+    "in_sample_matches_picks_json": true,
+    "n_active_clauses": 6,
+    "n_candidates": 20,
+    "phenotype_hash": "6d315b31630746251e19e3f24e14d1d6d7cc9a2d",
+    "phenotype_hash_search_full": "6d315b31630746251e19e3f24e14d1d6d7cc9a2d",
+    "picked_gen": 59,
+    "validation": null
+  },
+  "family": "weather/gfs_mex/taker/v1",
+  "finalists": [
+    {
+      "boot_lo": 0.08689024621212121,
+      "dates": 44,
+      "gen": 12,
+      "genome_id": "4b5acfa1055e4250",
+      "genome_json": "{\"encoding\":[0,0,1,50,0,0,0,3,11,5,1,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"1-2F\",\"4-5F\",\"5F+\"],\"direction\":\"buy_yes\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":0.95,\"quote_lo\":0.1,\"sigma_cap\":4.0,\"windows\":[\">=24h\"]},\"n_active_clauses\":6,\"name\":\"\",\"notes\":\"\",\"source\":\"gfs_mex\"}",
+      "n_active_clauses": 6,
+      "phenotype_hash": "6d315b31630746251e19e3f24e14d1d6d7cc9a2d",
+      "rank": 1,
+      "realized": 0.20213636363636364,
+      "trades": 71
+    },
+    {
+      "boot_lo": 0.08488101851851852,
+      "dates": 45,
+      "gen": 15,
+      "genome_id": "00c64263f60418ff",
+      "genome_json": "{\"encoding\":[0,0,41,50,0,0,0,3,0,5,5,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"1-2F\",\"4-5F\",\"5F+\"],\"direction\":\"buy_yes\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\",\"long\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":\"OFF\",\"quote_lo\":0.1,\"sigma_cap\":4.0,\"windows\":[\">=24h\",\"3-6h\",\"<1h\"]},\"n_active_clauses\":5,\"name\":\"\",\"notes\":\"\",\"source\":\"gfs_mex\"}",
+      "n_active_clauses": 5,
+      "phenotype_hash": "15adb2895208b65de87c6e4a62774871e8a3498f",
+      "rank": 2,
+      "realized": 0.19574444444444444,
+      "trades": 73
+    },
+    {
+      "boot_lo": 0.08372400678294574,
+      "dates": 43,
+      "gen": 38,
+      "genome_id": "4414857f99225f21",
+      "genome_json": "{\"encoding\":[0,0,41,18,0,0,0,3,0,5,5,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"1-2F\",\"4-5F\"],\"direction\":\"buy_yes\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\",\"long\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":\"OFF\",\"quote_lo\":0.1,\"sigma_cap\":4.0,\"windows\":[\">=24h\",\"3-6h\",\"<1h\"]},\"n_active_clauses\":5,\"name\":\"\",\"notes\":\"\",\"source\":\"gfs_mex\"}",
+      "n_active_clauses": 5,
+      "phenotype_hash": "f59b983390828b83ac2be1acb556dbad8fcc04ea",
+      "rank": 3,
+      "realized": 0.2002674418604651,
+      "trades": 71
+    }
+  ],
+  "picker": "max_boot_lo_ties_fewer_clauses (ALL69 ledger, distinct phenotypes)",
+  "run_id": "run_2026-09-03b"
+}

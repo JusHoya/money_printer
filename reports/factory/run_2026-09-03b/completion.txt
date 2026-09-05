@@ -1,0 +1,7 @@
+factory run run_2026-09-03b: DONE
+family: weather/gfs_mex/taker/v1
+verdict: {'conditions':_{'beats_every_control':_False,_'bss_trades_ge0':_True,_'cities_ge3':_True,_'headline_picks_present':_True,_'holm_p_lt_alpha':_False,_'p_rc_all69_lt_threshold':_False,_'paired_vs_nofilter_lo_gt0':_False,_'point_estimate_ge_4c':_False,_'pooled_boot_lo_gt0':_False,_'sign_survives_2c':_True,_'sign_survives_3c':_True,_'sign_survives_embargo2':_True},_'controls_complete':_True,_'failing':_['pooled_boot_lo_gt0',_'holm_p_lt_alpha',_'p_rc_all69_lt_threshold',_'beats_every_control',_'paired_vs_nofilter_lo_gt0',_'point_estimate_ge_4c'],_'planted_pass':_True,_'residual_real_rank':_21,_'rule':_'PROPOSED_iff_every_headline_campaign_(A/B/C/ALL69)_has_a_pick,_pooled_boot_lo_>_0,_Holm_p_<_alpha,_p_RC(ALL69)_<_threshold,_beats_every_control_pooled_validation,_and_every_section_5.8_gate;_otherwise_CLOSED_(section_6.3)',_'snapshot_pass':_False,_'status':_'CLOSED'}
+pooled OOS (33 validation dates): mean=+0.0308 se=+0.0604 t=+0.51 boot=[-0.0900,+0.1417] n_dates=29
+wall_s: 1217
+used_gib before/after/peak: 27/28/29
+report: reports/factory/run_2026-09-03b/summary.md

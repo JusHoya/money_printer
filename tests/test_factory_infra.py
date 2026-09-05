@@ -463,9 +463,9 @@ class TestCliAndDeploy:
             assert sub in r.stdout
 
     def test_stubs_exit_2(self):
-        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory.py"), "run", "--config", "x"],
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory.py"), "holdout"],
                            capture_output=True, text=True, cwd=str(REPO), timeout=120)
-        assert r.returncode == 2 and "not implemented in F1" in r.stderr
+        assert r.returncode == 2 and "not implemented" in r.stderr
 
     def test_compose_factory_services(self):
         doc = yaml.safe_load((REPO / "deploy" / "spark" / "docker-compose.lab.yml").read_text(encoding="utf-8"))
@@ -527,9 +527,25 @@ class TestCliAndDeploy:
         assert set(cfg["seeds"]) == {"fr31a_taker", "fr31b", "nofilter_no", "salvage_5f", "mlweather_fallback", "fr31a_gefs", "far_yes_taker"}
 
     def test_systemd_unit(self):
-        unit = (REPO / "deploy" / "spark" / "systemd" / "mp-factory@.service").read_text(encoding="utf-8")
-        assert "Type=oneshot" in unit and "Restart=on-failure" in unit and "StartLimitBurst=5" in unit
-        assert "docker-compose.lab.yml run --rm factory python scripts/factory.py resume %i" in unit
+        import configparser
+
+        unit_path = REPO / "deploy" / "spark" / "systemd" / "mp-factory@.service"
+        unit = unit_path.read_text(encoding="utf-8")
+        assert "\r" not in unit, "unit must be LF (systemd parser)"
+        cp = configparser.ConfigParser(strict=False, interpolation=None, allow_no_value=True)
+        cp.optionxform = str  # systemd keys are case-sensitive
+        cp.read_string(unit)
+        assert set(cp.sections()) >= {"Unit", "Service"}
+        u, s = cp["Unit"], cp["Service"]
+        assert "%i" in u["Description"] and u["StartLimitBurst"] == "5" and u["StartLimitIntervalSec"] == "1h"
+        assert s["Type"] == "oneshot" and s["Restart"] == "on-failure" and s["RestartSec"] == "30"
+        assert s["TimeoutStartSec"] == "6h" and s["Nice"] == "10"
+        assert s["StandardOutput"] == "journal" and s["StandardError"] == "journal"
+        assert s["WorkingDirectory"] == "%h/projects/money_printer"
+        assert s["ExecStart"].endswith("deploy/spark/mp_factory_run.sh %i")
+        assert "MP_REPO_DIR=%h/projects/money_printer" in unit and "TZ=UTC" in unit
+        # the old direct compose ExecStart is gone: the wrapper owns run -> controls -> report -> notify
+        assert "factory.py resume %i" not in unit
 
     def test_board_monitor_script_conventions(self):
         sh = (REPO / "hermes_plugin" / "scripts" / "mp_factory_board.sh").read_text(encoding="utf-8")
@@ -594,5 +610,507 @@ class TestHermesPlugin:
         # the numbers are the summary's numbers, not re-derived
         sj = json.loads((root / "gen0_2026-09-02" / "summary.json").read_text())
         assert st["brier_skill_vs_market"] == sj["brier_skill_vs_market"]
+        # the gen-0 report carries a status pointer, so active_run is the gen-0 status.json
+        assert st["active_run"]["run_id"] == "gen0_2026-09-02" and st["active_run"]["status"]["phase"] == "F1"
         b = json.loads(hp.get_factory_board({}))
         assert b["ok"] and b["board_md"].startswith("# Factory board") and b["coverage"]["lanes"]["weather"]["status"] == "READY"
+
+    def test_active_run_status(self, tmp_path, monkeypatch):
+        """F2: latest.json {active_run, status} -> the run's status.json, completion.txt, bench compare."""
+        hp = self._plugin()
+        assert hp.PLUGIN_VERSION == "2.3.0"
+        y = yaml.safe_load((REPO / "hermes_plugin" / "plugin.yaml").read_text(encoding="utf-8"))
+        assert str(y["version"]) == hp.PLUGIN_VERSION
+        root = tmp_path / "reports" / "factory"
+        run = root / "run_2026-09-04"
+        run.mkdir(parents=True)
+        status = {"run_id": "run_2026-09-04", "state": "RUNNING", "phase": "evolve", "campaign": "B", "gen": 17,
+                  "n_gens": 60, "best_fit": 0.0123, "n_phenotypes": 812, "evaluations": 6800,
+                  "picks_done": ["A"], "controls_done": {}}
+        (run / "status.json").write_text(json.dumps(status, sort_keys=True, indent=2) + "\n")
+        (run / "completion.txt").write_text("factory run run_2026-09-04: DONE\nverdict: CLOSED\n")
+        (run / "bench.json").write_text(json.dumps({"mp_vllm": {"compare": {"p50_change_pct": 3.1, "pass": True}},
+                                                    "factory": {"throughput": {"evals_per_s": 6100.0}}}))
+        monkeypatch.setenv("MONEY_PRINTER_FACTORY_DIR", str(root))
+        # 1. an active run with NO summary yet is ok:true with active_run populated
+        (root / "latest.json").write_text(json.dumps({"active_run": "run_2026-09-04", "status": "run_2026-09-04/status.json",
+                                                      "board": "gen0_2026-09-02/board.md"}))
+        st = json.loads(hp.get_factory_status({}))
+        assert st["ok"] and st["summary_path"] is None
+        ar = st["active_run"]
+        assert ar["run_id"] == "run_2026-09-04" and ar["state"] == "RUNNING" and ar["gen"] == 17 and ar["n_gens"] == 60
+        assert ar["campaign"] == "B" and ar["best_fit"] == 0.0123 and ar["evaluations"] == 6800 and ar["picks_done"] == ["A"]
+        assert ar["status"] == status
+        assert ar["completion"].startswith("factory run run_2026-09-04: DONE")
+        assert ar["bench"]["mp_vllm_compare"]["pass"] is True and ar["bench"]["factory_throughput"]["evals_per_s"] == 6100.0
+        # 2. alongside the gen-0 headline once a summary pointer exists
+        report_mod.write_gen0_report(_minimal_summary(), root / "gen0_2026-09-02")
+        latest = json.loads((root / "latest.json").read_text())
+        latest.update({"active_run": "run_2026-09-04", "status": "run_2026-09-04/status.json"})
+        (root / "latest.json").write_text(json.dumps(latest))
+        st = json.loads(hp.get_factory_status({}))
+        assert st["ok"] and st["run_id"] == "gen0_2026-09-02" and st["parity_fr31a"]["kernel"]["trades"] == 181
+        assert st["active_run"]["run_id"] == "run_2026-09-04" and st["active_run"]["state"] == "RUNNING"
+        # 3. a dangling status pointer is reported, not raised
+        latest["status"] = "run_missing/status.json"
+        (root / "latest.json").write_text(json.dumps(latest))
+        st = json.loads(hp.get_factory_status({}))
+        assert st["ok"] and st["active_run"]["error"] == "status.json missing"
+        # board semantics unchanged
+        b = json.loads(hp.get_factory_board({}))
+        assert b["ok"] and b["board_path"] == "gen0_2026-09-02/board.md"
+
+
+# ---------------------------------------------------------------------------
+# F2 INFRA: unit wrapper / notify / monitor scripts, coexistence bench,
+# registry CLOSED refusal, gen0 overwrite refusal, .gitignore
+# ---------------------------------------------------------------------------
+def _bash():
+    """A bash that runs the repo's POSIX scripts (Git Bash on Windows); None when absent."""
+    import shutil
+
+    cands = [os.environ.get("MP_TEST_BASH"), r"C:\Program Files\Git\bin\bash.exe",
+             r"C:\Program Files\Git\usr\bin\bash.exe", shutil.which("bash")]
+    for c in cands:
+        if c and os.path.exists(c):
+            try:
+                r = subprocess.run([c, "-c", "echo ok"], capture_output=True, text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if r.returncode == 0 and "ok" in r.stdout:
+                return c
+    return None
+
+
+def _sh(script: Path, *args: str, env=None, cwd=None, timeout=120):
+    bash = _bash()
+    if bash is None:
+        pytest.skip("no bash available")
+    full = dict(os.environ)
+    full.update(env or {})
+    return subprocess.run([bash, script.as_posix(), *args], capture_output=True, text=True,
+                          env=full, cwd=str(cwd or REPO), timeout=timeout)
+
+
+SCRIPTS = [
+    REPO / "deploy" / "spark" / "mp_factory_run.sh",
+    REPO / "deploy" / "spark" / "mp_factory_notify.sh",
+    REPO / "deploy" / "spark" / "install_factory_unit.sh",
+    REPO / "hermes_plugin" / "scripts" / "mp_factory_monitor.sh",
+]
+
+
+class TestF2Scripts:
+    def test_scripts_are_lf_and_pass_bash_n(self):
+        bash = _bash()
+        for p in SCRIPTS:
+            text = p.read_text(encoding="utf-8")
+            assert text.startswith("#!/usr/bin/env bash"), p
+            assert "\r" not in text, f"{p} must be LF"
+            if bash:
+                r = subprocess.run([bash, "-n", p.as_posix()], capture_output=True, text=True, timeout=60)
+                assert r.returncode == 0, f"{p}: {r.stderr}"
+        if bash is None:
+            pytest.skip("no bash: syntax not checked")
+
+    def test_wrapper_conventions(self):
+        sh = (REPO / "deploy" / "spark" / "mp_factory_run.sh").read_text(encoding="utf-8")
+        assert "set -euo pipefail" in sh
+        assert 'run --rm factory python scripts/factory.py "$@"' in sh
+        for step in ('run --run-id "$RUN_ID"', 'controls "$RUN_ID"', 'report "$RUN_ID"'):
+            assert step in sh, step
+        assert "--resume" in sh and 'run.json' in sh                      # auto-resume
+        assert "free -g" in sh and "resources.log" in sh and "SAMPLE_S" in sh
+        assert "mp_factory_notify.sh" in sh and '"$STATE"' in sh
+        assert "trap finish EXIT" in sh                                   # sampler stopped + notify on every exit
+        assert "factory_bench_coexist.py" in sh and "--throughput-from" in sh
+        assert "git add" not in sh                                        # the wrapper never commits
+
+    def test_notify_conventions(self):
+        sh = (REPO / "deploy" / "spark" / "mp_factory_notify.sh").read_text(encoding="utf-8")
+        assert "set -euo pipefail" in sh and "completion.txt" in sh
+        assert "discord:1491982736989093961" in sh
+        assert 'send --to "$TARGET" --subject "$subject" --file "$OUT"' in sh   # form verified on alcyone 2026-09-03
+        assert "exit 0" in sh                                                   # delivery failure is never fatal
+
+    def test_notify_writes_completion_without_hermes(self, tmp_path):
+        run = tmp_path / "reports" / "factory" / "run_x"
+        run.mkdir(parents=True)
+        (run / "summary.json").write_text(json.dumps({
+            "family": registry_mod.FAMILY_F1, "verdict": "CLOSED",
+            "pooled": {"mean": 0.0123, "se": 0.01, "t_stat": 1.23, "boot_lo": -0.0071, "boot_hi": 0.0317, "n_dates": 33},
+        }))
+        env = {"MP_REPO_DIR": tmp_path.as_posix(), "MP_FACTORY_NO_SEND": "1", "MP_FACTORY_WALL_S": "5400",
+               "MP_FACTORY_USED_GIB": "27/28/31"}
+        r = _sh(REPO / "deploy" / "spark" / "mp_factory_notify.sh", "run_x", "DONE", env=env)
+        assert r.returncode == 0, r.stderr
+        body = (run / "completion.txt").read_text(encoding="utf-8")
+        lines = body.splitlines()
+        assert lines[0] == "factory run run_x: DONE"
+        assert "family: weather/gfs_mex/taker/v1" in lines and "verdict: CLOSED" in lines
+        assert any(l.startswith("pooled OOS (33 validation dates): mean=+0.0123 se=+0.0100 t=+1.23 boot=[-0.0071,+0.0317] n_dates=33") for l in lines)
+        assert "wall_s: 5400" in lines and "used_gib before/after/peak: 27/28/31" in lines
+        assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", body)     # timestamp-free
+        # no summary at all: still written, with n/a fields; FAILED state accepted; bad args exit 2
+        r = _sh(REPO / "deploy" / "spark" / "mp_factory_notify.sh", "run_y", "FAILED", env=env)
+        assert r.returncode == 0, r.stderr
+        b2 = (tmp_path / "reports" / "factory" / "run_y" / "completion.txt").read_text()
+        assert b2.startswith("factory run run_y: FAILED") and "verdict: n/a" in b2
+        r = _sh(REPO / "deploy" / "spark" / "mp_factory_notify.sh", "run_y", "MAYBE", env=env)
+        assert r.returncode == 2
+        # a hermes binary that fails must not change the exit code
+        fake = tmp_path / "hermes"
+        fake.write_text("#!/usr/bin/env bash\nexit 1\n")
+        fake.chmod(0o755)
+        env2 = dict(env, HERMES_BIN=fake.as_posix())
+        env2.pop("MP_FACTORY_NO_SEND")
+        r = _sh(REPO / "deploy" / "spark" / "mp_factory_notify.sh", "run_x", "DONE", env=env2)
+        assert r.returncode == 0 and "hermes send failed" in r.stderr
+
+    def test_wrapper_dry_run_and_arg_validation(self, tmp_path):
+        run = REPO / "deploy" / "spark" / "mp_factory_run.sh"
+        r = _sh(run, "bad id!", env={"MP_FACTORY_DRY_RUN": "1"})
+        assert r.returncode == 2 and "bad run_id" in r.stderr
+        r = _sh(run, env={"MP_FACTORY_DRY_RUN": "1"})
+        assert r.returncode == 2 and "usage" in r.stderr
+        # dry run against a throwaway "checkout": plan printed, resume detected, docker never called
+        fake_repo = tmp_path / "repo"
+        (fake_repo / "deploy" / "spark").mkdir(parents=True)
+        (fake_repo / "deploy" / "spark" / "docker-compose.lab.yml").write_text("services: {}\n")
+        (fake_repo / "data" / "factory" / "runs" / "run_z").mkdir(parents=True)
+        (fake_repo / "data" / "factory" / "runs" / "run_z" / "run.json").write_text("{}")
+        subprocess.run(["git", "init", "-q", str(fake_repo)], check=True, timeout=60)
+        subprocess.run(["git", "-C", str(fake_repo), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+                        "--allow-empty", "-m", "init"], check=True, timeout=60)
+        r = _sh(run, "run_z", env={"MP_FACTORY_DRY_RUN": "1", "MP_REPO_DIR": fake_repo.as_posix()}, cwd=fake_repo)
+        assert r.returncode == 0, r.stderr + r.stdout
+        assert "resuming (--resume)" in r.stdout and "dry run: stopping before docker" in r.stdout
+        assert "plan: run --run-id run_z --resume" in r.stdout
+        assert (fake_repo / "reports" / "factory" / "run_z").is_dir()      # bind dirs created up front
+
+    def test_monitor_conventions(self):
+        sh = (REPO / "hermes_plugin" / "scripts" / "mp_factory_monitor.sh").read_text(encoding="utf-8")
+        assert "set -u" in sh and "sha256sum" in sh and "MONEY_PRINTER_FACTORY_DIR" in sh
+        assert "hermes cron create 10m --name mp-factory-monitor --no-agent" in sh
+        assert "--script mp_factory_monitor.sh --deliver discord:1491982736989093961" in sh
+        assert "--provider custom --model ykarout/Qwen3.5-9B-NVFP4" in sh
+        assert "mp_factory_monitor.sha" in sh and "completion.txt" in sh
+
+    def test_monitor_posts_only_on_change(self, tmp_path):
+        mon = REPO / "hermes_plugin" / "scripts" / "mp_factory_monitor.sh"
+        root = tmp_path / "reports" / "factory"
+        run = root / "run_x"
+        run.mkdir(parents=True)
+        env = {"MONEY_PRINTER_FACTORY_DIR": root.as_posix(), "MP_FACTORY_MONITOR_STATE": (tmp_path / "state" / "m.sha").as_posix()}
+        # no latest.json -> silent, exit 0
+        r = _sh(mon, env=env)
+        assert r.returncode == 0 and r.stdout == ""
+        # latest.json without a status pointer -> silent
+        (root / "latest.json").write_text(json.dumps({"board": "run_x/board.md"}))
+        r = _sh(mon, env=env)
+        assert r.returncode == 0 and r.stdout == ""
+        # active run -> one compact line
+        (root / "latest.json").write_text(json.dumps({"active_run": "run_x", "status": "run_x/status.json", "board": "run_x/board.md"}))
+        status = {"run_id": "run_x", "state": "RUNNING", "phase": "evolve", "campaign": "A", "gen": 3, "n_gens": 60,
+                  "best_fit": 0.0123, "n_phenotypes": 812, "evaluations": 1600, "picks_done": [], "controls_done": {}}
+        (run / "status.json").write_text(json.dumps(status, sort_keys=True, indent=2) + "\n")
+        r = _sh(mon, env=env)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.splitlines() == ["factory run_x RUNNING evolve A gen 3/60 best_fit +0.0123 phenotypes 812 evals 1600"]
+        # same bytes -> silent
+        r = _sh(mon, env=env)
+        assert r.stdout == ""
+        # progress -> posts again
+        status.update({"gen": 4, "evaluations": 2000, "best_fit": 0.02})
+        (run / "status.json").write_text(json.dumps(status, sort_keys=True, indent=2) + "\n")
+        r = _sh(mon, env=env)
+        assert r.stdout.splitlines() == ["factory run_x RUNNING evolve A gen 4/60 best_fit +0.0200 phenotypes 812 evals 2000"]
+        # completion.txt appears -> line + its content, once
+        (run / "completion.txt").write_text("factory run run_x: DONE\nverdict: CLOSED\n")
+        r = _sh(mon, env=env)
+        out = r.stdout.splitlines()
+        assert out[0].startswith("factory run_x RUNNING") and out[1:] == ["factory run run_x: DONE", "verdict: CLOSED"]
+        r = _sh(mon, env=env)
+        assert r.stdout == ""
+        # a later status change repeats the line but NOT the completion text
+        status.update({"state": "DONE", "phase": "report"})
+        (run / "status.json").write_text(json.dumps(status, sort_keys=True, indent=2) + "\n")
+        r = _sh(mon, env=env)
+        assert r.stdout.splitlines() == ["factory run_x DONE report A gen 4/60 best_fit +0.0200 phenotypes 812 evals 2000"]
+        # gen-0 style status.json (no state/gen keys) still yields a line with dashes
+        (run / "status.json").write_text(json.dumps({"run_id": "gen0_x", "kind": "gen0", "phase": "F1"}) + "\n")
+        r = _sh(mon, env=env)
+        assert r.stdout.splitlines() == ["factory gen0_x - F1 - gen -/- best_fit - phenotypes - evals -"]
+
+    def test_install_script_conventions(self):
+        sh = (REPO / "deploy" / "spark" / "install_factory_unit.sh").read_text(encoding="utf-8")
+        assert 'UNIT_DIR="$HOME/.config/systemd/user"' in sh and 'mkdir -p "$UNIT_DIR"' in sh
+        assert "systemctl --user daemon-reload" in sh and "enable-linger" in sh
+        assert "sudo install" not in sh and "sudo systemctl" not in sh    # user unit: no root (the usermod hint is text)
+        # nothing is enabled or started by the installer: only comments / echo hints mention start
+        code = [l for l in sh.splitlines() if l.strip() and not l.lstrip().startswith("#") and "echo" not in l]
+        assert not any("systemctl --user enable" in l or "systemctl --user start" in l for l in code)
+
+
+class _FakeVLLM:
+    """Minimal OpenAI-compatible streaming server: role chunk, N content chunks, usage, [DONE]."""
+
+    def __init__(self, n_tokens=6, gap_s=0.003, ttft_s=0.01):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+        import time as _time
+
+        outer = self
+        self.requests = []
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(n) or b"{}")
+                outer.requests.append((self.path, body))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Connection", "close")
+                self.end_headers()
+
+                def chunk(delta, **extra):
+                    d = {"id": "x", "object": "chat.completion.chunk", "model": body.get("model"),
+                         "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+                    d.update(extra)
+                    return ("data: " + json.dumps(d) + "\n\n").encode()
+
+                self.wfile.write(b": keep-alive\n\n")
+                self.wfile.write(chunk({"role": "assistant"}))
+                self.wfile.flush()
+                _time.sleep(ttft_s)
+                for i in range(n_tokens):
+                    self.wfile.write(chunk({"content": f"tok{i} "}))
+                    self.wfile.flush()
+                    _time.sleep(gap_s)
+                self.wfile.write(b'data: {"choices": [], "usage": {"completion_tokens": %d}}\n\n' % n_tokens)
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+
+            def log_message(self, *a):  # silence
+                pass
+
+        self.srv = HTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.srv.server_address[1]}/v1"
+        self.thread = threading.Thread(target=self.srv.serve_forever, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+@pytest.fixture
+def fake_vllm():
+    s = _FakeVLLM()
+    try:
+        yield s
+    finally:
+        s.close()
+
+
+def _bench_mod():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("factory_bench_coexist", REPO / "scripts" / "factory_bench_coexist.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestBenchCoexist:
+    def test_stdlib_only(self):
+        src = (REPO / "scripts" / "factory_bench_coexist.py").read_text(encoding="utf-8")
+        for bad in ("import numpy", "import requests", "import pandas", "from src."):
+            assert bad not in src, bad
+
+    def test_sse_parsing_with_fake_clock(self):
+        b = _bench_mod()
+        lines = [
+            b": keep-alive\n",
+            b"\n",
+            b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n',
+            b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n',
+            b"event: ping\n",
+            b'data: {"choices":[{"delta":{"content":"lo"}}]}\n',
+            b'data: {"choices":[{"delta":{}}]}\n',
+            b'data: not json\n',
+            b'data: {"choices":[{"delta":{"content":" world"}}]}\n',
+            b'data: {"choices":[],"usage":{"completion_tokens":3}}\n',
+            b"data: [DONE]\n",
+            b'data: {"choices":[{"delta":{"content":"IGNORED after DONE"}}]}\n',
+        ]
+        ticks = iter([1.0, 1.5, 2.5, 3.0])      # one per content chunk, then the end stamp
+        s = b.time_stream(lines, t_send=0.4, clock=lambda: next(ticks))
+        assert s["n_tokens"] == 3 and s["n_chars"] == len("Hello world")
+        assert s["ttft_ms"] == pytest.approx(600.0)
+        assert s["inter_token_ms"] == pytest.approx([500.0, 1000.0])
+        assert s["gen_ms"] == pytest.approx(1500.0) and s["total_ms"] == pytest.approx(2600.0)
+        assert s["usage"] == {"completion_tokens": 3}
+        assert list(b.sse_payloads([b"data: [DONE]", b'data: {"a":1}'])) == []
+
+    def test_percentile_and_aggregate(self):
+        b = _bench_mod()
+        assert b.percentile([], 50) is None and b.percentile([7.0], 90) == 7.0
+        assert b.percentile([1, 2, 3, 4], 50) == 2.5 and b.percentile([1, 2, 3, 4], 90) == pytest.approx(3.7)
+        samples = [
+            {"ttft_ms": 100.0, "inter_token_ms": [10.0, 20.0, 30.0], "n_tokens": 4, "gen_ms": 60.0, "total_ms": 200.0},
+            {"ttft_ms": 120.0, "inter_token_ms": [10.0, 10.0, 10.0], "n_tokens": 4, "gen_ms": 30.0, "total_ms": 180.0},
+        ]
+        a = b.aggregate(samples, label="idle", endpoint="e", model="m", max_tokens=8)
+        assert a["n"] == 2 and a["p50_inter_token_ms"] == 10.0 and a["p90_inter_token_ms"] == 25.0
+        assert a["p50_ttft_ms"] == 110.0 and a["tokens_per_s"] == pytest.approx(8 / 0.09, rel=1e-3)
+        assert a["prompt_sha256"] == __import__("hashlib").sha256(b.FIXED_PROMPT.encode()).hexdigest()
+        assert len(a["samples"]) == 2
+
+    def test_compare_math(self):
+        b = _bench_mod()
+        c = b.compare({"p50_inter_token_ms": 20.0, "p50_ttft_ms": 100.0}, {"p50_inter_token_ms": 22.0, "p50_ttft_ms": 110.0})
+        assert c["p50_change_pct"] == 10.0 and c["pass"] is True and c["ttft_change_pct"] == 10.0
+        c = b.compare({"p50_inter_token_ms": 20.0}, {"p50_inter_token_ms": 23.0})
+        assert c["p50_change_pct"] == 15.0 and c["pass"] is False
+        c = b.compare({"p50_inter_token_ms": 20.0}, {"p50_inter_token_ms": 17.0})
+        assert c["p50_change_pct"] == -15.0 and c["pass"] is False           # |change| counts both ways
+        c = b.compare({"p50_inter_token_ms": 20.0}, {"p50_inter_token_ms": 18.5}, threshold_pct=10)
+        assert c["p50_change_pct"] == -7.5 and c["pass"] is True
+        assert b.compare(None, {"p50_inter_token_ms": 1.0})["pass"] is None
+        assert b.compare({"p50_inter_token_ms": 0.0}, {"p50_inter_token_ms": 1.0})["pass"] is None
+
+    def test_throughput_from_tolerates_absence(self, tmp_path):
+        b = _bench_mod()
+        t = b.throughput_from([str(tmp_path / "missing.json")])
+        assert t["evaluations"] is None and t["evals_per_s"] is None and t["sources"][0]["found"] is False
+        st = tmp_path / "status.json"
+        st.write_text(json.dumps({"run_id": "r", "state": "DONE", "evaluations": 216000, "gen": 60, "n_gens": 60}))
+        t = b.throughput_from([str(st), str(tmp_path / "run.json")], wall_s=120.0)
+        assert t["evaluations"] == 216000 and t["wall_s"] == 120.0 and t["evals_per_s"] == 1800.0
+        assert t["state"] == "DONE" and t["run_id"] == "r"
+        rj = tmp_path / "run.json"
+        rj.write_text(json.dumps({"throughput": {"evaluations": 5, "wall_s": 2.0, "evals_per_s": 2.5}}))
+        t = b.throughput_from([str(rj)])
+        assert t["evaluations"] == 5 and t["evals_per_s"] == 2.5 and t["evals_per_s_reported"] == 2.5
+
+    def test_end_to_end_against_fake_server(self, tmp_path, fake_vllm):
+        b = _bench_mod()
+        out = tmp_path / "bench.json"
+        rc = b.main(["--label", "idle", "--n", "3", "--max-tokens", "8", "--warmup", "1",
+                     "--endpoint", fake_vllm.url, "--model", "fake/model", "--out", str(out)])
+        assert rc == 0
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        idle = doc["mp_vllm"]["idle"]
+        assert idle["n"] == 3 and idle["n_ok"] == 3 and idle["tokens_total"] == 18 and idle["gaps_total"] == 15
+        assert idle["p50_inter_token_ms"] > 0 and idle["p50_ttft_ms"] > 0 and idle["tokens_per_s"] > 0
+        assert idle["model"] == "fake/model" and idle["max_tokens"] == 8
+        # the request is the fixed prompt, streamed
+        path, body = fake_vllm.requests[-1]
+        assert path == "/v1/chat/completions" and body["stream"] is True and body["max_tokens"] == 8
+        assert body["messages"][-1]["content"] == b.FIXED_PROMPT
+        assert len(fake_vllm.requests) == 4                                  # 1 warmup + 3 samples
+        # JSON conventions: sorted, indent 2, trailing newline, no timestamp
+        text = out.read_text(encoding="utf-8")
+        assert text == json.dumps(json.loads(text), sort_keys=True, indent=2) + "\n"
+        assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", text)
+        # running + throughput + extras merge without clobbering idle
+        rc = b.main(["--label", "running", "--n", "2", "--max-tokens", "8", "--warmup", "0",
+                     "--endpoint", fake_vllm.url, "--model", "fake/model", "--out", str(out),
+                     "--wall-s", "100", "--extra", "used_gib_peak=31", "--extra", "state=DONE"])
+        assert rc == 0
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        assert doc["mp_vllm"]["idle"] == idle and doc["mp_vllm"]["running"]["n"] == 2
+        assert doc["factory"]["host"] == {"used_gib_peak": 31, "state": "DONE"}
+        assert doc["factory"]["throughput"]["wall_s"] == 100.0
+        # compare writes the verdict; pass is a bool either way (same server, so it should pass)
+        rc = b.main(["--compare", "--out", str(out)])
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        cmp_ = doc["mp_vllm"]["compare"]
+        assert isinstance(cmp_["p50_change_pct"], float) and isinstance(cmp_["pass"], bool)
+        assert rc == (0 if cmp_["pass"] else 3)
+        # a crafted failing pair returns 3
+        doc["mp_vllm"]["running"]["p50_inter_token_ms"] = doc["mp_vllm"]["idle"]["p50_inter_token_ms"] * 1.5
+        out.write_text(json.dumps(doc))
+        assert b.main(["--compare", "--out", str(out)]) == 3
+
+    def test_cli_help_and_nothing_to_do(self, tmp_path):
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory_bench_coexist.py"), "--help"],
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0 and "--label" in r.stdout and "--compare" in r.stdout and "--throughput-from" in r.stdout
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory_bench_coexist.py"), "--out", str(tmp_path / "b.json")],
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 2 and "nothing to do" in r.stderr
+
+
+class TestF1RedTeamCarryOvers:
+    def test_registry_refuses_closed_or_halt_family(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MP_GIT_REV", "deadbeef")
+        R = registry_mod.Registry(tmp_path / "registry.jsonl")
+        kw = dict(lane="weather", source="gfs_mex", mode="taker", gene_spec_version=1, config_sha256="abc",
+                  budget={"population": 400}, picker="max_boot_lo_ties_fewer_clauses", thresholds={"min_trades": 40},
+                  cutoff="2026-07-25")
+        R.write_family_line("lane/a/b/v1", **kw)
+        R.transition("lane/a/b/v1", "CLOSED", evidence={"reason": "holm"})
+        with pytest.raises(registry_mod.RegistryError, match="CLOSED"):
+            R.write_family_line("lane/a/b/v1", **kw)
+        R.write_family_line("lane/a/b/v2", **kw)                             # a new name is the sanctioned path
+        R.transition("lane/a/b/v2", "HALT")
+        with pytest.raises(registry_mod.RegistryError, match="HALT"):
+            R.write_family_line("lane/a/b/v2", **kw)
+        line = R.write_family_line("lane/a/b/v2", allow_reopen=True, **kw)  # explicit, on purpose
+        assert line["status"] == "OPEN"
+        assert len((tmp_path / "registry.jsonl").read_text().splitlines()) == 5
+
+    def test_gen0_refuses_same_day_overwrite(self, tmp_path):
+        from src.factory import gen0
+
+        root = tmp_path / "reports" / "factory"
+        out = root / "gen0_2026-09-04"
+        gen0.refuse_overwrite(out, "gen0_2026-09-04", root)                   # nothing there: fine
+        out.mkdir(parents=True)
+        (out / "summary.json").write_text("{}")
+        with pytest.raises(gen0.Gen0Error, match="summary.json"):
+            gen0.refuse_overwrite(out, "gen0_2026-09-04", root)
+        gen0.refuse_overwrite(out, "gen0_2026-09-04", root, force=True)       # --force
+        (out / "summary.json").unlink()
+        (root / "latest.json").write_text(json.dumps({"run_id": "gen0_2026-09-04", "summary": "gen0_2026-09-04/summary.json"}))
+        with pytest.raises(gen0.Gen0Error, match="latest.json"):
+            gen0.refuse_overwrite(out, "gen0_2026-09-04", root)
+        gen0.refuse_overwrite(out, "gen0_2026-09-05", root)                   # a new run id is fine
+        gen0.refuse_overwrite(out, "gen0_2026-09-04", root, force=True)
+
+    def test_gen0_cli_has_force(self):
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory.py"), "gen0", "--help"],
+                           capture_output=True, text=True, cwd=str(REPO), timeout=120)
+        assert r.returncode == 0 and "--force" in r.stdout
+        src = (REPO / "scripts" / "factory.py").read_text(encoding="utf-8")
+        assert "refuse_overwrite(out_dir, run_id, REPORTS_ROOT, force=bool(args.force))" in src
+
+    def test_family_yaml_still_hashes_to_registry_line(self):
+        """The byte-frozen YAML must hash (CRLF-normalised, as load_family_config does) to the registry's config_sha256."""
+        from src.factory.fees import sha256_file
+
+        sha = sha256_file(str(REPO / "configs" / "factory" / "weather_gfs_mex_taker_v1.yaml"))
+        lines = [json.loads(l) for l in (REPO / "reports" / "factory" / "registry.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        fam = [l for l in lines if l.get("event") == "family" and l.get("family") == registry_mod.FAMILY_F1]
+        assert fam and fam[0]["config_sha256"] == sha
+        assert sha.startswith("e679631add8e")
+
+    def test_gitignore_f2_layout(self):
+        gi = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
+        for entry in ("data/factory/", "reports/factory/*/gen_*", "reports/factory/*/controls/",
+                      "reports/factory/*/resources.log", "reports/factory/*/frames/"):
+            assert entry in gi, entry
+        ignored = ["reports/factory/run_x/controls/summary.json", "reports/factory/run_x/gen_001.parquet",
+                   "reports/factory/run_x/resources.log", "reports/factory/run_x/frames/search/a.parquet",
+                   "data/factory/runs/run_x/run.json", "data/factory/frames/x/parity/a.parquet"]
+        tracked = [f"reports/factory/run_x/{f}" for f in ("summary.json", "summary.md", "oos_by_date.csv", "finalists.json",
+                                                            "board.md", "status.json", "run.json", "bench.json", "completion.txt")]
+        tracked += ["reports/factory/latest.json", "reports/factory/registry.jsonl", "reports/factory/coverage.json"]
+        r = subprocess.run(["git", "check-ignore", "--no-index", *ignored, *tracked], capture_output=True, text=True,
+                           cwd=str(REPO), timeout=60)
+        hits = set(r.stdout.split())
+        assert hits == set(ignored), f"ignored mismatch: extra={hits - set(ignored)} missing={set(ignored) - hits}"
