@@ -1,0 +1,218 @@
+{
+  "adverse_drift": {
+    "20s": {
+      "both_sides": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      },
+      "no_ask": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      },
+      "yes_ask": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      }
+    },
+    "60s": {
+      "both_sides": {
+        "max": 0.010000000000000009,
+        "mean": 0.00016666666666666682,
+        "n": 60,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "share_gt_0": 0.016666666666666666,
+        "share_gt_1c": 0.0
+      },
+      "no_ask": {
+        "max": 0.0,
+        "mean": 0.0,
+        "n": 30,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "share_gt_0": 0.0,
+        "share_gt_1c": 0.0
+      },
+      "yes_ask": {
+        "max": 0.010000000000000009,
+        "mean": 0.00033333333333333365,
+        "n": 30,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "share_gt_0": 0.03333333333333333,
+        "share_gt_1c": 0.0
+      }
+    }
+  },
+  "counts": {
+    "decision_polls": 36,
+    "gap_no_decision_poll": 12,
+    "gap_no_followup_20s_no": 36,
+    "gap_no_followup_20s_yes": 36,
+    "gap_no_followup_60s_no": 6,
+    "gap_no_followup_60s_yes": 6,
+    "gap_no_next_poll_60s_no": 6,
+    "gap_no_next_poll_60s_yes": 6,
+    "market_hours": 48
+  },
+  "decision_lag_s": {
+    "max": 14.370157,
+    "mean": 8.085756833333333,
+    "n": 36,
+    "p50": 9.617981,
+    "p90": 14.356369,
+    "p95": 14.365305,
+    "share_gt_0": 1.0,
+    "share_gt_1c": 1.0
+  },
+  "definitions": {
+    "adverse_drift": "max(0, max_t(ask_t - ask_0)) over follow-up polls with ts_dec < ts <= ts_dec + W",
+    "decision_points": "only hour boundaries H with a poll strictly before H on the tape (a fragment starting after :00 cannot say which poll was first)",
+    "decision_poll": "first MARKET_DATA row with ts >= H (top of UTC hour), lag <= max_decision_lag",
+    "next_poll_adverse": "max(0, ask_next - ask_0) to the first follow-up poll carrying the quote within max(windows); at the tape's ~40 s per-market cadence this is an UPPER bound on the 20 s drift",
+    "percentile": "nearest-rank: sorted[ceil(q*n) - 1]",
+    "recommendation": "adverse_fill = max(0.01, ceil_to_cent(max(p90 adverse drift at the primary window, p90 next-poll adverse drift)))",
+    "signed_next": "ask_next - ask_0 for the first follow-up poll carrying the quote"
+  },
+  "examples_gt_1c": [],
+  "inputs": {
+    "csv": [
+      "data/fill_realism/maia_tape_2026-09-05.csv"
+    ],
+    "note": null,
+    "url": null
+  },
+  "max_decision_lag_s": 60.0,
+  "next_poll_adverse_drift": {
+    "both_sides": {
+      "max": 0.010000000000000009,
+      "mean": 0.00016666666666666682,
+      "n": 60,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.016666666666666666,
+      "share_gt_1c": 0.0
+    },
+    "gap_s": {
+      "max": 57.123673,
+      "mean": 33.850921,
+      "n": 60,
+      "p50": 30.819692,
+      "p90": 57.111817,
+      "p95": 57.118991,
+      "share_gt_0": 1.0,
+      "share_gt_1c": 1.0
+    },
+    "no_ask": {
+      "max": 0.0,
+      "mean": 0.0,
+      "n": 30,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
+    },
+    "yes_ask": {
+      "max": 0.010000000000000009,
+      "mean": 0.00033333333333333365,
+      "n": 30,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.03333333333333333,
+      "share_gt_1c": 0.0
+    }
+  },
+  "p90_basis": "next poll",
+  "p90_exceeds_1c": false,
+  "p90_next_poll": 0.0,
+  "p90_primary": 0.0,
+  "p90_primary_window": null,
+  "per_city": {
+    "KXHIGHCHI": {
+      "decision_polls": 12,
+      "samples_60s": 24
+    },
+    "KXHIGHLAX": {
+      "decision_polls": 12,
+      "samples_60s": 12
+    },
+    "KXHIGHNY": {
+      "decision_polls": 12,
+      "samples_60s": 24
+    }
+  },
+  "primary_window_s": 20.0,
+  "recommended_adverse_fill": 0.01,
+  "series_prefix": "KXHIGH",
+  "signed_next_poll": {
+    "no_ask": {
+      "max": 0.0,
+      "mean": -0.00033333333333333365,
+      "n": 30,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
+    },
+    "yes_ask": {
+      "max": 0.010000000000000009,
+      "mean": 0.00033333333333333365,
+      "n": 30,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.03333333333333333,
+      "share_gt_1c": 0.0
+    }
+  },
+  "statement": "p90 adverse drift = 0.0000 (basis: next poll; 20 s window p90=None n=0, next-poll p90=0.0 n=60) does not exceed 1c: adverse_fill=0.01 stands",
+  "tape": {
+    "first_ts": "2026-09-05T02:21:12.504930+00:00",
+    "hours_utc": [
+      "2026-09-05T03:00:00+00:00"
+    ],
+    "last_ts": "2026-09-05T03:10:03.715138+00:00",
+    "market_rows_in_series": 2918,
+    "markets": 48,
+    "poll_gap_s": {
+      "max": 339.626903,
+      "mean": 48.293503779790946,
+      "n": 2870,
+      "p50": 39.805029,
+      "p90": 80.145419,
+      "p95": 123.050405,
+      "share_gt_0": 1.0,
+      "share_gt_1c": 1.0
+    },
+    "rows": 15950
+  },
+  "windows_s": [
+    20.0,
+    60.0
+  ]
+}
