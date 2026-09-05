@@ -495,6 +495,7 @@ class TestBotShadowMode:
         # the bot reaches every city on every tick, so an hour with no record at all
         # is a stalled loop rather than an archive gap (F3 review, missed-hour hole a)
         assert genome.tick_driven is True
+        assert bot.genome_refused_reason is None
         # the bot's clock is the ET wall clock (frozen here); the strategy never reads one itself
         assert genome.clock().utcoffset() == timedelta(hours=-4) and genome.clock() == TS
         # swap the live MOS-backed provider for the replay table (no network in tests)
@@ -565,12 +566,38 @@ class TestBotShadowMode:
             lim = float(re.search(r"limit=(\S+)", line).group(1))
             assert lim == pytest.approx(q + 0.01, abs=1e-9)
 
+    @pytest.mark.parametrize("bad_mode", ["shadw", "off", "1", 'shadow"', "SHADOW ONLY"])
+    def test_an_unrecognised_mode_is_refused_instead_of_read_as_not_shadow(
+        self, tmp_path, monkeypatch, mp_caplog, bad_mode
+    ):
+        # F3 review: the env value was only ever COMPARED against "paper"/"shadow",
+        # so a typo matched neither, tripped no refusal and was silently treated as
+        # not-shadow -- on a PAPER spec a typo'd tightening request would fail OPEN.
+        bot, _ = self._bot(tmp_path, monkeypatch, mode_env=bad_mode, spec_mode="paper",
+                           registry_status="PROPOSED", expect_genome=False)
+        assert bot.genome_shadow is False
+        assert any("GenomeStrategy REFUSED" in m and repr(bad_mode.strip().lower()) in m
+                   for m in mp_caplog.messages), mp_caplog.messages
+        assert bot.genome_refused_reason and "GENOME_STRATEGY_MODE" in bot.genome_refused_reason
+
+    def test_an_empty_mode_still_means_use_the_specs_own_mode(self, tmp_path, monkeypatch):
+        bot, genome = self._bot(tmp_path, monkeypatch, mode_env="", spec_mode="shadow")
+        assert bot.genome_shadow is True and genome is not None
+
+    def test_every_refusal_records_a_reason_for_the_dashboard(self, tmp_path, monkeypatch):
+        bot, _ = self._bot(tmp_path, monkeypatch, mode_env="paper", spec_mode="shadow", expect_genome=False)
+        assert bot.genome_refused_reason and "mode=shadow" in bot.genome_refused_reason
+        bot, _ = self._bot(tmp_path, monkeypatch, mode_env="paper", spec_mode="paper",
+                           registry_status="PROPOSED", expect_genome=False)
+        assert bot.genome_refused_reason and "registry status is CLOSED" in bot.genome_refused_reason
+
     def test_bot_without_env_has_no_genome_and_v2_path_unchanged(self, monkeypatch):
         from src.bots.weather_bot import WeatherBot
 
         monkeypatch.delenv("GENOME_STRATEGY_ID", raising=False)
         bot = WeatherBot()
         assert list(bot.strategies) == ["weather"] and bot.genome_shadow is False
+        assert bot.genome_refused_reason is None  # nothing was asked for, nothing refused
 
 
 # ---------------------------------------------------------------------------
@@ -878,3 +905,74 @@ class TestClosureIsVisible:
         got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
         assert got and all(f"cause={gs.CAUSE_OBSERVATION_FAILURE}" in m for m in got)
         assert strat.stats.get("poll_failures", 0) == 0  # not every miss is a poll failure
+
+
+class TestStateDurability:
+    def test_a_corrupt_state_file_starts_fresh_loudly_instead_of_refusing(self, tmp_path, mp_caplog):
+        # a Pi power cut leaves exactly this; json.load raised, WeatherBot's broad
+        # except logged one ERROR and ran V2 only for the rest of the deploy.
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        state_file = tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)
+        strat.analyze(_obs())
+        assert state_file.exists()
+        state_file.write_text("", encoding="utf-8")  # zero bytes
+        mp_caplog.clear()
+        fresh, _ = _strategy(clock=Clock(TS + timedelta(hours=1)), state_dir=str(tmp_path))  # must not raise
+        assert fresh.state_recovered_from and "JSONDecodeError" in fresh.state_recovered_from
+        assert any("STARTING FROM AN EMPTY STATE" in m for m in mp_caplog.messages)
+        assert fresh.stats.get("state_resets") == 1
+        assert fresh.analyze(_obs(ts=TS + timedelta(hours=1)))  # and it trades on
+
+    def test_a_truncated_state_file_is_recovered_the_same_way(self, tmp_path):
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        strat.analyze(_obs())
+        state_file = tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)
+        state_file.write_text(state_file.read_text(encoding="utf-8")[:40], encoding="utf-8")
+        fresh, _ = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        assert fresh.state_recovered_from is not None and fresh._traded == set()
+
+    def test_a_state_file_for_another_genome_is_still_a_refusal(self, tmp_path):
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        strat.analyze(_obs())
+        other = G.SEEDS["fr31a_taker"]
+        path = tmp_path / gs.STATE_FILE_FMT.format(genome_id=_spec(other).genome_id)
+        path.write_text(json.dumps({"genome_id": spec.genome_id}), encoding="utf-8")
+        with pytest.raises(GenomeSpecMismatch):
+            _strategy(genome=other, clock=Clock(TS), state_dir=str(tmp_path))
+
+    def test_the_state_file_is_fsynced_before_the_rename(self, tmp_path, monkeypatch):
+        # os.replace is atomic but not durable: without the fsync the rename can
+        # land with the file's blocks unwritten -- the zero-byte file above.
+        calls = []
+        real_fsync, real_replace = os.fsync, os.replace
+        monkeypatch.setattr(os, "fsync", lambda fd: calls.append(("fsync", fd)) or real_fsync(fd))
+        monkeypatch.setattr(os, "replace", lambda a, b: calls.append(("replace", a)) or real_replace(a, b))
+        strat, _ = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        strat.analyze(_obs())
+        kinds = [k for k, _ in calls]
+        assert "fsync" in kinds and "replace" in kinds
+        assert kinds.index("fsync") < kinds.index("replace")
+
+    def test_the_closure_cause_survives_a_restart(self, tmp_path, mp_caplog):
+        strat, spec = _strategy(clock=Clock(TS + timedelta(hours=1, minutes=3)), state_dir=str(tmp_path))
+        strat.analyze(_obs(ts=TS + timedelta(hours=1)))  # late first tick
+        strat.clock.now = TS + timedelta(hours=2)
+        strat.analyze(_obs(ts=TS + timedelta(hours=2)))  # closes the day
+        doc = json.loads((tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)).read_text(encoding="utf-8"))
+        assert doc["missed_days"] == [["NY", "2026-07-20"]]
+        assert doc["missed_causes"]["NY|2026-07-20"] == [int(TS.timestamp()) + 3600, gs.CAUSE_LATE_TICK]
+        mp_caplog.clear()
+        fresh, _ = _strategy(clock=Clock(TS + timedelta(hours=3)), state_dir=str(tmp_path))
+        assert fresh.analyze(_obs(ts=TS + timedelta(hours=3))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert got and all(f"cause={gs.CAUSE_LATE_TICK}" in m for m in got)
+
+    def test_a_state_file_written_before_missed_causes_still_loads(self, tmp_path, mp_caplog):
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        path = tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)
+        path.write_text(json.dumps({"genome_id": spec.genome_id, "last_hour_epoch": {},
+                                    "missed_days": [["NY", "2026-07-20"]], "traded": []}), encoding="utf-8")
+        fresh, _ = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        assert fresh.analyze(_obs()) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert got and all("cause=unknown" in m for m in got)

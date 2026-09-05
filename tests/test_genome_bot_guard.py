@@ -56,6 +56,8 @@ def test_missing_calibration_dir_refuses_the_genome_instead_of_crashing(
     assert "weather" in bot.strategies
     assert bot.genome_spec is None
     assert any("GenomeStrategy REFUSED" in r.getMessage() for r in mp_caplog.records)
+    # the refusal is otherwise invisible over HTTP: /api/status reads this attribute
+    assert bot.genome_refused_reason and "GenomeSpecMismatch" in bot.genome_refused_reason
 
 
 def test_bot_without_genome_env_is_unchanged(monkeypatch):
@@ -65,6 +67,7 @@ def test_bot_without_genome_env_is_unchanged(monkeypatch):
     bot = WeatherBot()
     assert list(bot.strategies) == ["weather"] or "weather" in bot.strategies
     assert bot.genome_spec is None
+    assert bot.genome_refused_reason is None
 
 
 def test_every_city_skip_tells_the_genome_which_kind_of_skip_it_was(monkeypatch):

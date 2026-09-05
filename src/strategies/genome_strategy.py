@@ -80,10 +80,14 @@ claim that snapshot if it evaluated EVERY earlier hour of the market-day:
 * **Persisted state.** ``state_dir`` (the bot passes the forecast-cache dir)
   holds ``genome_state_<genome_id>.json`` -- last evaluated hour per city,
   missed city-days and why, traded (target_date, symbol) -- rewritten
-  atomically on every change and loaded at construction, so a restarted
-  strategy neither re-emits an already-traded market nor claims a first hour it
-  did not see. ``state_dir=None`` keeps the state in memory (replay parity,
-  tests).
+  atomically (write, ``fsync``, ``os.replace``) on every change and loaded at
+  construction, so a restarted strategy neither re-emits an already-traded
+  market nor claims a first hour it did not see. A state file that cannot be
+  read (the zero-byte file a power cut leaves) is NOT fatal: the strategy
+  starts from an empty state -- conservative, since an empty state claims no
+  predecessor hour -- and says so at ERROR (``state_recovered_from``). A state
+  file belonging to a DIFFERENT genome is still a refusal. ``state_dir=None``
+  keeps the state in memory (replay parity, tests).
 
 What the live poll cannot reproduce (documented, not fudged):
 
@@ -354,6 +358,8 @@ class GenomeStrategy(Strategy):
         #: for (the live bot), so an hour with NO record is a stalled loop, not an archive
         #: gap. Replay drivers visit only the hours the archive holds and leave this False.
         self.tick_driven = bool(tick_driven)
+        #: set when ``_load_state`` had to start from an empty state (corrupt/unreadable file)
+        self.state_recovered_from: Optional[str] = None
         self._warned_context_keys: Set[str] = set()
         self.state_path: Optional[str] = (
             os.path.join(state_dir, STATE_FILE_FMT.format(genome_id=spec.genome_id)) if state_dir else None
@@ -925,8 +931,28 @@ class GenomeStrategy(Strategy):
     def _load_state(self) -> None:
         if not self.state_path or not os.path.exists(self.state_path):
             return
-        with open(self.state_path, "r", encoding="utf-8") as fh:
-            doc = json.load(fh)
+        try:
+            with open(self.state_path, "r", encoding="utf-8") as fh:
+                doc = json.load(fh)
+            if not isinstance(doc, dict):
+                raise ValueError(f"top level is {type(doc).__name__}, not an object")
+        except (OSError, ValueError) as exc:
+            # A truncated or zero-byte state file is what a Pi power cut leaves
+            # behind. Starting from an empty state is CONSERVATIVE -- the first
+            # evaluated hour then has no predecessor, so nothing is claimed as a
+            # first masked snapshot the process did not see -- but it IS a
+            # decision, so it is logged loudly here instead of being raised into
+            # WeatherBot.__init__'s broad except, where one ERROR line refused the
+            # whole genome for the rest of the deploy.
+            self.state_recovered_from = f"{type(exc).__name__}: {exc}"
+            self.stats["state_resets"] = self.stats.get("state_resets", 0) + 1
+            logger.error(
+                "[%s] state file %s is unreadable (%s); STARTING FROM AN EMPTY STATE: markets "
+                "traded before this restart can be emitted once more and this process has no "
+                "predecessor hour for the missed-hour rule",
+                self._name, self.state_path, self.state_recovered_from,
+            )
+            return
         if doc.get("genome_id") != self.spec.genome_id:
             raise GenomeSpecMismatch(
                 f"state file {self.state_path} belongs to genome {doc.get('genome_id')!r}, not {self.spec.genome_id!r}"
@@ -947,11 +973,27 @@ class GenomeStrategy(Strategy):
     def _save_state(self) -> None:
         if not self.state_path:
             return
-        os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
+        directory = os.path.dirname(self.state_path) or "."
+        os.makedirs(directory, exist_ok=True)
         tmp = f"{self.state_path}.tmp.{os.getpid()}"
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps(self.state_dict(), sort_keys=True, indent=2) + "\n")
+            # os.replace alone is atomic but not durable: on a Pi power cut the
+            # rename can land with the file's blocks still unwritten, which is
+            # exactly the zero-byte state file _load_state now has to recover from.
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, self.state_path)
+        try:  # persist the directory entry too (POSIX; a directory cannot be opened on Windows)
+            dir_fd = os.open(directory, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        except OSError:  # not supported on this filesystem
+            pass
+        finally:
+            os.close(dir_fd)
 
     def record_missed_hour(self, city: str, cause: str = CAUSE_POLL_FAILURE) -> None:
         """The bot HAD ``city``'s hour at ``clock()`` and lost it -- record it and say so.

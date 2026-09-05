@@ -55,6 +55,13 @@ ML_WEATHER_ENABLED = False
 GENOME_STRATEGY_ID_ENV = "GENOME_STRATEGY_ID"
 GENOME_STRATEGY_MODE_ENV = "GENOME_STRATEGY_MODE"
 GENOME_SHADOW = "shadow"
+GENOME_PAPER = "paper"
+# The ONLY values GENOME_STRATEGY_MODE may take (empty = "use the spec's mode").
+# Anything else -- "shadw", "off", "1", a trailing quote from a hand-edited .env --
+# used to match neither branch below and was silently treated as not-shadow: on a
+# PAPER spec a typo'd request to TIGHTEN to shadow would have failed OPEN and let
+# the genome paper-trade. An unrecognised value is now refused outright.
+GENOME_MODES = (GENOME_PAPER, GENOME_SHADOW)
 GENOME_STRATEGY_KEY = "genome"
 
 # Waterfall key -> the strategy_name that appears in EMIT/EXECUTED/REJECT lines.
@@ -187,6 +194,11 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.strategies = {}
         self.genome_shadow = False
         self.genome_spec = None
+        #: Why the genome is NOT running, or None when there is nothing to report
+        #: (no GENOME_STRATEGY_ID, or it loaded). Read by the web dashboard's
+        #: /api/status -- a refusal is otherwise only one ERROR line in the log,
+        #: invisible over HTTP within ~10 minutes. Public, stable name.
+        self.genome_refused_reason = None
         genome_id = (os.getenv(GENOME_STRATEGY_ID_ENV) or "").strip()
         if genome_id:
             # A genome that cannot be built must never take the sandbox down
@@ -203,6 +215,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 )
                 self.genome_shadow = False
                 self.genome_spec = None
+                self.genome_refused_reason = f"{genome_id}: {type(exc).__name__}: {exc}"
                 genome_strategy = None
             if genome_strategy is not None:  # None = refused (logged); the bot runs V2 only
                 self.strategies[GENOME_STRATEGY_KEY] = genome_strategy
@@ -236,6 +249,20 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
         spec = load_promoted(genome_id)
         env_mode = (os.getenv(GENOME_STRATEGY_MODE_ENV) or "").strip().lower()
+        if env_mode and env_mode not in GENOME_MODES:
+            reason = (
+                f"{GENOME_STRATEGY_MODE_ENV}={env_mode!r} is not one of {GENOME_MODES} "
+                f"(spec {spec.genome_id} is mode={spec.mode})"
+            )
+            logger.error(
+                "[Weather] GenomeStrategy REFUSED: %s -- an unrecognised mode must never be read as "
+                "'not shadow'; fix the value or unset it to use the spec's own mode; running V2 only",
+                reason,
+            )
+            self.genome_shadow = False
+            self.genome_spec = None
+            self.genome_refused_reason = reason
+            return None
         # Authorization (F3 red team, 2026-09-05): the env can only TIGHTEN a
         # spec to shadow; asking for paper on a shadow spec is a configuration
         # error and the genome is refused outright rather than silently run in
@@ -243,7 +270,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # status (reports/factory/registry.jsonl, tracked, shipped in the image)
         # to be PROPOSED/RATIFIED and to match the spec -- spec_hash is
         # integrity, not authorization.
-        if env_mode == "paper" and spec.mode == GENOME_SHADOW:
+        if env_mode == GENOME_PAPER and spec.mode == GENOME_SHADOW:
             logger.error(
                 "[Weather] GenomeStrategy REFUSED: GENOME_STRATEGY_MODE=paper but spec %s is mode=shadow "
                 "(promote it with --mode paper once the family is PROPOSED); running V2 only",
@@ -251,6 +278,9 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             )
             self.genome_shadow = False
             self.genome_spec = None
+            self.genome_refused_reason = (
+                f"{GENOME_STRATEGY_MODE_ENV}=paper but spec {spec.genome_id} is mode=shadow"
+            )
             return None
         self.genome_shadow = spec.mode == GENOME_SHADOW or env_mode == GENOME_SHADOW
         if not self.genome_shadow:
@@ -262,6 +292,10 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     spec.family, registry_status, spec.registry_status,
                 )
                 self.genome_spec = None
+                self.genome_refused_reason = (
+                    f"paper mode refused: family {spec.family} registry status is {registry_status}, "
+                    f"spec says {spec.registry_status}"
+                )
                 return None
         self.genome_spec = spec
         # Repo-relative spec paths resolve against the checkout, never the CWD.
