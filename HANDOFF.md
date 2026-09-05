@@ -323,3 +323,51 @@ should be read: `_ladder_for_city` tracks D-1/D/D+1 on the **ET** calendar
 50-contract post-cap quantity that `record_execution` books (FR-F0.4, log-only;
 earlier logs overstate qty/cost by up to 75/50). Tests:
 `tests/test_weather_bot_f0.py`.
+
+### 2026-09-04 — Phase F2 verdict: strategy-factory family #1 is CLOSED (PRD_STRATEGY_FACTORY FR-F2)
+
+The evolutionary factory ran end to end on alcyone (`reports/factory/run_2026-09-03b/`,
+registry `weather/gfs_mex/taker/v1` → **CLOSED**). Four anchored campaigns plus the
+blocked-5-fold diagnostic, 216,000 genome evaluations, then 41 control replicates
+(20 snapshot-efficient nulls, 20 residual-shuffle nulls, 1 planted +5c edge); 1,217 s
+wall on the 16-core cpuset with `mp-vllm` serving (p50 token latency +6 %), peak 29 GiB.
+Two independent cycles are byte-identical (8,002 ledger/control files), and the same
+picks and numbers reproduce on the Windows dev box under numpy 1.25 vs alcyone's 2.5.
+
+**The number.** Pooled 33-date out-of-sample PnL of the pre-registered picker:
+**+0.031 per contract, bootstrap CI [−0.090, +0.142], t = 0.51**, 29 dates traded,
+49 trades. The picks sit on the 40-trade floor with in-sample lower bounds of
+0.08–0.19 and validate at −0.037 / +0.035 / +0.109 (A/B/C): the search memorises
+date luck, exactly the failure the settlement-true fitness was built to expose.
+Feasible-set Reality Check p = 0.41 / 0.77 / 0.72 / 0.89, Holm p = 0.29, paired
+difference vs the no-filter baseline −0.053 (lower bound −0.19). Failing promotion
+conditions: pooled lower bound, Holm, p_RC(ALL69), beats-every-control, paired
+baseline, and the 4c floor. The machine's own controls behaved: 0 of 20 snapshot
+nulls reported a positive lower bound and the planted edge was recovered (capture
+1.09, rule-level 1.07 — only 2 of the picks' 48 validation trades were flipped, so the
+pick-level ratio is one-trade granular).
+
+**What this does and does not say.** It says the 13-gene rule space over the frozen
+May–July frame contains no shape that beats fees after correction — the outcome the
+PRD named as the honest expectation (risk #1). It does not say the harvested data is
+worthless: the blocked-5-fold diagnostic (in-sample blocks postdate the held block,
+never headline) pooled +0.049 [+0.012, +0.085] over 64 dates, which is the usual
+look-ahead-flavoured optimism and the reason walk-forward is the headline. **Nothing
+from the factory is cleared for paper trading, let alone capital**; maia keeps running
+V2 only.
+
+**Two method amendments, ratified 2026-09-04** (`docs/factory/FACTORY_ARCHITECTURE.md`
+§6.4a): (1) `p_RC` is computed on the picker's feasible competition set (≥ 0.6·D dates,
+≥ 40 trades) with the all-phenotype value reported beside it — over every ledger row the
+max is owned by 2–5-date kills and every pick scores p ≈ 1, zero power; (2) the
+residual-shuffle null is **not** a no-edge null: late-window quotes already embed the
+observed high, so under shuffled truth the market is confidently wrong and null picks
+earn +0.60–0.88/contract (real pick rank 21/20 by construction). It stays a diagnostic;
+a pre-observation-window or joint-shift variant is an F4 design item. Two F2 exit
+criteria therefore fail on the letter (snapshot KS p = 0.001 because null p_RC skew
+*high* — 3.3 % below 0.10; residual rank) and are accepted as documented.
+
+Read next: `PRD_STRATEGY_FACTORY.md` §8 (F3 starts on the six seeds plus these CLOSED
+picks for replay parity); `docs/factory/F2_RUNBOOK.md` for re-summarising a run
+without re-searching; a second family needs new data (sealed holdout-B, the Sept–Oct
+R3 reserve), never a new seed on the same 69 dates.

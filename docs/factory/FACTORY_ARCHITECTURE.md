@@ -387,7 +387,9 @@ every entry window. It is replaced by:
 
 Two findings of the Phase-F2 red team on family #1 (`run_2026-09-03`, 400×60, 41 control
 replicates) change how §6.3 and §6.4 are *computed*; the promotion conditions themselves are
-unchanged. The owner ratifies or overrides both at F4 (`docs/REVIVAL_2026_09.md`).
+unchanged. **RATIFIED by the owner on 2026-09-04** (both amendments, as written below); the
+residual null remains a diagnostic until a pre-observation-window or joint-shift variant
+is designed, and that design is an F4 deliverable.
 
 **§6.3 — `p_RC` is computed on the feasible competition set (headline), and on every
 phenotype (secondary).** The ledger holds every phenotype ever evaluated, including the
