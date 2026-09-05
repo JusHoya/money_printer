@@ -31,7 +31,7 @@ ENV_FILE="$STATE_ROOT/.env"
 SPEC="$ROOT/configs/factory/promoted/$GENOME_ID.json"
 
 log() { printf '[deploy_f3_shadow %s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
-die() { log "ERROR: $*"; exit 1; }
+die() { log "ERROR: $*"; restore; exit 1; }   # restore() is defined below; resolved at call time
 
 cd "$ROOT"
 log "1/6 git pull --ff-only"
@@ -58,7 +58,7 @@ upsert GENOME_STRATEGY_MODE shadow
 sudo grep -E '^GENOME_' "$ENV_FILE"
 
 SERVICE=sandbox   # the runtime service (container mp-sandbox); NOT config --services|head, which lists autoheal first
-STOPPED=0
+STOPPED=0   # set to 1 while the sandbox is stopped for the repair
 restore() { if [[ "$STOPPED" == 1 ]]; then log "restoring the sandbox after a failure"; "${COMPOSE[@]}" up -d || true; fi; }
 trap restore ERR
 if [[ "$DO_REPAIR" == 1 ]]; then
@@ -87,7 +87,7 @@ fi
 
 log "5/6 docker compose up -d --build"
 "${COMPOSE[@]}" up -d --build
-STOPPED=0
+STOPPED=0   # set to 1 while the sandbox is stopped for the repair
 sleep 8
 curl -sf http://localhost:8050/healthz || die "healthz failed"
 echo
