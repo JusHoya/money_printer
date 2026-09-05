@@ -1,0 +1,184 @@
+{
+  "adverse_drift": {
+    "20s": {
+      "both_sides": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      },
+      "no_ask": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      },
+      "yes_ask": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      }
+    },
+    "60s": {
+      "both_sides": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      },
+      "no_ask": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      },
+      "yes_ask": {
+        "max": null,
+        "mean": null,
+        "n": 0,
+        "p50": null,
+        "p90": null,
+        "p95": null,
+        "share_gt_0": null,
+        "share_gt_1c": null
+      }
+    }
+  },
+  "counts": {},
+  "decision_lag_s": {
+    "max": null,
+    "mean": null,
+    "n": 0,
+    "p50": null,
+    "p90": null,
+    "p95": null,
+    "share_gt_0": null,
+    "share_gt_1c": null
+  },
+  "definitions": {
+    "adverse_drift": "max(0, max_t(ask_t - ask_0)) over follow-up polls with ts_dec < ts <= ts_dec + W",
+    "decision_points": "only hour boundaries H with a poll strictly before H on the tape (a fragment starting after :00 cannot say which poll was first)",
+    "decision_poll": "first MARKET_DATA row with ts >= H (top of UTC hour), lag <= max_decision_lag",
+    "next_poll_adverse": "max(0, ask_next - ask_0) to the first follow-up poll carrying the quote within max(windows); at the tape's ~40 s per-market cadence this is an UPPER bound on the 20 s drift",
+    "percentile": "nearest-rank: sorted[ceil(q*n) - 1]",
+    "recommendation": "adverse_fill = max(0.01, ceil_to_cent(max(p90 adverse drift at the primary window, p90 next-poll adverse drift)))",
+    "signed_next": "ask_next - ask_0 for the first follow-up poll carrying the quote"
+  },
+  "examples_gt_1c": [],
+  "inputs": {
+    "csv": [
+      "reports/factory/fill_realism_2026-09-05_tape.csv"
+    ],
+    "note": "Tape collected 2026-09-05 01:21:10Z..01:43:13Z by polling http://maia.local:8050/api/logs/data every 3 s (the route returns only the LAST 100 rows, ~15 s of tape, with no history parameters -- src/web/server.py get_data_log -- so no earlier polls were fetchable). The collected span contains NO :00 UTC boundary with a poll on both sides, so there are zero decision points and no p90; the study must be re-run on a tape spanning at least one :00 UTC boundary (collector: --url ... --collect-seconds 7200 --cache ...). Per-market poll gap on this tape: p50 37 s, p90 68 s, max 210 s (the bot rotates cities; the 14-s figure is the whole-tape cadence, not the per-market one).",
+    "url": null
+  },
+  "max_decision_lag_s": 60.0,
+  "next_poll_adverse_drift": {
+    "both_sides": {
+      "max": null,
+      "mean": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p95": null,
+      "share_gt_0": null,
+      "share_gt_1c": null
+    },
+    "gap_s": null,
+    "no_ask": {
+      "max": null,
+      "mean": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p95": null,
+      "share_gt_0": null,
+      "share_gt_1c": null
+    },
+    "yes_ask": {
+      "max": null,
+      "mean": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p95": null,
+      "share_gt_0": null,
+      "share_gt_1c": null
+    }
+  },
+  "p90_basis": null,
+  "p90_exceeds_1c": null,
+  "p90_next_poll": null,
+  "p90_primary": null,
+  "p90_primary_window": null,
+  "per_city": {},
+  "primary_window_s": 20.0,
+  "recommended_adverse_fill": null,
+  "series_prefix": "KXHIGH",
+  "signed_next_poll": {
+    "no_ask": {
+      "max": null,
+      "mean": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p95": null,
+      "share_gt_0": null,
+      "share_gt_1c": null
+    },
+    "yes_ask": {
+      "max": null,
+      "mean": null,
+      "n": 0,
+      "p50": null,
+      "p90": null,
+      "p95": null,
+      "share_gt_0": null,
+      "share_gt_1c": null
+    }
+  },
+  "statement": "no drift samples (no covered :00 boundary with a follow-up poll); no recommendation can be made",
+  "tape": {
+    "first_ts": "2026-09-05T01:21:10.557105+00:00",
+    "hours_utc": [],
+    "last_ts": "2026-09-05T01:43:13.502683+00:00",
+    "market_rows_in_series": 1436,
+    "markets": 48,
+    "poll_gap_s": {
+      "max": 209.972212,
+      "mean": 42.3597533832853,
+      "n": 1388,
+      "p50": 37.323907,
+      "p90": 67.874991,
+      "p95": 98.241991,
+      "share_gt_0": 1.0,
+      "share_gt_1c": 1.0
+    },
+    "rows": 7810
+  },
+  "windows_s": [
+    20.0,
+    60.0
+  ]
+}
