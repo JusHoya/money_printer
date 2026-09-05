@@ -574,6 +574,19 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                             obs_data.extra[field] = k_extra.get(field)
                 except Exception as e:
                     logger.error(f"[Weather] Market Fetch Fail ({kalshi_ticker}): {e}")
+                    # F3 missed-hour rule: a poll the sandbox could not make is
+                    # a lost chance for the genome (the archive keeps the
+                    # candle), never a silent gap it may fill at a later hour.
+                    genome = self.strategies.get(GENOME_STRATEGY_KEY)
+                    if genome is not None and hasattr(genome, "record_poll_failure"):
+                        try:
+                            from src.core.weather_settlement import city_key_for_station
+
+                            genome.record_poll_failure(
+                                city_key_for_station(station) or kalshi_ticker.replace("KXHIGH", "")
+                            )
+                        except Exception as e2:  # never let bookkeeping break the tick
+                            logger.warning(f"[Weather] genome poll-failure bookkeeping failed: {e2}")
 
             # Use real Kalshi market price for position valuation (not raw temp)
             kalshi_market_price = None

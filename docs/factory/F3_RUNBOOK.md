@@ -281,7 +281,12 @@ live process does when it misses an hour. `GenomeStrategy` now enforces:
   strategy that skipped an hour cannot claim it. A market evaluated at every
   earlier hour (mask false / book empty / not executable) and masked-executable
   now emits normally -- that is the offline rule. Newly tracked city-days that
-  first appear during a gap are marked missed too (conservative).
+  first appear during a gap are marked missed too (conservative). A late tick
+  counts as a lost chance even when it is the very first tick after a fresh
+  deploy (no persisted state). A Kalshi poll that FAILS on the Pi (`Market
+  Fetch Fail`) is reported to the strategy (`record_poll_failure`) and counts
+  as a miss like a late tick -- only an hour with no candle in the archive is a
+  data gap.
 - **Persisted state.** `<MP_FORECAST_CACHE_DIR>/genome_state_<genome_id>.json`
   holds last hour per city, missed city-days and traded (target_date, symbol);
   rewritten atomically on every change, loaded at construction. A restarted

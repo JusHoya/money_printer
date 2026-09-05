@@ -42,7 +42,7 @@ import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 LINE_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (?P<level>\w+)\s*\| (?P<msg>.*)$")
 EMIT_RE = re.compile(
@@ -64,8 +64,13 @@ EXIT_PASS, EXIT_FAIL, EXIT_NO_EMIT = 0, 1, 3
 # every risk-manager reason are outcomes.
 STRATEGY_SKIP_CODES = {
     "GENOME_NO_VINTAGE", "GENOME_MASK_FALSE", "GENOME_ALREADY_TRADED", "GENOME_FEE_MISMATCH",
-    "GENOME_NOT_TOP_OF_HOUR", "GENOME_NOT_EXECUTABLE", "GENOME_SIGMA_CAP",
+    "GENOME_NOT_TOP_OF_HOUR", "GENOME_NOT_EXECUTABLE", "GENOME_SIGMA_CAP", "GENOME_MISSED_HOUR",
 }
+# A paper-mode EMIT (mixin line, no quote=) is paired with the strategy's own
+# ``[Genome] DECIDE ... quote= limit=`` line for the same symbol within this
+# many seconds (nearest wins); the two are logged microseconds apart but may
+# straddle a second boundary.
+DECIDE_PAIR_TOLERANCE_S = 2.0
 
 
 def _get(url: str, timeout: float) -> bytes:
@@ -178,16 +183,20 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
             lm = LIMIT_RE.search(msg0)
             limit = float(lm.group("limit")) if lm else None
         if quote is None:
+            best: Optional[Tuple[float, str]] = None
             for e in entries:
-                if e["ts"] != em["ts"]:
+                delta = abs((e["ts"] - em["ts"]).total_seconds())
+                if delta > DECIDE_PAIR_TOLERANCE_S:
                     continue
                 sm = SYMBOL_IN_LINE_RE.search(e["msg"])
                 qm = QUOTE_RE.search(e["msg"])
                 if qm and sm and sm.group("symbol") == em["symbol"]:
-                    quote = float(qm.group("quote"))
-                    lm = LIMIT_RE.search(e["msg"])
-                    limit = float(lm.group("limit")) if lm else None
-                    break
+                    if best is None or delta < best[0]:
+                        best = (delta, e["msg"])
+            if best is not None:
+                quote = float(QUOTE_RE.search(best[1]).group("quote"))
+                lm = LIMIT_RE.search(best[1])
+                limit = float(lm.group("limit")) if lm else None
         if quote is None and data_rows:
             quote = _quote_from_data_log(data_rows, em["symbol"], em["contract"], em["ts"])
         if quote is None:

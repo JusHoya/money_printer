@@ -388,3 +388,55 @@ def test_cadence_checker_refuses_a_log_without_verifiable_quotes(tmp_path):
                    encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT, timeout=120)
     assert proc.returncode == 1 and json.loads(proc.stdout)["verdict"] == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# F3 final red team (2026-09-05): residual defects 3-4 in the cadence checker.
+# ---------------------------------------------------------------------------
+_EMIT = ("2026-07-19 15:00:00 | INFO | [Signal] EMIT strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+         "side=buy contract=NO price=0.86 qty=20 confidence=0.870 quote=0.85 limit=0.86\n")
+_SHADOW = ("2026-07-19 15:00:00 | INFO | [Risk] REJECT strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+           "reason=GENOME_SHADOW side=buy contract=NO price=0.86 quantity=20 quote=0.85 limit=0.86\n")
+
+
+def _check(log_path):
+    cmd = [sys.executable, os.path.join(ROOT, "scripts", "check_maia_emit_cadence.py"),
+           "--file", str(log_path), "--no-data-log", "--strategy", "Genome", "--json"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT, timeout=120)
+    return proc.returncode, json.loads(proc.stdout), proc.stderr
+
+
+def test_missed_hour_rejects_are_strategy_skips_not_outcomes(tmp_path):
+    log = tmp_path / "missed.log"
+    lines = [_EMIT, _SHADOW]
+    for sym in ("KXHIGHNY-26JUL20-B79.5", "KXHIGHNY-26JUL20-B81.5"):
+        for hour in ("16", "17"):
+            lines.append(f"2026-07-19 {hour}:00:00 | INFO | [Risk] REJECT strategy=Genome 0c4b2050 symbol={sym} "
+                         f"reason=GENOME_MISSED_HOUR target_date=2026-07-20\n")
+    log.write_text("".join(lines), encoding="utf-8")
+    rc, verdict, _ = _check(log)
+    assert rc == 0, verdict
+    assert verdict["verdict"] == "PASS"
+    assert verdict["outcome_codes"] == {"GENOME_SHADOW": 1}
+    assert verdict["strategy_skip_codes"].get("GENOME_MISSED_HOUR") == 4
+
+
+def test_paper_decide_line_one_second_off_still_verifies(tmp_path):
+    log = tmp_path / "paper.log"
+    log.write_text(
+        "2026-07-19 15:00:01 | INFO | [Genome] DECIDE strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+        "contract=NO quote=0.8500 limit=0.8600 p_win=0.8700 target_date=2026-07-20\n"
+        "2026-07-19 15:00:00 | INFO | [Signal] EMIT strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+        "side=buy contract=NO price=0.86 qty=20 confidence=0.870\n"
+        "2026-07-19 15:00:00 | INFO | [Risk] REJECT strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+        "reason=KELLY_ZERO side=buy contract=NO price=0.86 quantity=20\n",
+        encoding="utf-8",
+    )
+    rc, verdict, _ = _check(log)
+    assert rc == 0, verdict
+    assert verdict["limit_price"]["verified_ok"] == 1 and verdict["limit_price"]["unverified"] == []
+    # beyond the +-2 s pairing window the EMIT is unverified again
+    log.write_text(log.read_text(encoding="utf-8").replace("15:00:01 | INFO | [Genome]", "15:00:03 | INFO | [Genome]"),
+                   encoding="utf-8")
+    rc, verdict, err = _check(log)
+    assert rc == 3 and verdict["verdict"] == "UNVERIFIED"

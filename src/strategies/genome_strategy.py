@@ -46,10 +46,15 @@ claim that snapshot if it evaluated EVERY earlier hour of the market-day:
   parity exact. A market evaluated at every earlier hour (mask false, book
   empty, not executable ...) and masked-executable now emits normally -- that
   IS the offline rule. Newly tracked city-days that first appear at a missed
-  hour are marked missed too (conservative). The first evaluation after a
-  FRESH deploy (no persisted state) has no predecessor and never marks a
-  miss: the first visible city-days may emit later than the offline first
-  hour; ``factory_paper_reconcile.py`` flags those.
+  hour are marked missed too (conservative). A late tick counts as a lost
+  chance even on a FRESH deploy (no persisted state, no predecessor hour); a
+  fresh deploy whose first tick is on time has no predecessor and never marks
+  a miss, so its first visible city-days may emit later than the offline
+  first hour -- ``factory_paper_reconcile.py`` flags those. A data gap the
+  BOT could observe -- its Kalshi poll for the city failed at an hour
+  (``record_poll_failure``) -- is a miss like a late tick: the market existed
+  and the archive keeps its candle, only the sandbox did not look. An hour
+  with no candle in the archive (no ladder poll anywhere) is not.
 * **Persisted state.** ``state_dir`` (the bot passes the forecast-cache dir)
   holds ``genome_state_<genome_id>.json`` -- last evaluated hour per city,
   missed city-days, traded (target_date, symbol) -- rewritten atomically on
@@ -371,18 +376,24 @@ class GenomeStrategy(Strategy):
         groups = self._group_by_date(ladder)
         prev_hour = self._last_hour.get(city)
         resumed_from = self._resumed.pop(city, None)
-        if prev_hour is not None and hour_epoch - prev_hour > self.grid_s:
-            late_tick = any(
-                c == city and st == "missed" and prev_hour < h < hour_epoch
-                for (c, h), st in self._hours.items()
-            )
-            downtime = resumed_from is not None and hour_epoch - resumed_from > self.grid_s
-            if late_tick or downtime:
-                # the module docstring's missed-hour rule: a chance was lost, so
-                # every visible city-day is closed for the rest of the day
-                missed_now = {(city, d) for d in groups} - self._missed_days
-                self._missed_days |= missed_now
-                self.stats["missed_days"] = self.stats.get("missed_days", 0) + len(missed_now)
+        # A lost chance before this hour: a late tick or a bot-side poll failure
+        # recorded per city-hour (``_hours[...] == "missed"``). It counts even
+        # when no earlier hour was ever evaluated (fresh deploy whose FIRST tick
+        # landed late -- F3 final red team defect 1); only hours after the last
+        # evaluated one matter when there is one.
+        lower = prev_hour if prev_hour is not None else float("-inf")
+        late_tick = any(
+            c == city and st == "missed" and lower < h < hour_epoch
+            for (c, h), st in self._hours.items()
+        )
+        gap = prev_hour is not None and hour_epoch - prev_hour > self.grid_s
+        downtime = gap and resumed_from is not None and hour_epoch - resumed_from > self.grid_s
+        if late_tick or downtime:
+            # the module docstring's missed-hour rule: a chance was lost, so
+            # every visible city-day is closed for the rest of the day
+            missed_now = {(city, d) for d in groups} - self._missed_days
+            self._missed_days |= missed_now
+            self.stats["missed_days"] = self.stats.get("missed_days", 0) + len(missed_now)
         self._last_hour[city] = hour_epoch
         self._save_state()
 
@@ -733,6 +744,22 @@ class GenomeStrategy(Strategy):
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps(self.state_dict(), sort_keys=True, indent=2) + "\n")
         os.replace(tmp, self.state_path)
+
+    def record_poll_failure(self, city: str) -> None:
+        """The bot's ladder poll for ``city`` failed at ``clock()``'s hour.
+
+        Recorded exactly like a late tick (``_hours[(city, hour)] = "missed"``):
+        the market existed and the offline set may hold that hour's trade, so
+        every visible city-day is closed at the next evaluated hour
+        (``GENOME_MISSED_HOUR``). An hour already evaluated is left alone.
+        """
+        now_epoch = _epoch(self.clock())
+        hour_epoch = (now_epoch // self.grid_s) * self.grid_s
+        key = (str(city).upper(), hour_epoch)
+        if self._hours.get(key) in ("done", "done_logged"):
+            return
+        self._hours[key] = "missed"
+        self.stats["poll_failures"] = self.stats.get("poll_failures", 0) + 1
 
     def _reject(self, code: str, symbol: str, **context: Any) -> None:
         self.stats["rejects"] += 1

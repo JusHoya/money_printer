@@ -324,8 +324,16 @@ class TestCadence:
         mp_caplog.clear()
         assert strat.analyze(_obs()) == []  # same hour, already logged as missed: silent
         assert _rejects(mp_caplog, gs.REASON_NOT_TOP_OF_HOUR) == []
-        # inside the first poll of the next hour: evaluated once; the polls after it are one logged skip
+        # the late FIRST tick was a lost chance (F3 final red team defect 1): the next
+        # hour evaluates but every visible city-day is GENOME_MISSED_HOUR
+        mp_caplog.clear()
         strat.clock.now = TS + timedelta(hours=1, seconds=30)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_MISSED_HOUR)) == len(LADDER)
+        assert strat.stats["hours_evaluated"] == 1
+        # a fresh strategy whose first tick is inside the first poll of the hour: evaluated
+        # once and emits; the polls after it are one logged skip
+        strat, _ = _strategy(clock=Clock(TS + timedelta(hours=1, seconds=30)))
         sigs = strat.analyze(_obs(ts=TS + timedelta(hours=1)))
         assert sigs and all(int(s.expiration_time.timestamp()) > 0 for s in sigs)
         assert strat.stats["hours_evaluated"] == 1
@@ -579,3 +587,54 @@ class TestReplayParity:
             assert r["p_yes_max_abs_diff"] <= 1e-9 and r["column_mismatches"] == {}
             assert r["rows_frame_unvisited"] == 0
         assert doc["ok"] and doc["ok_strict"]
+
+
+# ---------------------------------------------------------------------------
+# F3 final red team (2026-09-05): residual defects 1-2 -- fresh-deploy late first
+# tick and bot-side poll failure are lost chances, exactly like a late tick.
+# ---------------------------------------------------------------------------
+def _symbols_of(msgs):
+    return sorted(m.split("symbol=")[1].split()[0] for m in msgs)
+
+
+def test_fresh_deploy_late_first_tick_marks_the_day_missed(mp_caplog):
+    # no persisted state, no predecessor hour: the FIRST tick lands 3 min late at H+1
+    strat, _ = _strategy(clock=Clock(TS + timedelta(hours=1, minutes=3)))
+    assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+    assert len(_rejects(mp_caplog, gs.REASON_NOT_TOP_OF_HOUR)) == 1
+    # H+2 on time: the chance at H+1 was lost -> GENOME_MISSED_HOUR, no signal
+    mp_caplog.clear()
+    strat.clock.now = TS + timedelta(hours=2)
+    assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+    got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+    assert _symbols_of(got) == sorted(t for t, *_ in LADDER)
+    assert strat.stats["signals"] == 0 and strat.stats.get("missed_days") == 1
+
+
+def test_bot_poll_failure_is_a_missed_hour(mp_caplog):
+    # H evaluated on time with an EMPTY book (nothing executable)
+    strat, _ = _strategy(clock=Clock(TS))
+    rows = strat.build_rows(_obs(), TS)
+    masked = [t for t, r in rows.items() if bool(G.to_mask(strat.genome, r))]
+    empty = {t: (0.0, 0.05) for t in masked}
+    assert strat.analyze(_obs(ladder=_ladder(quotes=empty))) == []
+    # H+1: the bot's Kalshi poll for the city failed -> recorded as a lost chance
+    strat.clock.now = TS + timedelta(hours=1, seconds=5)
+    strat.record_poll_failure("NY")
+    assert strat.stats.get("poll_failures") == 1
+    # H+2 on time, full book: GENOME_MISSED_HOUR for every market, no signal
+    mp_caplog.clear()
+    strat.clock.now = TS + timedelta(hours=2)
+    assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+    got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+    assert _symbols_of(got) == sorted(t for t, *_ in LADDER)
+    assert strat.stats["signals"] == 0
+
+
+def test_poll_failure_after_an_evaluated_hour_is_ignored():
+    strat, _ = _strategy(clock=Clock(TS))
+    strat.analyze(_obs())  # H evaluated (and emitted)
+    strat.clock.now = TS + timedelta(seconds=40)
+    strat.record_poll_failure("NY")  # same hour, already done -> not a miss
+    assert strat.stats.get("poll_failures", 0) == 0
+    assert strat._hours[("NY", int(TS.timestamp()))] == "done"
