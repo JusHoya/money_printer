@@ -55,6 +55,13 @@ ML_WEATHER_ENABLED = False
 GENOME_STRATEGY_ID_ENV = "GENOME_STRATEGY_ID"
 GENOME_STRATEGY_MODE_ENV = "GENOME_STRATEGY_MODE"
 GENOME_SHADOW = "shadow"
+GENOME_PAPER = "paper"
+# The ONLY values GENOME_STRATEGY_MODE may take (empty = "use the spec's mode").
+# Anything else -- "shadw", "off", "1", a trailing quote from a hand-edited .env --
+# used to match neither branch below and was silently treated as not-shadow: on a
+# PAPER spec a typo'd request to TIGHTEN to shadow would have failed OPEN and let
+# the genome paper-trade. An unrecognised value is now refused outright.
+GENOME_MODES = (GENOME_PAPER, GENOME_SHADOW)
 GENOME_STRATEGY_KEY = "genome"
 
 # Waterfall key -> the strategy_name that appears in EMIT/EXECUTED/REJECT lines.
@@ -187,6 +194,11 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.strategies = {}
         self.genome_shadow = False
         self.genome_spec = None
+        #: Why the genome is NOT running, or None when there is nothing to report
+        #: (no GENOME_STRATEGY_ID, or it loaded). Read by the web dashboard's
+        #: /api/status -- a refusal is otherwise only one ERROR line in the log,
+        #: invisible over HTTP within ~10 minutes. Public, stable name.
+        self.genome_refused_reason = None
         genome_id = (os.getenv(GENOME_STRATEGY_ID_ENV) or "").strip()
         if genome_id:
             # A genome that cannot be built must never take the sandbox down
@@ -203,6 +215,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 )
                 self.genome_shadow = False
                 self.genome_spec = None
+                self.genome_refused_reason = f"{genome_id}: {type(exc).__name__}: {exc}"
                 genome_strategy = None
             if genome_strategy is not None:  # None = refused (logged); the bot runs V2 only
                 self.strategies[GENOME_STRATEGY_KEY] = genome_strategy
@@ -236,6 +249,20 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
         spec = load_promoted(genome_id)
         env_mode = (os.getenv(GENOME_STRATEGY_MODE_ENV) or "").strip().lower()
+        if env_mode and env_mode not in GENOME_MODES:
+            reason = (
+                f"{GENOME_STRATEGY_MODE_ENV}={env_mode!r} is not one of {GENOME_MODES} "
+                f"(spec {spec.genome_id} is mode={spec.mode})"
+            )
+            logger.error(
+                "[Weather] GenomeStrategy REFUSED: %s -- an unrecognised mode must never be read as "
+                "'not shadow'; fix the value or unset it to use the spec's own mode; running V2 only",
+                reason,
+            )
+            self.genome_shadow = False
+            self.genome_spec = None
+            self.genome_refused_reason = reason
+            return None
         # Authorization (F3 red team, 2026-09-05): the env can only TIGHTEN a
         # spec to shadow; asking for paper on a shadow spec is a configuration
         # error and the genome is refused outright rather than silently run in
@@ -243,7 +270,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # status (reports/factory/registry.jsonl, tracked, shipped in the image)
         # to be PROPOSED/RATIFIED and to match the spec -- spec_hash is
         # integrity, not authorization.
-        if env_mode == "paper" and spec.mode == GENOME_SHADOW:
+        if env_mode == GENOME_PAPER and spec.mode == GENOME_SHADOW:
             logger.error(
                 "[Weather] GenomeStrategy REFUSED: GENOME_STRATEGY_MODE=paper but spec %s is mode=shadow "
                 "(promote it with --mode paper once the family is PROPOSED); running V2 only",
@@ -251,6 +278,9 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             )
             self.genome_shadow = False
             self.genome_spec = None
+            self.genome_refused_reason = (
+                f"{GENOME_STRATEGY_MODE_ENV}=paper but spec {spec.genome_id} is mode=shadow"
+            )
             return None
         self.genome_shadow = spec.mode == GENOME_SHADOW or env_mode == GENOME_SHADOW
         if not self.genome_shadow:
@@ -262,6 +292,10 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     spec.family, registry_status, spec.registry_status,
                 )
                 self.genome_spec = None
+                self.genome_refused_reason = (
+                    f"paper mode refused: family {spec.family} registry status is {registry_status}, "
+                    f"spec says {spec.registry_status}"
+                )
                 return None
         self.genome_spec = spec
         # Repo-relative spec paths resolve against the checkout, never the CWD.
@@ -285,6 +319,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             fee_regime=fees_mod.load_regime(),
             calibration_provider=calibration,
             state_dir=cache_dir,  # persisted traded/missed-hour state survives restarts
+            # This bot reaches every city on every tick and reports every hour it is
+            # alive for (evaluated, late, poll failure, observation failure, empty
+            # ladder), so the strategy may read a hole in that record as a stalled
+            # loop / paused container rather than an archive gap. Replay drivers do
+            # not set this.
+            tick_driven=True,
         )
         logger.info(
             "[Weather] GenomeStrategy %s loaded (genome_id=%s mode=%s registry=%s shadow=%s)",
@@ -320,6 +360,26 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         except OSError:
             return None
         return status
+
+    def _genome_hour_hook(self, method: str, city_key: str, *args) -> None:
+        """Tell the genome what happened to ``city_key``'s current hour; never break the tick.
+
+        The genome's missed-hour rule is what makes "the offline trade set is the
+        FIRST masked executable snapshot" true live, so every path that skips a city
+        for an hour has to say which kind of skip it was (FR-F3.1):
+        ``record_missed_hour`` = the sandbox HAD the hour and lost it (the archive
+        keeps the candle), ``record_no_ladder`` = the sandbox looked and there was
+        nothing to see (a data gap, never a miss). A silent skip is the one outcome
+        that breaks replay parity in the way parity cannot detect.
+        """
+        genome = self.strategies.get(GENOME_STRATEGY_KEY)
+        hook = getattr(genome, method, None) if genome is not None else None
+        if hook is None:
+            return
+        try:
+            hook(city_key, *args)
+        except Exception as e:  # bookkeeping must never break the tick
+            logger.warning(f"[Weather] genome {method} bookkeeping failed: {e}")
 
     def _strategy_label(self, key: str, strategy) -> str:
         if key == GENOME_STRATEGY_KEY:
@@ -461,6 +521,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     obs_data = nws_data
 
             if not obs_data:
+                # The whole city is skipped for this tick, so the genome never gets
+                # this hour: an hour it HAD and lost, exactly like a failed Kalshi
+                # poll (the ladder archive keeps the candle -- only the sandbox did
+                # not look). Silence here would let a later hour be claimed as the
+                # first masked executable snapshot.
+                self._genome_hour_hook("record_missed_hour", city.key, "observation_failure")
                 continue
 
             # --- Merge NWS forecast into METAR observation ---
@@ -534,6 +600,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                                 f"{m.symbol} (Market)", best_price, **kwargs
                             )
                     else:
+                        # Kalshi answered and this city has no ladder: a DATA gap,
+                        # not a lost chance (the offline frame has no row for an
+                        # hour with no candle either). Recorded rather than ignored
+                        # so the genome can tell it from an hour the bot was not
+                        # there for at all.
+                        self._genome_hour_hook("record_no_ladder", city.key)
                         # Fallback: legacy single-market resolution path
                         active_ticker = self._resolve_smart_ticker(
                             kalshi_ticker, criteria="sentiment", kalshi=self.kalshi
@@ -591,16 +663,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     # F3 missed-hour rule: a poll the sandbox could not make is
                     # a lost chance for the genome (the archive keeps the
                     # candle), never a silent gap it may fill at a later hour.
-                    genome = self.strategies.get(GENOME_STRATEGY_KEY)
-                    if genome is not None and hasattr(genome, "record_poll_failure"):
-                        try:
-                            from src.core.weather_settlement import city_key_for_station
-
-                            genome.record_poll_failure(
-                                city_key_for_station(station) or kalshi_ticker.replace("KXHIGH", "")
-                            )
-                        except Exception as e2:  # never let bookkeeping break the tick
-                            logger.warning(f"[Weather] genome poll-failure bookkeeping failed: {e2}")
+                    self._genome_hour_hook("record_missed_hour", city.key, "poll_failure")
 
             # Use real Kalshi market price for position valuation (not raw temp)
             kalshi_market_price = None
