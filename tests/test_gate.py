@@ -620,7 +620,9 @@ def test_pass_scenario_reproduces_hand_computed_p(tmp_path):
     assert v["counts"]["quality_excluded"] == 0
     assert v["counts"]["corrupt_rows"] == []
     assert v["counts"]["fills_by_fee_source"] == {"closed_trades.entry_fee": 60}
-    assert v["warnings"] == []
+    # the only warning is the cross-city governance report: this record's ten
+    # two-fill dates are two CITIES each, which the pre-registered unit merges
+    assert [w["warning"] for w in v["warnings"]] == ["cross_city_units_merged"]
     # unit-level null: two-fill dates at 0.834 (least favourable), singles at 0.417
     two = [u for u in v["unit_table"] if u["n_fills"] == 2]
     one = [u for u in v["unit_table"] if u["n_fills"] == 1]
@@ -857,9 +859,9 @@ def test_quantity_mismatch_uses_the_journal_row_and_warns(tmp_path):
 
     journal, state, registration = _write_record(tmp_path, layout, state_rows_override=_qty)
     v = _run(tmp_path, journal, state, registration)
-    assert len(v["warnings"]) == 1
-    w = v["warnings"][0]
-    assert w["warning"] == "quantity_mismatch_journal_vs_state"
+    qty_warnings = [w for w in v["warnings"] if w["warning"] == "quantity_mismatch_journal_vs_state"]
+    assert len(qty_warnings) == 1
+    w = qty_warnings[0]
     assert w["journal_quantity"] == 20.0 and w["state_quantity"] == 5.0
     fill = [f for f in v["fills"] if f["symbol"] == w["symbol"] and f["entry_time"] == w["entry_time"]][0]
     assert fill["quantity"] == 20.0
@@ -1065,7 +1067,204 @@ def test_degrading_losing_fills_cannot_buy_a_pass(tmp_path):
     assert "excluded_rate_within_bound" in v["failing"]
 
 
-def test_exclusion_budget_is_configurable_from_the_registration(tmp_path):
+def test_settlement_error_marker_cannot_delete_a_reconcilable_fill(tmp_path):
+    """F3 review round 2, BLOCKING 1: an in-band free-text field bought a PASS.
+
+    ``settlement_error`` routed a row into the ``settlement_unresolved`` SCOPE
+    branch, which the exclusion budget deliberately does not charge. So one
+    field written onto one losing leg of each two-fill unit deleted ten losing
+    fills for free: net PnL +83.40, and each stripped pair's least-favourable
+    null fell from 0.834 to 0.417, which is a BIGGER reward than the superseded
+    independent model gave. FAIL (p=0.22795) became PASS (p=0.02904).
+    """
+    layout = _layout(both_win=0, split=5, both_lose=5, single_wins=23)
+    base_dir = tmp_path / "clean"
+    base_dir.mkdir()
+    j0, s0, r0 = _write_record(base_dir, layout)
+    v0 = _run(base_dir, j0, s0, r0)
+    assert v0["verdict"] == "FAIL"
+    assert v0["units"]["p_upper_tail"] == pytest.approx(0.2279518598313848, abs=1e-12)
+    assert v0["pnl"]["net"] == pytest.approx(59.60, abs=1e-9)
+    assert v0["counts"]["settled_fills"] == 60
+
+    # exactly one losing leg of each two-fill date, in BOTH files, marked
+    # "unresolved" while every settlement field on it still reconciles.
+    losing_leg = [i for i in range(20) if not layout[i][2] and i % 2 == 1]
+    assert len(losing_leg) == 10
+
+    def _mark(rows):
+        for i in losing_leg:
+            rows[i] = {**rows[i], "settlement_error": "transient upstream hiccup"}
+        return rows
+
+    attack_dir = tmp_path / "attack"
+    attack_dir.mkdir()
+    j1, s1, r1 = _write_record(
+        attack_dir, layout, journal_rows_override=_mark,
+        state_rows_override=lambda rows: _mark(list(rows)),
+    )
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(attack_dir, j1, s1, r1)
+    assert "reconcile" in str(exc.value)
+    assert "unresolved" in str(exc.value)
+
+
+def test_a_genuinely_unresolved_row_is_still_a_free_scope_filter(tmp_path):
+    """The fix must not refuse the honest unresolved row every record carries."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    v = _run(tmp_path, journal, state, registration)
+    # _write_record always appends one SETTLEMENT_UNRESOLVED row whose exit_price
+    # is the entry mark, so it does NOT reconcile and stays out of scope.
+    assert v["counts"]["excluded"]["settlement_unresolved"] == 1
+    assert v["counts"]["quality_excluded"] == 0
+    assert v["refused"] is False and v["verdict"] == "PASS"
+
+
+def test_close_reason_rewrite_cannot_delete_a_reconcilable_fill(tmp_path):
+    """The same shape through the OTHER status scope filter (``not_settled``)."""
+    layout = _layout(both_win=0, split=5, both_lose=5, single_wins=23)
+    losing_leg = [i for i in range(20) if not layout[i][2] and i % 2 == 1]
+
+    def _mark_journal(rows):
+        for i in losing_leg:
+            rows[i] = {**rows[i], "close_reason": "MANUAL_CLOSE"}
+        return rows
+
+    def _mark_state(rows):
+        keep = set(losing_leg)
+        return [
+            {**r, "reason": "MANUAL_CLOSE"} if i in keep else r
+            for i, r in enumerate(rows)
+        ]
+
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_mark_journal,
+        state_rows_override=_mark_state,
+    )
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "reconcile" in str(exc.value)
+
+
+def test_an_unreadable_journal_row_prefers_its_complete_state_twin(tmp_path):
+    """The de-duplication key must not delete a fill the state file can still read."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _gut(rows):
+        # the journal row can no longer be read; its state twin still can
+        rows[14] = {k: v for k, v in rows[14].items() if k != "quantity"}
+        return rows
+
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_gut
+    )
+    v = _run(tmp_path, journal, state, registration)
+    assert v["counts"]["settled_fills"] == 60          # nothing lost
+    assert v["counts"]["quality_excluded"] == 0
+    assert v["counts"]["excluded_rows"] == []
+    assert v["verdict"] == "PASS"
+
+
+def test_cross_city_unit_merging_is_reported_and_quantified(tmp_path):
+    """FR-5.2 fixes the unit at target_date; the gate must SAY what that costs."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    v = _run(tmp_path, journal, state, registration)
+    u = v["units"]
+    assert u["cross_city_units"] == 10               # every two-fill date is two cities
+    assert u["n_units_if_grouped_by_city_day"] == 60
+    assert u["units_lost_to_cross_city_merging"] == 10
+    assert "NOT mutually exclusive" in u["cross_city_note"]
+    assert any(w["warning"] == "cross_city_units_merged" for w in v["warnings"])
+    two = [x for x in v["unit_table"] if x["n_fills"] == 2]
+    assert all(x["n_cities"] == 2 and x["cross_city"] is True for x in two)
+
+
+def test_degenerate_null_fires_below_saturation(tmp_path):
+    """w_u = 1 is far too late: a unit is evidence-free well before it."""
+    high = 0.46  # q* just under 0.47 -> a pair's least-favourable null is ~0.94
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23,
+                     pair_prices=(high, high))
+    journal, state, registration = _write_record(tmp_path, layout)
+    v = _run(tmp_path, journal, state, registration)
+    u = v["units"]
+    assert u["units_with_saturated_null"] == 0        # nothing reaches 1
+    assert u["units_with_degenerate_null"] == 10      # but ten carry ~no evidence
+    assert u["degenerate_null_threshold"] == gate.NULL_DEGENERATE_W
+    assert any(w["warning"] == "units_with_degenerate_null" for w in v["warnings"])
+    assert all(x["null_degenerate"] is True for x in v["unit_table"] if x["n_fills"] == 2)
+
+
+def test_registration_cannot_loosen_the_exclusion_budget(tmp_path):
+    """A guard a registration can dial away is not a guard."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _strip(rows):
+        for i in (14, 16):
+            rows[i] = {k: v for k, v in rows[i].items() if k != "settlement_outcome"}
+        return rows
+
+    def _strip_state(rows):
+        return [
+            {k: v for k, v in r.items() if k != "settlement_outcome"} if i in (14, 16) else r
+            for i, r in enumerate(rows)
+        ]
+
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_strip, state_rows_override=_strip_state,
+        thresholds={"n_min": 50, "alpha": 0.05, "net_pnl_gt": 0.0, "max_excluded_rate": 0.05},
+    )
+    v = _run(tmp_path, journal, state, registration)
+    c = v["conditions"]["excluded_rate_within_bound"]
+    assert c["required_le"] == gate.MAX_EXCLUDED_RATE       # the 0.05 did NOT take
+    assert c["registration_max_excluded_rate"] == 0.05
+    assert c["registration_override_rejected"] is True
+    assert v["counts"]["excluded_rate"] == pytest.approx(2 / 60)
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+
+
+def test_registration_may_tighten_the_exclusion_budget(tmp_path):
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _strip(rows):
+        rows[14] = {k: v for k, v in rows[14].items() if k != "settlement_outcome"}
+        return rows
+
+    def _strip_state(rows):
+        return [
+            {k: v for k, v in r.items() if k != "settlement_outcome"} if i == 14 else r
+            for i, r in enumerate(rows)
+        ]
+
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_strip, state_rows_override=_strip_state,
+        thresholds={"n_min": 50, "alpha": 0.05, "net_pnl_gt": 0.0, "max_excluded_rate": 0.0},
+    )
+    v = _run(tmp_path, journal, state, registration)
+    c = v["conditions"]["excluded_rate_within_bound"]
+    assert c["required_le"] == 0.0
+    assert c["registration_override_rejected"] is False
+    assert v["refused"] is True  # 1/60 > 0
+
+
+def test_target_date_wrapper_still_returns_a_plain_string(tmp_path):
+    """scripts/factory_paper_reconcile.py calls _target_date and feeds date.fromisoformat."""
+    row = {"symbol": _ticker("NY", date(2026, 6, 1)), "target_date": "2026-06-01"}
+    assert gate._target_date(row) == "2026-06-01"
+    assert gate._target_date({"symbol": "KXHIGHNY-26JUN01-B84.5"}) == "2026-06-01"
+    assert gate._target_date({"symbol": "", "target_date": "not-a-date"}) is None
+    # the checked form is the one that reports the problem
+    td, problem = gate._target_date_checked({"symbol": "", "target_date": "not-a-date"})
+    assert td is None and problem[0] == "target_date_unparseable"
+
+
+def test_the_default_exclusion_budget_refuses_a_trimmed_sample(tmp_path):
+    """Two unreadable fills in sixty is 3.3%: over the 2% ceiling, so refused.
+
+    The registration used to be able to raise that ceiling; it now cannot --
+    see test_registration_cannot_loosen_the_exclusion_budget.
+    """
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
 
     def _strip(rows):
@@ -1083,14 +1282,7 @@ def test_exclusion_budget_is_configurable_from_the_registration(tmp_path):
     v = _run(tmp_path, journal, state, registration)
     assert v["counts"]["excluded_rate"] == pytest.approx(2 / 60)  # 3.3% > the 2% default
     assert v["refused"] is True
-    journal, state, registration = _write_record(
-        tmp_path, layout, journal_rows_override=_strip, state_rows_override=strip_state,
-        thresholds={"n_min": 50, "alpha": 0.05, "net_pnl_gt": 0.0, "max_excluded_rate": 0.05},
-    )
-    v2 = _run(tmp_path, journal, state, registration)
-    assert v2["conditions"]["excluded_rate_within_bound"]["required_le"] == 0.05
-    assert v2["refused"] is False and v2["verdict"] == "PASS"
-    assert gate.MAX_EXCLUDED_RATE == 0.02  # the default the registration overrode
+    assert gate.MAX_EXCLUDED_RATE == 0.02
 
 
 # ---------------------------------------------------------------------------

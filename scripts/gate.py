@@ -31,6 +31,21 @@ Four cities sharing a date collapse into one unit as well: their highs are not
 independent either (synoptic weather), and the frame the genome was searched on
 grouped by target_date for the same reason (registry ``grouping_unit``).
 
+That merge is NOT free, and since 2026-09-05 the gate says so instead of leaving
+it implicit (F3 review round 2, should-fix 1). Two brackets on ONE city-day
+ladder are mutually EXCLUSIVE, which is the structure the within-unit null is
+built on and attains. Two CITIES' brackets are not mutually exclusive at all --
+both can settle YES -- so on a cross-city date the premise the null leans on
+does not hold, and four cities' fills on one day are scored as one trial rather
+than four. The verdict therefore reports ``units.cross_city_units``,
+``units.n_units_if_grouped_by_city_day`` and
+``units.units_lost_to_cross_city_merging`` (the power cost, in trials), raises a
+``cross_city_units_merged`` warning, and prints the loss on the ``--quiet``
+line. It does NOT redefine the unit: ``target_date`` is pre-registered by FR-5.2
+and PRD_STRATEGY_FACTORY FR-F3.4, and changing a pre-registered unit mid-run is
+the owner's call, not the gate's. This is an open governance question, reported
+so the call can be made on numbers.
+
 BREAKEVEN -- derived, per fill
 ------------------------------
 A binary bought at price ``p`` with entry fee ``f`` per contract and held to
@@ -101,6 +116,16 @@ and the gate uses ``w_u = min(1, sum_j min_{i in A_j} q*_i)``. Properties:
   small p, which is the honest outcome -- a date carrying several brackets is
   not one clean trial, and the fix is to trade one bracket per date, not to
   assume a copula.
+* saturation is the EXTREME case and fires far too late to be the safeguard
+  (F3 review round 2, should-fix 3): a unit is evidence-free well before
+  ``w_u`` reaches 1. Two brackets at ``q* = 0.47``, or three cities at
+  ``q* = 0.30``, already win under the null nine times in ten. The verdict
+  therefore also carries ``units_with_degenerate_null`` -- units at or above
+  ``NULL_DEGENERATE_W`` (0.90) -- with their dates, a warning, and a
+  ``--quiet`` line entry. It is reported, not gating: the Poisson-binomial
+  already handles such units correctly (they simply carry no information), so
+  the honest response is to make the operator SEE the regime, not to invent a
+  second threshold on top of ``alpha``.
 
 Raising ``w_u`` can only raise ``P[K >= k]``, so a bound that is loose costs
 power and never validity. ``unit_null_win_probability_independent`` keeps the
@@ -168,9 +193,52 @@ themselves gated. The gate splits the exclusions in two:
                 could not read
 
 ``excluded_rate = quality / (admitted + quality)`` is a gating condition and,
-above ``MAX_EXCLUDED_RATE`` (2%, overridable as ``thresholds.max_excluded_rate``),
-a refusal. Every dropped row is listed in the verdict under
-``counts.excluded_rows`` so the holes are auditable rather than a bare counter.
+above ``MAX_EXCLUDED_RATE`` (2%), a refusal. Every dropped row is listed in the
+verdict under ``counts.excluded_rows`` so the holes are auditable rather than a
+bare counter.
+
+The budget was still HALF-CLOSED until 2026-09-05 (F3 review round 2, BLOCKING
+1). Charging only the quality reasons left every SCOPE filter as a free
+deletion, and each of them fires on ONE field of ONE row. Writing
+``settlement_error`` onto one losing leg of each two-fill unit -- a free-text
+field, on rows that stayed fully readable -- took a record from FAIL
+(p=0.22795, net 59.60) to PASS (p=0.02904, net 143.00) with ``excluded_rate``
+still 0.0000, ``quality_excluded`` 0, ``refused`` false and ``n_units`` intact
+at 50. Worse, the least-favourable null made the reward BIGGER than the
+superseded independent model did: stripping a fill from a two-fill unit drops
+``w_u`` from 0.834 to 0.417, against 0.660 to 0.417 before.
+
+So every scope filter that fires on a row of THIS strategy is now cross-checked
+before it is honoured. ``settlement_payoff_check`` is asked whether the row is a
+settled fill after all; returning ``None`` means exit_price IS the settled
+payoff, pnl matches it, and the strike spec re-derives the recorded outcome. A
+row that reconciles exactly while claiming to be out of scope contradicts
+itself, and which claim is false is not knowable from inside, so it REFUSES the
+record (``unresolved_row_reconciles``, ``unsettled_row_reconciles``,
+``out_of_family_row_reconciles``, ``non_weather_row_reconciles``) exactly as a
+contradicted payoff does. A genuinely unresolved row does not reconcile -- its
+exit price is a mark, not a settled payoff -- so the honest filter still costs
+nothing. ``other_strategy`` is the one filter with no cross-check (nothing on a
+fill names the strategy but the field itself, and another strategy's fill
+reconciles perfectly well); it is defended instead by the join key, which
+CONTAINS strategy_name, so a name rewritten in one file leaves the other file's
+row under its original key where the twin rule below still admits it.
+
+``thresholds.max_excluded_rate`` may only TIGHTEN the budget. It used to be
+overridable upward with nothing gating the override, and a registration that
+can dial away its own guard is not a guard (should-fix 4): a looser value is
+rejected, ``MAX_EXCLUDED_RATE`` stands, and the verdict records the attempt
+under ``conditions.excluded_rate_within_bound.registration_override_rejected``.
+
+PREFER THE READABLE TWIN (2026-09-05, F3 review round 2, should-fix 2)
+----------------------------------------------------------------------
+The journal and ``closed_trades`` hold the same fill under one join key, and the
+``seen`` key set that stopped one fill being charged to the budget twice also
+DELETED a fill whose journal row was unreadable and whose state twin was
+complete. A key whose journal row was excluded is therefore retried against its
+twin: when the twin admits and reconciles the journal's charge is RETRACTED
+(source ``closed_trades_over_unreadable_journal``), and when it does not, the
+twin's own charge is rolled back so the fill is still counted exactly once.
 
 TARGET DATE (2026-09-05, F3 review defect 4)
 ---------------------------------------------
@@ -218,6 +286,7 @@ rather than scoring when the record cannot be gated as it stands:
     registration_commit_utc contradicted by git
     stale NO-side settlement rows       (GateRefusal, before any p is computed)
     rows whose booked money or unit key contradicts their settlement fields
+    rows filtered out of SCOPE that nonetheless reconcile as settled fills
 
 STALE NO-SIDE ROWS (engine fix 724d93c, 2026-09-04)
 ---------------------------------------------------
@@ -278,7 +347,9 @@ if REPO_ROOT not in sys.path:
 from src.core.bracket_payoff import BracketSpecError, parse_bracket_spec, settles_yes  # noqa: E402
 from src.core.fee_calculator import compute_fee, fee_type_for_symbol  # noqa: E402
 from src.core.weather_settlement import (  # noqa: E402
+    city_key_for_station,
     settlement_date_for,
+    settlement_station_for,
     settlement_timezone_for,
 )
 from src.factory.report import write_json  # noqa: E402
@@ -317,6 +388,25 @@ QUALITY_EXCLUSION_REASONS = (
     "settlement_outcome_missing",
     "strike_spec_unverifiable",
 )
+
+#: SCOPE filters that fire on a row ALREADY matched to the registered strategy.
+#: Each is one per-row field an operator or a corrupted writer can flip, and a
+#: scope drop is deliberately NOT charged to the exclusion budget -- so each was
+#: a free deletion of an inconvenient fill (F3 review round 2, BLOCKING 1). Each
+#: is now cross-checked against ``settlement_payoff_check`` before it is
+#: honoured, and the value is the refusal code a reconciling row earns instead.
+CROSS_CHECKED_SCOPE_REASONS = {
+    "settlement_unresolved": "unresolved_row_reconciles",
+    "not_settled": "unsettled_row_reconciles",
+    "outside_market_family": "out_of_family_row_reconciles",
+    "non_weather_symbol": "non_weather_row_reconciles",
+}
+
+#: a unit whose least-favourable null win probability reaches this carries next
+#: to no evidence: under the null it wins almost always, so winning it is not a
+#: result. Saturation (w_u = 1) is the extreme case and fires far too late --
+#: two brackets at q* = 0.47, or three cities at q* = 0.30, are already here.
+NULL_DEGENERATE_W = 0.90
 
 FORMULAS: Dict[str, str] = {
     "breakeven_per_fill": (
@@ -362,7 +452,17 @@ FORMULAS: Dict[str, str] = {
     ),
     "exclusion_rate": (
         "quality_excluded / (admitted + quality_excluded) over IN-SCOPE settled fills the gate "
-        "could not read; scope filters (other strategy, other family, unsettled) are not counted"
+        "could not read; scope filters (other strategy, other family, unsettled) are not counted, "
+        "but every scope filter that fires on a row of THIS strategy is first cross-checked "
+        "against settlement_payoff_check, and a row that reconciles while claiming to be out "
+        "of scope refuses the record. The ceiling is MAX_EXCLUDED_RATE; a registration may "
+        "tighten it and may never loosen it"
+    ),
+    "cross_city_units": (
+        "FR-5.2 fixes the independence unit at target_date ALONE, so fills on several cities' "
+        "ladders on one date collapse into ONE unit. Reported, never silently redefined: "
+        "n_units_if_grouped_by_city_day counts the (city, target_date) pairs the record actually "
+        "holds, and units_lost_to_cross_city_merging is the power the pre-registered unit costs"
     ),
     "target_date": (
         "parsed as a calendar date, normalised to YYYY-MM-DD, and cross-checked against "
@@ -972,7 +1072,19 @@ def _parse_iso_day(value: Any) -> Optional[_date]:
         return None
 
 
-def _target_date(row: Mapping[str, Any]) -> Tuple[Optional[str], Optional[Tuple[str, str]]]:
+def _target_date(row: Mapping[str, Any]) -> Optional[str]:
+    """The row's normalised ``YYYY-MM-DD`` unit key, or ``None``.
+
+    The plain-string form of :func:`_target_date_checked`, kept because it is
+    this module's published shape: ``scripts/factory_paper_reconcile.py`` loads
+    gate.py as a module and feeds the result straight to ``date.fromisoformat``
+    (F3 review round 2, BLOCKING 2). A row whose label cannot be trusted reads
+    as "no date" here; only the gate itself acts on WHY, through the checked form.
+    """
+    return _target_date_checked(row)[0]
+
+
+def _target_date_checked(row: Mapping[str, Any]) -> Tuple[Optional[str], Optional[Tuple[str, str]]]:
     """``(normalised YYYY-MM-DD, problem)`` for the row's independence-unit key.
 
     ``target_date`` is what ``group_units`` buckets on, so a wrong label splits
@@ -1011,6 +1123,20 @@ def _target_date(row: Mapping[str, Any]) -> Tuple[Optional[str], Optional[Tuple[
     return (label.isoformat(), None) if label is not None else (None, None)
 
 
+def _city_of(symbol: str) -> str:
+    """The settlement city a weather ticker belongs to (``KXHIGHNY-...`` -> ``NY``).
+
+    Taken from the settlement-station registry rather than the ticker text, so
+    it names the station whose daily high actually settles the bracket. Falls
+    back to the series prefix for anything unregistered -- this feeds a REPORT,
+    never a gating number.
+    """
+    station = settlement_station_for(symbol)
+    if station:
+        return city_key_for_station(station) or station
+    return (str(symbol).split("-", 1)[0] or "?").upper()
+
+
 def _is_maker_booked(row: Mapping[str, Any]) -> bool:
     if row.get("is_maker") is True:
         return True
@@ -1024,6 +1150,7 @@ def collect_settled_trades(
     strategy_name: str,
     market_family: str = "KXHIGH",
     fee_type: str = "taker",
+    reconcile_settlement: bool = True,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Merge journal + closed_trades into one settled-fill list for ``strategy_name``.
 
@@ -1040,9 +1167,20 @@ def collect_settled_trades(
     either is non-empty. ``counts["excluded_rows"]`` lists every dropped row
     with its reason, and ``counts["excluded_rate"]`` is the share of in-scope
     settled fills the gate could not read (F3 review defects 2-4).
+
+    ``reconcile_settlement`` defaults to True and the gate always passes True:
+    a fill whose booked money the gate cannot reproduce from the row's own
+    settlement fields is dropped and charged, never assumed good. It is a
+    keyword because this function is also the fill collector for NON-gating
+    tools (``scripts/factory_paper_reconcile.py`` loads gate.py as a module),
+    and a repricing report is not a promotion decision -- a caller that is not
+    scoring a genome may pass False to keep pre-FR-1.2 rows, which carry no
+    ``settlement_spec`` / ``settlement_high``, rather than silently report zero
+    fills. The scope cross-check stays on either way: it only ever fires on a
+    row that reconciles EXACTLY, so it is never a false alarm.
     """
     excluded: Counter = Counter()
-    excluded_rows: List[Dict[str, Any]] = []
+    excluded_rows: List[Optional[Dict[str, Any]]] = []
     by_key: Dict[Tuple[str, Optional[str], str], Dict[str, Any]] = {}
     stale_rows: List[Dict[str, Any]] = []
     corrupt_rows: List[Dict[str, Any]] = []
@@ -1059,18 +1197,93 @@ def collect_settled_trades(
             "entry_time": _iso(row.get("entry_time")) or _iso(row.get("open_time")),
         }
 
+    def _drop(
+        reason: str,
+        row: Mapping[str, Any],
+        source: str,
+        detail: Optional[str] = None,
+        *,
+        listed: bool = True,
+    ) -> Tuple[str, Optional[int]]:
+        """Charge one exclusion and return a handle the twin pass can RETRACT."""
+        excluded[reason] += 1
+        idx: Optional[int] = None
+        if listed:
+            entry = {**_identify(row), "reason": reason, "source": source}
+            if detail:
+                entry["detail"] = detail
+            excluded_rows.append(entry)
+            idx = len(excluded_rows) - 1
+        return reason, idx
+
     def _exclude(
         reason: str, row: Mapping[str, Any], source: str, detail: Optional[str] = None
-    ) -> None:
+    ) -> Tuple[str, Optional[int]]:
         """Drop a row, counted AND named: a bare counter hides which fills went."""
-        excluded[reason] += 1
-        entry = {**_identify(row), "reason": reason, "source": source}
-        if detail:
-            entry["detail"] = detail
-        excluded_rows.append(entry)
+        return _drop(reason, row, source, detail, listed=True)
+
+    def _retract(record: Tuple[str, Optional[int]]) -> None:
+        """Un-charge an exclusion a readable twin of the same fill has replaced."""
+        reason, idx = record
+        excluded[reason] -= 1
+        if excluded[reason] <= 0:
+            del excluded[reason]
+        if idx is not None:
+            excluded_rows[idx] = None
+
+    def _snapshot() -> Tuple[Counter, int]:
+        return Counter(excluded), len(excluded_rows)
+
+    def _restore(snap: Tuple[Counter, int]) -> None:
+        """Undo a failed twin attempt's exclusions so one fill is charged once."""
+        before, n_rows = snap
+        excluded.clear()
+        excluded.update(before)
+        del excluded_rows[n_rows:]
 
     def _corrupt(reason: str, row: Mapping[str, Any], source: str, detail: str) -> None:
         corrupt_rows.append({**_identify(row), "reason": reason, "source": source, "detail": detail})
+
+    def _scope_drop(
+        reason: str,
+        row: Mapping[str, Any],
+        source: str,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> Optional[Tuple[str, Optional[int]]]:
+        """Honour a per-row scope filter only when the row is NOT a readable fill.
+
+        Scope drops are deliberately not charged to the exclusion budget -- they
+        are filters, not damage. But every filter here fires on ONE field of ONE
+        row, so an operator or a corrupted writer could delete an inconvenient
+        fill from the sample for free, and the gate's numbers all improve when a
+        losing fill vanishes. The reviewer demonstrated it: ``settlement_error``
+        written onto one losing leg of each two-fill unit took a record from
+        FAIL (p=0.22795, net 59.60) to PASS (p=0.02904, net 143.00) with
+        ``excluded_rate`` still 0.0000.
+
+        So before a scope filter is honoured the row's OWN settlement fields are
+        asked whether it is a settled fill after all. ``settlement_payoff_check``
+        returning ``None`` means exit_price IS the settled payoff, pnl matches
+        it, and the strike spec re-derives the recorded outcome -- a fully
+        readable, fully reconcilable settled fill. A row that reconciles while
+        claiming to be out of scope contradicts itself, and which of the two
+        claims is false is not knowable from inside, so it REFUSES the record
+        exactly as a contradicted payoff does (F3 review round 2, BLOCKING 1).
+        """
+        code = CROSS_CHECKED_SCOPE_REASONS.get(reason)
+        if code is not None and settlement_payoff_check(row, rows) is None:
+            _corrupt(
+                code,
+                row,
+                source,
+                f"filtered out of scope as {reason!r}, yet the row's own settlement "
+                "fields reconcile exactly (exit_price is the settled payoff, pnl "
+                "matches it, and the strike spec re-derives the recorded outcome): "
+                "a readable settled fill cannot be deleted from the sample by one "
+                "field, so the record is refused rather than scored without it",
+            )
+            return None
+        return _drop(reason, row, source, listed=False)
 
     def _fee_for(trade: Dict[str, Any], booked: Optional[float]) -> Tuple[float, str]:
         recomputed = nearest_cent_taker_fee(trade["symbol"], trade["entry_price"], trade["quantity"])
@@ -1091,42 +1304,52 @@ def collect_settled_trades(
             return False
         return True
 
-    def _admit(row: Mapping[str, Any], source: str) -> Optional[Dict[str, Any]]:
+    def _admit(
+        row: Mapping[str, Any], source: str, twin: Optional[Mapping[str, Any]] = None
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[Tuple[str, Optional[int]]]]:
+        """``(trade, retractable exclusion handle)``; the handle is ``None`` when
+        nothing was charged (admitted, or refused as corrupt)."""
+        rows = tuple(r for r in (row, twin) if r is not None)
         symbol = str(row.get("symbol") or "")
         if str(row.get("strategy_name") or "") != strategy_name:
+            # The ONE scope filter the gate cannot cross-check: nothing on a fill
+            # names the strategy except the field itself, and a row of ANOTHER
+            # strategy reconciles perfectly well. It is defended instead by the
+            # join key -- strategy_name is part of it, so a name rewritten in one
+            # file leaves the other file's row under the original key, where the
+            # twin rule below still admits it.
             excluded["other_strategy"] += 1
-            return None
+            return None, None
         if not symbol.upper().startswith(market_family.upper()):
-            excluded["outside_market_family"] += 1
-            return None
+            return None, _scope_drop("outside_market_family", row, source, rows)
         if settlement_timezone_for(symbol) is None:
-            excluded["non_weather_symbol"] += 1
-            return None
+            return None, _scope_drop("non_weather_symbol", row, source, rows)
         ok, why = _is_settled(row)
         if not ok:
             reason = why.split(":", 1)[0]
             if reason in QUALITY_EXCLUSION_REASONS:
-                _exclude(reason, row, source, why)
-            else:
-                excluded[reason] += 1
-            return None
-        td, td_problem = _target_date(row)
+                return None, _exclude(reason, row, source, why)
+            return None, _scope_drop(reason, row, source, rows)
+        td, td_problem = _target_date_checked(row)
         if td_problem is not None:
             _corrupt(td_problem[0], row, source, td_problem[1])
-            return None
+            return None, None
         if td is None:
-            _exclude("no_target_date", row, source, "no target_date, expiration stamp or event-date label")
-            return None
+            return None, _exclude(
+                "no_target_date", row, source,
+                "no target_date, expiration stamp or event-date label",
+            )
         try:
             entry_price = float(row["entry_price"])
             quantity = float(row["quantity"])
             pnl = float(row["pnl"])
         except (KeyError, TypeError, ValueError):
-            _exclude("missing_numeric_field", row, source, "entry_price / quantity / pnl unreadable")
-            return None
+            return None, _exclude(
+                "missing_numeric_field", row, source,
+                "entry_price / quantity / pnl unreadable",
+            )
         if quantity <= 0:
-            _exclude("non_positive_quantity", row, source, f"quantity={quantity!r}")
-            return None
+            return None, _exclude("non_positive_quantity", row, source, f"quantity={quantity!r}")
         return {
             "symbol": symbol,
             "strategy_name": strategy_name,
@@ -1141,12 +1364,14 @@ def collect_settled_trades(
             "source": source,
             "maker_booked": _is_maker_booked(row),
             "repaired": bool(row.get(REPAIRED_MARKER)),
-        }
+        }, None
 
     def _reconcile(
         trade: Dict[str, Any], rows: Sequence[Mapping[str, Any]], source: str
     ) -> bool:
         """False when the row's booked money does not survive recomputation."""
+        if not reconcile_settlement:
+            return True
         problem = settlement_payoff_check(trade, rows)
         if problem is None:
             return True
@@ -1157,11 +1382,18 @@ def collect_settled_trades(
             _corrupt(code, trade, source, detail)
         return False
 
-    # Every journal key the loop below touches, admitted or not. The
-    # closed_trades pass exists only for fills the journal LOST, so without this
-    # an excluded journal row's state twin is excluded a second time and the
-    # exclusion budget double-counts one fill.
+    # Every journal key the loop below touches, admitted or not, together with
+    # the exclusion it was charged. The closed_trades pass exists for fills the
+    # journal LOST: without ``seen`` an excluded journal row's state twin is
+    # excluded a second time and the budget double-counts one fill, but ``seen``
+    # alone also DELETED a fill whose journal row was unreadable and whose state
+    # twin was complete. So a key with a retractable charge is retried against
+    # its twin, and the journal's charge is retracted when the twin admits --
+    # the readable twin is preferred, and the fill is still charged at most once
+    # (F3 review round 2, should-fix 2).
     seen: set = set()
+    retractable: Dict[Tuple[str, Optional[str], str], List[Tuple[str, Optional[int]]]] = {}
+    journal_by_key: Dict[Tuple[str, Optional[str], str], Mapping[str, Any]] = {}
 
     for row in journal_rows:
         key = _join_key(row)
@@ -1169,10 +1401,13 @@ def collect_settled_trades(
             excluded["duplicate_journal_row"] += 1
             continue
         seen.add(key)
-        trade = _admit(row, "journal")
-        if trade is None:
-            continue
+        journal_by_key.setdefault(key, row)
         st = state_by_key.get(key)
+        trade, drop = _admit(row, "journal", twin=st)
+        if trade is None:
+            if drop is not None:
+                retractable.setdefault(key, []).append(drop)
+            continue
         if st is not None:
             # the state row is the fee/pnl source when present: it must be clean too
             if not _check_no_side(trade, st, "closed_trades"):
@@ -1214,21 +1449,41 @@ def collect_settled_trades(
             trade["entry_fee"], trade["fee_source"] = _fee_for(trade, None)
             if not _reconcile(trade, (row,), "journal"):
                 continue
+        for record in retractable.pop(key, []):
+            _retract(record)  # an earlier, unreadable duplicate of this same fill
         by_key[key] = trade
 
     for t in closed_trades:
         key = _join_key(t)
-        if key in by_key or key in seen:
+        if key in by_key:
             continue
-        trade = _admit(t, "closed_trades_only")
-        if trade is None:
+        replaced = key in seen
+        if replaced and key not in retractable:
+            # the journal row was read and then dropped downstream with this very
+            # state row already consulted (stale NO leg, unreconcilable payoff):
+            # retrying it here would only charge the same fill twice
             continue
-        if not _check_no_side(trade, t, "closed_trades"):
+        snapshot = _snapshot() if replaced else None
+        source = "closed_trades_over_unreadable_journal" if replaced else "closed_trades_only"
+        twin = journal_by_key.get(key)
+        trade, _unused = _admit(t, source, twin=twin)
+        ok = trade is not None
+        if ok and not _check_no_side(trade, t, "closed_trades"):
+            ok = False
+        if ok:
+            booked = float(t["entry_fee"]) if t.get("entry_fee") is not None else None
+            trade["entry_fee"], trade["fee_source"] = _fee_for(trade, booked)
+            rows = tuple(r for r in (t, twin) if r is not None)
+            if not _reconcile(trade, rows, source):
+                ok = False
+        if not ok:
+            if snapshot is not None:
+                # the twin is no better than the journal row: keep the journal's
+                # single charge rather than charging one fill twice
+                _restore(snapshot)
             continue
-        booked = float(t["entry_fee"]) if t.get("entry_fee") is not None else None
-        trade["entry_fee"], trade["fee_source"] = _fee_for(trade, booked)
-        if not _reconcile(trade, (t,), "closed_trades_only"):
-            continue
+        for record in retractable.pop(key, []):
+            _retract(record)
         by_key[key] = trade
 
     trades: List[Dict[str, Any]] = []
@@ -1241,8 +1496,30 @@ def collect_settled_trades(
         trades.append(trade)
     trades.sort(key=lambda t: (t["target_date"], t["entry_time"] or "", t["symbol"]))
 
+    listed_rows = [r for r in excluded_rows if r is not None]
     quality_excluded = sum(excluded[r] for r in QUALITY_EXCLUSION_REASONS)
     denominator = len(trades) + quality_excluded
+    if not trades and quality_excluded:
+        # The gate refuses on excluded_rate long before this, but this function
+        # is also the fill collector for non-gating tools, and "0 fills" printed
+        # without a reason reads as "the strategy did not trade" rather than
+        # "every fill it made was dropped". Say which it is, in counts, where
+        # every caller already carries it into its report.
+        warnings.append(
+            {
+                "warning": "every_in_scope_settled_fill_was_excluded",
+                "quality_excluded": quality_excluded,
+                "by_reason": {
+                    r: int(excluded[r]) for r in QUALITY_EXCLUSION_REASONS if excluded[r]
+                },
+                "note": (
+                    "no settled fill survived; a report built on this list is empty for a "
+                    "reason, not because the strategy did not trade. strike_spec_unverifiable "
+                    "on every row means the record predates the FR-1.2 settlement provenance "
+                    "(settlement_spec / settlement_high) the payoff reconciliation needs"
+                ),
+            }
+        )
     counts = {
         "journal_rows": len(journal_rows),
         "closed_trades": len(closed_trades),
@@ -1250,7 +1527,7 @@ def collect_settled_trades(
         "fills_by_source": dict(Counter(t["source"] for t in trades)),
         "fills_by_fee_source": dict(Counter(t["fee_source"] for t in trades)),
         "excluded": dict(sorted(excluded.items())),
-        "excluded_rows": excluded_rows,
+        "excluded_rows": listed_rows,
         "quality_excluded": quality_excluded,
         "quality_exclusion_reasons": list(QUALITY_EXCLUSION_REASONS),
         "excluded_rate": (quality_excluded / denominator) if denominator else 0.0,
@@ -1266,7 +1543,14 @@ def collect_settled_trades(
 
 
 def group_units(trades: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    """One unit per ``target_date``: summed net PnL, contract-weighted breakeven."""
+    """One unit per ``target_date``: summed net PnL, contract-weighted breakeven.
+
+    The key is ``target_date`` ALONE, which is the pre-registered
+    ``grouping_unit`` (FR-5.2 / FR-F3.4) and is NOT redefined here. Each unit
+    therefore records the cities its fills span, so ``evaluate`` can report what
+    that costs: four cities' ladders on one date are one unit, and unlike two
+    brackets on ONE ladder they are not mutually exclusive.
+    """
     buckets: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
     for t in trades:
         buckets[t["target_date"]].append(t)
@@ -1283,11 +1567,15 @@ def group_units(trades: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
             if len(fills) <= MAX_FILLS_FOR_INDEPENDENT_DIAGNOSTIC
             else None
         )
+        cities = sorted({_city_of(f["symbol"]) for f in fills})
         units.append(
             {
                 "target_date": td,
                 "n_fills": len(fills),
                 "symbols": sorted(f["symbol"] for f in fills),
+                "cities": cities,
+                "n_cities": len(cities),
+                "cross_city": len(cities) > 1,
                 "quantity": qty,
                 "net_pnl": net,
                 "q_star": q_star,
@@ -1297,6 +1585,7 @@ def group_units(trades: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
                 "n_minimal_winning_sets": len(minimal),
                 "min_fills_to_win": min((len(a) for a in minimal), default=None),
                 "null_saturated": w_u >= 1,
+                "null_degenerate": float(w_u) >= NULL_DEGENERATE_W,
                 "won": net > 0.0,
                 "_w_u": w_u,
             }
@@ -1415,8 +1704,32 @@ def evaluate(
     n_min = int(thresholds["n_min"])
     alpha = float(thresholds["alpha"])
     net_gt = float(thresholds.get("net_pnl_gt", 0.0))
-    max_excluded = float(thresholds.get("max_excluded_rate", MAX_EXCLUDED_RATE))
+    # The exclusion budget is a GUARD, so the registration may only TIGHTEN it.
+    # It used to be overridable upward with nothing gating the override, which
+    # let a registration dial away the one condition standing between a damaged
+    # sample and a PASS (F3 review round 2, should-fix 4).
+    raw_max_excluded = thresholds.get("max_excluded_rate")
+    reg_max_excluded = None if raw_max_excluded is None else float(raw_max_excluded)
+    max_excluded = (
+        MAX_EXCLUDED_RATE if reg_max_excluded is None
+        else min(reg_max_excluded, MAX_EXCLUDED_RATE)
+    )
+    override_rejected = reg_max_excluded is not None and reg_max_excluded > MAX_EXCLUDED_RATE
     counts = counts or {}
+    extra_warnings: List[Dict[str, Any]] = []
+    if override_rejected:
+        extra_warnings.append(
+            {
+                "warning": "registration_max_excluded_rate_rejected",
+                "registration_max_excluded_rate": reg_max_excluded,
+                "applied": max_excluded,
+                "note": (
+                    "the registration asked to raise the exclusion budget above the "
+                    "hard ceiling; a guard a registration can dial away is not a guard, "
+                    "so the ceiling stands"
+                ),
+            }
+        )
 
     units = group_units(trades)
     n_units = len(units)
@@ -1435,6 +1748,45 @@ def evaluate(
 
     multi = sum(1 for u in units if u["n_fills"] > 1)
     saturated = sum(1 for u in units if u["null_saturated"])
+    degenerate = sum(1 for u in units if u["null_degenerate"])
+    cross_city = sum(1 for u in units if u["cross_city"])
+    city_day_units = len({(c, u["target_date"]) for u in units for c in u["cities"]})
+    max_cities = max((u["n_cities"] for u in units), default=0)
+    if cross_city:
+        extra_warnings.append(
+            {
+                "warning": "cross_city_units_merged",
+                "cross_city_units": cross_city,
+                "n_units": n_units,
+                "n_units_if_grouped_by_city_day": city_day_units,
+                "units_lost_to_cross_city_merging": city_day_units - n_units,
+                "max_cities_in_one_unit": max_cities,
+                "note": (
+                    "the pre-registered unit is target_date ALONE (FR-5.2), so fills on "
+                    "several cities' ladders on one date are scored as ONE trial. That is "
+                    "a power loss of "
+                    f"{city_day_units - n_units} trial(s) here, and the mutual-exclusivity "
+                    "premise the within-unit null leans on does not hold ACROSS cities -- "
+                    "two cities' brackets can both settle YES. Redefining the unit is the "
+                    "owner's call, not the gate's; this is reported so the call is informed"
+                ),
+            }
+        )
+    if degenerate:
+        extra_warnings.append(
+            {
+                "warning": "units_with_degenerate_null",
+                "units": degenerate,
+                "of": n_units,
+                "threshold": NULL_DEGENERATE_W,
+                "dates": [u["target_date"] for u in units if u["null_degenerate"]][:20],
+                "note": (
+                    "these units win under the null almost always, so winning them is not "
+                    "evidence. Saturation (w_u = 1) fires far too late to catch this; a "
+                    "date carrying several brackets, or several cities, is already here"
+                ),
+            }
+        )
     w_us = [u.pop("_w_u") for u in units]  # Fractions: not for the JSON
     p_exact: Optional[Fraction] = None
     if n_units:
@@ -1563,6 +1915,9 @@ def evaluate(
                 for r in QUALITY_EXCLUSION_REASONS
                 if counts.get("excluded", {}).get(r)
             },
+            "hard_ceiling": MAX_EXCLUDED_RATE,
+            "registration_max_excluded_rate": reg_max_excluded,
+            "registration_override_rejected": override_rejected,
             "source": FORMULAS["exclusion_rate"],
             "note": (
                 "every gating number is computed over ADMITTED fills only, so a dropped "
@@ -1618,6 +1973,29 @@ def evaluate(
             "rule": FORMULAS["unit_win"],
             "units_with_multiple_fills": multi,
             "units_with_saturated_null": saturated,
+            "units_with_degenerate_null": degenerate,
+            "degenerate_null_threshold": NULL_DEGENERATE_W,
+            "degenerate_note": (
+                "a unit whose least-favourable null win probability reaches "
+                f"{NULL_DEGENERATE_W} carries next to no evidence: under the null it wins "
+                "almost always. Saturation at 1 is the extreme case and fires far too "
+                "late -- two brackets at q* = 0.47, or three cities at q* = 0.30, are "
+                "already here"
+            ),
+            "cross_city_units": cross_city,
+            "n_units_if_grouped_by_city_day": city_day_units,
+            "units_lost_to_cross_city_merging": city_day_units - n_units,
+            "max_cities_in_one_unit": max_cities,
+            "cross_city_note": (
+                "GOVERNANCE, not a gate: FR-5.2 pre-registers the unit as target_date "
+                "ALONE, so fills on several cities' ladders on one date collapse into one "
+                "trial. Two brackets on ONE city-day ladder are mutually exclusive, which "
+                "is what the within-unit null is built on; two cities' brackets are NOT "
+                "mutually exclusive, only correlated through synoptic weather. The gate "
+                "reports the merging and its power cost and refuses to redefine the "
+                "pre-registered unit on its own authority"
+            ),
+            "cross_city_formula": FORMULAS["cross_city_units"],
             "saturated_note": (
                 "a unit whose least-favourable null win probability reaches 1 carries NO "
                 "evidence: some dependence structure makes it win every time. Several "
@@ -1645,7 +2023,7 @@ def evaluate(
             "entry_fees": fees,
             "source": FORMULAS["net_pnl"],
         },
-        "warnings": list(counts.get("warnings") or []),
+        "warnings": list(counts.get("warnings") or []) + extra_warnings,
         "formulas": dict(FORMULAS),
         "unit_table": units,
         "fills": [dict(t) for t in trades],
@@ -1699,6 +2077,7 @@ def run_gate(
         strategy_name=strategy_name,
         market_family=str(registration.get("market_family", "KXHIGH")),
         fee_type=str(registration.get("fee_type") or "taker"),
+        reconcile_settlement=True,  # explicit: the gate never scores money it cannot reproduce
     )
     if counts["stale_no_side_rows"]:
         rows = counts["stale_no_side_rows"]
@@ -1821,8 +2200,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"p_secondary={u['p_pooled_qbar_secondary']}) "
             f"net_pnl={verdict['pnl']['net']:+.2f} "
             f"excluded_rate={verdict['counts']['excluded_rate']:.4f} "
-            f"saturated_units={u['units_with_saturated_null']}"
+            f"saturated_units={u['units_with_saturated_null']} "
+            f"degenerate_units={u['units_with_degenerate_null']} "
+            f"cross_city_units={u['cross_city_units']}"
+            + (
+                f" [{u['units_lost_to_cross_city_merging']} trial(s) lost to cross-city "
+                "unit merging -- see units.cross_city_note]"
+                if u["cross_city_units"]
+                else ""
+            )
         )
+        for w in verdict["warnings"]:
+            print(f"  WARNING: {w.get('warning')}: {w.get('note') or ''}")
         for reason in verdict["refusals"]:
             print(f"  REFUSED: {reason}")
     else:
