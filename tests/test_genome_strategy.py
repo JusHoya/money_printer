@@ -38,7 +38,14 @@ WALLCLOCK_FILES = (
     REPO_ROOT / "src" / "factory" / "features.py",
     REPO_ROOT / "src" / "factory" / "genome.py",
 )
-FRAMES_DIR = os.getenv("MP_FACTORY_FRAMES")  # dev box: the frozen frame lives outside a worktree
+#: The frozen parity frame. ``MP_FACTORY_FRAMES`` still overrides it (a dev box that
+#: keeps the frame outside the checkout), but the default is the repo's OWN path --
+#: the same one ``scripts/factory_replay_parity.py`` resolves to. ``data/factory/`` is
+#: gitignored, so a fresh clone genuinely has no frame and the class skips; a checkout
+#: that HAS the frame now runs the single most load-bearing F3 claim instead of
+#: silently skipping it because an env var nobody sets was unset.
+DEFAULT_FRAMES_DIR = REPO_ROOT / "data" / "factory" / "frames" / "weather_2026-07-25_bfcf94654a3a"
+FRAMES_DIR = os.getenv("MP_FACTORY_FRAMES") or str(DEFAULT_FRAMES_DIR)
 
 
 # ---------------------------------------------------------------------------
@@ -570,9 +577,18 @@ class TestBotShadowMode:
 
 
 # ---------------------------------------------------------------------------
-# replay parity on the frozen frame (dev box / factory container only)
+# replay parity on the frozen frame (runs wherever the frame exists)
+#
+# Scope note: run_parity serves the FRAME's WalkForwardCalibrationProvider, not
+# the FrozenCalibrationProvider weather_bot.py builds. This proves the strategy
+# reproduces the frame under the frame's own calibration -- see the registered
+# deviation in PRD_STRATEGY_FACTORY.md Phase F3 for what it does not prove.
 # ---------------------------------------------------------------------------
-@pytest.mark.skipif(not FRAMES_DIR or not Path(FRAMES_DIR).exists(), reason="MP_FACTORY_FRAMES not set")
+@pytest.mark.skipif(
+    not Path(FRAMES_DIR).exists(),
+    reason=f"no frozen parity frame at {FRAMES_DIR} "
+           "(build it with scripts/factory.py freeze-frame, or point MP_FACTORY_FRAMES at one)",
+)
 class TestReplayParity:
     def test_one_seed_and_one_pick_replay_with_zero_discrepancies(self):
         pytest.importorskip("pandas")

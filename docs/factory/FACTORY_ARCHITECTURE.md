@@ -163,7 +163,10 @@ exit criterion pins (F1 correction: an earlier draft said "all windows, all band
 only**, mode gene forced to taker for any search}; `mlweather_fallback` = the shape the
 sandbox trades today (buy NO on the highest-YES-bid bracket when the forecast is ≥1.2F
 outside a 1F bracket) — scored settlement-true so the owner sees, for the first time, a
-number for what maia is paper-trading `[graft: FORGE]`.
+number for what maia is paper-trading `[graft: FORGE]`. Two further seeds are encoded
+but not spelled out above — `far_yes_taker` (the fourth Phase-2 taker shape) and
+`fr31a_gefs` (fr31a's genes on the gefs twin frame) — for **seven** in total;
+`src/factory/genome.py:SEEDS` is the roster of record (PRD FR-F1.5).
 
 Operators: per-gene mutation rate 1/L (subset genes flip one bit, never to empty; ordinal
 genes step ±1 quantum with p=0.1 jump to/from OFF; direction flips p=0.02); uniform
@@ -560,7 +563,10 @@ Never `git add -A` (data caches under `data/` are not ignored).
    lab's pessimistic price natively — no engine change; `confidence = p_win`; `is_maker=False`
    so the sim books taker fees; tz-aware `expiration_time`. Every existing gate applies
    unchanged (slot, EV gate, Kelly, daily cap, cooldowns, drawdown, allocation,
-   MAX_CONTRACTS=50).
+   MAX_CONTRACTS=50) — including Kelly's cold-start behaviour, which for a genome that
+   buys NO at a median quote of 0.83 sizes 117 of its 130 offline trades to **zero**
+   contracts. Shadow mode never reaches sizing, so this only bites at promotion to
+   paper; it is the open owner decision recorded in HANDOFF.md 2026-09-05.
 6. **Fills** — `realistic_fills=True` is a penny-floor coin flip in [0.01, 0.05]
    (matching_engine.py:437-448, 814-827), **not** a fill model, and is not claimed as
    FR-5.2's "realistic fills". The factory's claim is: fills at `quote + 1c` (more
@@ -619,7 +625,7 @@ Never `git add -A` (data caches under `data/` are not ignored).
 | Silent input drift | sha256 of every input, the frame, the lock file, the fee regime, and the git rev in `run.json`; resume refuses on mismatch; the runtime `GenomeStrategy` refuses to construct on a fee-type or calibration-hash mismatch. |
 | Wall-clock reads | `guards.py` tripwire in workers; `grep` test on `genome_strategy.py`; clock injected by the bot. |
 | Modelled-EV trap | `ev_per_contract` is hidden; `fit()` is realized settlement PnL only; the EV gate exists only as `sandbox_admissible` (a stricter admission filter, never a score). |
-| Lab ≠ sandbox | `features.py` shared; replay parity test (0 discrepancies over 1,656 markets); hourly decision cadence; `sandbox_admissible` in the search frame; weekly lab-vs-paper reconciliation with REJECT-coded differences; runtime forecast provider is the same product (`gfs_mex` via IEM MOS) at the same vintage rule. |
+| Lab ≠ sandbox | `features.py` shared; replay parity test (0 discrepancies over 1,656 markets for the ten taker genomes, under the frame's walk-forward calibration — the maker seed and the frozen-provider gap are registered in PRD_STRATEGY_FACTORY Phase F3); hourly decision cadence; `sandbox_admissible` in the search frame; weekly lab-vs-paper reconciliation with REJECT-coded differences; runtime forecast provider is the same product (`gfs_mex` via IEM MOS) at the same vintage rule. |
 | Presenting an unsearchable lane as evidence | `factory.py run` asserts ≥40 independent units; the board prints NOT_PROMOTABLE(n) for gas (14) and NOT_READY for mention/tweets/crypto_annual. |
 | Root container blanking provenance | non-root service; run aborts on empty git rev. |
 
