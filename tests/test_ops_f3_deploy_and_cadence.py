@@ -17,17 +17,33 @@ scripts/check_maia_emit_cadence.py
      limit-price clause;
   7. ``NO_EMIT`` -- the NORMAL verdict -- was uninterpretable.
 
-The deploy script is exercised through its side-effect-free ``--plan`` pre-flight
-with the clock pinned by ``MP_DEPLOY_NOW_EPOCH``; the parts that need docker/sudo
-are asserted structurally against the script text.
+and the remediation review of the same day:
+
+  B1. the boundary wait ran BEFORE the repair but was sized as if only ``up -d``
+      followed, so the default path could sleep most of an hour and still launch
+      past the tolerance -- and no test reached the wait at all;
+  B2. ``boundary_state`` compared seconds-into-the-hour against 45 s, so +50 s got
+      an unrecoverable-cost warning and a 58-minute sleep, and the spot the wait
+      parks in (-75 s) was reported LATE after a SUCCESSFUL wait;
+  B3. ``NO_GENOME_LINES`` was decided by ``{ts.minute == 0}`` over any line, so a
+      tail starting after a ``:00`` reported a genome that had already decided as
+      silent.
+
+The deploy script is exercised three ways: its side-effect-free ``--plan`` pre-flight,
+its ``--help``, and ``MP_DEPLOY_LIB_ONLY=1`` which sources the boundary/poll helpers so
+the REAL wait and poll loops run (``MP_DEPLOY_NOW_EPOCH`` pins the clock and ``nap``
+advances it instead of sleeping). Only the parts that need docker/sudo are asserted
+structurally against the script text.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from typing import Optional
 
 import pytest
 
@@ -39,11 +55,22 @@ CHECKER = os.path.join(ROOT, "scripts", "check_maia_emit_cadence.py")
 DEPLOY = os.path.join(ROOT, "deploy", "pi", "deploy_f3_shadow.sh")
 DEPLOY_TEXT = open(DEPLOY, "r", encoding="utf-8").read()
 
-TOP_OF_HOUR = 1757041200          # 2026-09-05T00:00:00Z -- exactly on a boundary
+TOP_OF_HOUR = 1757041200           # exactly on a :00 boundary (epoch % 3600 == 0)
 LATE_IN_HOUR = TOP_OF_HOUR + 2968  # +49m28s, the real 2026-09-05T03:49:28Z offset
+JUST_AFTER_HOUR = TOP_OF_HOUR + 50    # inside the 120 s tolerance, past the 45 s "usable"
+RUN_UP_TO_HOUR = TOP_OF_HOUR + 3525   # 75 s BEFORE the next :00 -- where the wait parks
+MID_HOUR = TOP_OF_HOUR + 1800         # the one place that really is off-boundary
+
+# Mirrors the script's own defaults; asserted against the script text below.
+LAUNCH_LEAD_S = 75
+REPAIR_BUDGET_S = 240
 
 BASH = shutil.which("bash")
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash not on PATH")
+
+# Request paths the stub_dashboard fixture actually served, so a test can assert what
+# went over the wire rather than what the source says it would send.
+_stub_requests: list = []
 
 
 def _check(*args: str):
@@ -64,6 +91,31 @@ def _plan(*args: str, epoch: int = TOP_OF_HOUR, **env):
                           capture_output=True, text=True, cwd=ROOT, timeout=120, env=environ)
 
 
+def _lib(snippet: str, epoch: Optional[int] = TOP_OF_HOUR, **env):
+    """Source the deploy script's boundary/poll helpers and run `snippet` against them.
+
+    ``MP_DEPLOY_LIB_ONLY=1`` stops the script after the helper definitions, before any
+    argument parsing or side effect, so the REAL wait path can be driven -- ``nap``
+    advances the pinned ``MP_DEPLOY_NOW_EPOCH`` instead of sleeping. This is how the
+    wait gets behavioural coverage: ``--plan`` exits at step 0 and never reaches it.
+    """
+    environ = {**os.environ, "MP_DEPLOY_LIB_ONLY": "1", **env}
+    if epoch is None:
+        environ.pop("MP_DEPLOY_NOW_EPOCH", None)
+    else:
+        environ["MP_DEPLOY_NOW_EPOCH"] = str(epoch)
+    script = "set -euo pipefail\nsource deploy/pi/deploy_f3_shadow.sh\n" + snippet + "\n"
+    return subprocess.run([BASH, "-c", script], capture_output=True, text=True,
+                          cwd=ROOT, timeout=120, env=environ)
+
+
+def _planned_wait_s(proc) -> int:
+    """The number of seconds the pre-flight says this run will sleep."""
+    m = re.search(r"will WAIT ~(\d+)s", proc.stdout)
+    assert m, f"the pre-flight does not announce a wait:\n{proc.stdout}"
+    return int(m.group(1))
+
+
 @pytest.fixture()
 def stub_dashboard():
     """A dashboard stub: /api/logs/tail serves one shadow EMIT, everything else 404s.
@@ -76,8 +128,11 @@ def stub_dashboard():
     body = json.dumps({"ok": True, "file": "money_printer_20260905_034934.log",
                        "lines": 2, "content": _EMIT + _SHADOW}).encode()
 
+    _stub_requests.clear()
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
+            _stub_requests.append(self.path)
             if self.path.split("?")[0] == "/api/logs/tail":
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -239,10 +294,22 @@ def test_no_emit_says_no_boundary_was_sampled(tmp_path):
     assert "NO_BOUNDARY_IN_WINDOW" in err and "next :00 UTC" in err
 
 
+def _covering_tail(*extra: str) -> tuple:
+    """A tail that really covers the 19:00 decision interval: 18:59:50 -> 19:02:30.
+
+    The genome may log its decision anywhere in ``[19:00:00, 19:00:00 + 120s]``
+    (DEFAULT_TOP_OF_HOUR_TOLERANCE_S), so only a tail spanning that whole interval can
+    say anything about the genome's silence.
+    """
+    return ("2026-09-05 18:59:50 | INFO    | [Weather] Using METAR data for station KNYC\n",
+            *extra,
+            "2026-09-05 19:02:30 | INFO    | [Weather] Using METAR data for station KNYC\n")
+
+
 def test_no_emit_says_the_genome_is_alive_and_legitimately_silent(tmp_path):
     already = ("2026-09-05 19:00:05 | INFO    | [Risk] REJECT strategy=Genome 0c4b2050 "
                "symbol=KXHIGHNY-26SEP05-B79.5 reason=GENOME_ALREADY_TRADED target_date=2026-09-05\n")
-    log = _log(tmp_path, _TICK.format(m=59, s=50).replace("18:", "18:"), already)
+    log = _log(tmp_path, *_covering_tail(already))
     rc, verdict, err = _check("--file", log, "--no-data-log", "--strategy", "Genome")
     assert rc == 3 and verdict["verdict"] == "NO_EMIT"
     assert verdict["no_emit_reason"] == "GENOME_ALIVE_NO_EMIT", verdict
@@ -251,14 +318,65 @@ def test_no_emit_says_the_genome_is_alive_and_legitimately_silent(tmp_path):
     assert "GENOME_ALIVE_NO_EMIT" in err and "Nothing to do" in err
 
 
+def test_proof_of_life_outranks_a_half_covered_window(tmp_path):
+    """A skip code says "loaded and deciding" even when the tail covers no boundary.
+
+    The reason chain used to test the window FIRST, so a genome that demonstrably spoke
+    was reported as `NO_BOUNDARY_IN_WINDOW`.
+    """
+    already = ("2026-09-05 19:00:05 | INFO    | [Risk] REJECT strategy=Genome 0c4b2050 "
+               "symbol=KXHIGHNY-26SEP05-B79.5 reason=GENOME_ALREADY_TRADED target_date=2026-09-05\n")
+    rc, verdict, err = _check("--file", _log(tmp_path, already), "--no-data-log", "--strategy", "Genome")
+    assert rc == 3 and verdict["no_emit_reason"] == "GENOME_ALIVE_NO_EMIT", verdict
+    assert verdict["boundaries_sampled"] == [], verdict
+
+
 def test_no_emit_says_the_genome_logged_nothing_at_all(tmp_path):
-    # a boundary WAS sampled and no strategy line exists: the genome is not loaded
-    log = _log(tmp_path, "2026-09-05 19:00:05 | INFO    | [Weather] Using METAR data for station KNYC\n")
-    rc, verdict, err = _check("--file", log, "--no-data-log", "--strategy", "Genome")
+    # the whole 19:00 decision interval is inside the tail and no strategy line exists,
+    # so "the genome is not loaded" is a conclusion the window actually supports
+    rc, verdict, err = _check("--file", _log(tmp_path, *_covering_tail()),
+                              "--no-data-log", "--strategy", "Genome")
     assert rc == 3 and verdict["verdict"] == "NO_EMIT"
     assert verdict["no_emit_reason"] == "NO_GENOME_LINES", verdict
     assert verdict["boundaries_sampled"] == ["2026-09-05T19:00"] and verdict["n_strategy_lines"] == 0
     assert "NO_GENOME_LINES" in err and "REFUSED" in err
+
+
+def test_a_tail_that_starts_after_the_boundary_is_not_evidence_of_a_silent_genome(tmp_path):
+    """The reviewer's case: tail from 19:00:30, genome decided at 19:00:07.
+
+    `boundaries_sampled` was `{ts.minute == 0}` over ANY line, so this tail "sampled a
+    boundary", found no strategy line and confidently reported NO_GENOME_LINES -- telling
+    the operator to go hunt for a REFUSED line that does not exist. The decision instant
+    was simply already scrolled off the top of the tail.
+    """
+    lines = ["2026-09-05 19:00:30 | INFO    | [Weather] Using METAR data for station KNYC\n",
+             "2026-09-05 19:04:10 | INFO    | [Weather] Using METAR data for station KNYC\n"]
+    rc, verdict, err = _check("--file", _log(tmp_path, *lines), "--no-data-log", "--strategy", "Genome")
+    assert rc == 3 and verdict["verdict"] == "NO_EMIT"
+    assert verdict["no_emit_reason"] != "NO_GENOME_LINES", verdict
+    assert verdict["no_emit_reason"] == "NO_BOUNDARY_IN_WINDOW", verdict
+    # the raw observation is still reported, it just no longer decides the diagnosis
+    assert verdict["boundaries_seen"] == ["2026-09-05T19:00"]
+    assert verdict["boundaries_sampled"] == []
+    assert "STARTS after one" in err, err
+
+
+def test_a_tail_that_stops_inside_the_tolerance_is_not_evidence_either(tmp_path):
+    """Same defect at the other end: the tail ends 40 s into the tolerance window."""
+    lines = ["2026-09-05 18:59:50 | INFO    | [Weather] Using METAR data for station KNYC\n",
+             "2026-09-05 19:00:40 | INFO    | [Weather] Using METAR data for station KNYC\n"]
+    rc, verdict, _ = _check("--file", _log(tmp_path, *lines), "--no-data-log", "--strategy", "Genome")
+    assert rc == 3 and verdict["no_emit_reason"] == "NO_BOUNDARY_IN_WINDOW", verdict
+    assert verdict["boundaries_seen"] == ["2026-09-05T19:00"] and verdict["boundaries_sampled"] == []
+
+
+def test_the_decision_window_matches_the_strategy_constant():
+    """`_covered_boundaries` is only right while it mirrors the runtime tolerance."""
+    import scripts.check_maia_emit_cadence as chk
+    from src.strategies.genome_strategy import DEFAULT_TOP_OF_HOUR_TOLERANCE_S
+
+    assert chk.DECISION_WINDOW_S == DEFAULT_TOP_OF_HOUR_TOLERANCE_S
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +507,213 @@ def test_the_boundary_tolerance_matches_the_strategy_constant():
     assert f"MP_TOP_OF_HOUR_TOLERANCE_S:-{DEFAULT_TOP_OF_HOUR_TOLERANCE_S}" in DEPLOY_TEXT
 
 
+def test_the_scripts_default_lead_and_budget_are_what_these_tests_assume():
+    assert f"MP_LAUNCH_LEAD_S:-{LAUNCH_LEAD_S}" in DEPLOY_TEXT
+    assert f"MP_REPAIR_BUDGET_S:-{REPAIR_BUDGET_S}" in DEPLOY_TEXT
+
+
+# ---------------------------------------------------------------------------
+# Remediation blocking 2 -- the verdict is the distance to the NEAREST :00.
+#
+# `usable = TOLERANCE - LAUNCH_LEAD_S` (45 s) cannot express "just before the next
+# :00", so everything past +45 s was LATE: a deploy 50 s into the hour got the full
+# "unrecoverable ... closes EVERY city-day" block plus a 57.9-minute sleep, and the
+# spot the wait itself parks in (75 s BEFORE a :00) was reported LATE too -- a
+# successful wait logged as a failure.
+# ---------------------------------------------------------------------------
+
+@needs_bash
+@pytest.mark.parametrize("epoch,verdict", [
+    (TOP_OF_HOUR, "IN_WINDOW"),          # on the boundary
+    (JUST_AFTER_HOUR, "IN_WINDOW"),      # +50 s: first tick lands well inside 120 s
+    (RUN_UP_TO_HOUR, "IN_WINDOW"),       # -75 s: exactly where the wait parks
+    (TOP_OF_HOUR + 3480, "IN_WINDOW"),   # -120 s: the far edge of the tolerance
+    (TOP_OF_HOUR + 121, "LATE"),         # +121 s: one second past it
+    (TOP_OF_HOUR + 3479, "LATE"),        # -121 s: one second before it
+    (MID_HOUR, "LATE"),                  # the middle of the hour
+])
+def test_the_verdict_measures_the_nearest_boundary(epoch, verdict):
+    proc = _plan(epoch=epoch)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"boundary verdict    = {verdict}" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_a_deploy_just_after_the_hour_is_not_told_it_forfeits_the_day():
+    """+50 s is inside the tolerance: no unrecoverable-cost block, and no hour-long sleep."""
+    proc = _plan("--no-repair", epoch=JUST_AFTER_HOUR)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "COST of deploying now" not in proc.stdout, proc.stdout
+    assert "unrecoverable" not in proc.stdout
+    assert "will WAIT" not in proc.stdout
+    assert "planned wait 0s" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_the_spot_the_wait_parks_in_is_not_reported_as_late():
+    """After a SUCCESSFUL wait the script must not log its own success as a failure."""
+    proc = _plan("--no-repair", epoch=RUN_UP_TO_HOUR)
+    assert "boundary verdict    = IN_WINDOW" in proc.stdout, proc.stdout
+    assert "planned wait 0s" in proc.stdout, proc.stdout
+    assert "COST of deploying now" not in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Remediation blocking 1 -- the wait must account for the work that follows it.
+#
+# The repair (compose stop + 2-4 `compose run` container starts) is the DEFAULT path
+# and runs BETWEEN the wait and `up -d`. A wait sized as if only `up -d` followed
+# slept most of an hour and STILL launched past the tolerance.
+# ---------------------------------------------------------------------------
+
+@needs_bash
+def test_the_wait_subtracts_the_repair_budget_that_follows_it():
+    with_repair = _planned_wait_s(_plan(epoch=LATE_IN_HOUR))
+    without_repair = _planned_wait_s(_plan("--no-repair", epoch=LATE_IN_HOUR))
+    # 632 s to the next :00, minus the launch lead, minus the repair when it will run
+    assert without_repair == 632 - LAUNCH_LEAD_S, without_repair
+    assert with_repair == without_repair - REPAIR_BUDGET_S, (with_repair, without_repair)
+
+
+@needs_bash
+def test_the_wait_really_lands_up_d_on_the_boundary_after_the_repair():
+    """Drive the wait itself, then the repair, and check where `up -d` would land.
+
+    This is the path `--plan` can never reach: it exits at step 0. Under the
+    MP_DEPLOY_NOW_EPOCH seam `nap` advances the pinned clock, so the arithmetic, the
+    announcement and the post-wait verdict are all the real ones.
+    """
+    proc = _lib(
+        'wait_for_launch_window "$REPAIR_BUDGET_S" "$MAX_WAIT_S" "boundary gate"\n'
+        f'nap {REPAIR_BUDGET_S}   # the repair happens here, between the wait and `up -d`\n'
+        'echo "LAUNCH $(boundary_state)"',
+        epoch=LATE_IN_HOUR,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    into, until_next, nearest, verdict = proc.stdout.strip().splitlines()[-1].split()[1:]
+    assert verdict == "IN_WINDOW", proc.stdout
+    # `up -d` runs LAUNCH_LEAD_S before the :00, which is what the lead is for
+    assert int(until_next) == LAUNCH_LEAD_S, proc.stdout
+    assert "waiting 317s" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_the_old_unbudgeted_wait_would_have_launched_late():
+    """The premise: waiting to the lead and THEN repairing overshoots the tolerance.
+
+    Same seam, but the wait is given a zero budget the way the script used to size it.
+    """
+    proc = _lib(
+        'wait_for_launch_window 0 "$MAX_WAIT_S" "unbudgeted"\n'
+        f'nap {REPAIR_BUDGET_S}\n'
+        'echo "LAUNCH $(boundary_state)"',
+        epoch=LATE_IN_HOUR,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.strip().splitlines()[-1].split()[-1] == "LATE", proc.stdout
+
+
+@needs_bash
+def test_the_wait_is_bounded_and_refuses_instead_of_sleeping():
+    """`--max-wait` turns a long wait into a refusal, and it does not sleep first."""
+    proc = _lib(
+        'if wait_for_launch_window "$REPAIR_BUDGET_S" 60 "bounded"; then echo SLEPT; '
+        'else echo "REFUSED into=$(( MP_DEPLOY_NOW_EPOCH % 3600 ))"; fi',
+        epoch=JUST_AFTER_HOUR,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "would have to wait 3235s, more than the 60s bound" in proc.stdout, proc.stdout
+    # refused WITHOUT advancing the clock: it did not sleep and then give up
+    assert "REFUSED into=50" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_max_wait_is_reachable_from_the_command_line_and_shown_in_the_plan():
+    proc = _plan("--max-wait", "60", epoch=LATE_IN_HOUR)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "REFUSED: 317s exceeds the 60s --max-wait bound" in proc.stdout, proc.stdout
+    proc = _plan("--max-wait", "600", epoch=LATE_IN_HOUR)
+    assert "--max-wait bound: 600s" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_the_wait_is_announced_and_interruptible():
+    """Announced with a target time, chunked so SIGINT lands promptly, and trapped."""
+    proc = _lib('trap -p INT\nnap 2\necho "slept for real"', epoch=None)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "on_int" in proc.stdout, proc.stdout          # an INT handler is installed
+    assert "slept for real" in proc.stdout
+    announce = _lib('wait_for_launch_window 0 3600 "boundary gate"', epoch=MID_HOUR)
+    assert "Ctrl-C is safe here" in announce.stdout, announce.stdout
+    assert re.search(r"waiting 1725s \(until ~\d{4}-\d\d-\d\dT", announce.stdout), announce.stdout
+
+
+@needs_bash
+def test_the_top_up_wait_after_the_repair_is_capped_so_the_sandbox_is_not_left_down():
+    """Step 7 waits only briefly: the sandbox is STOPPED between the repair and `up -d`."""
+    assert 'wait_for_launch_window 0 "$TOPUP_CAP" "launch gate"' in DEPLOY_TEXT
+    # if the repair blew its budget, launch rather than leave the sandbox down for an hour
+    proc = _lib('if wait_for_launch_window 0 240 "launch gate"; then echo WAITED; '
+                'else echo LAUNCH_ANYWAY; fi', epoch=MID_HOUR)
+    assert "LAUNCH_ANYWAY" in proc.stdout, proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Remediation should-fixes: --help, the seam comment, the loaded-line deadline.
+# ---------------------------------------------------------------------------
+
+@needs_bash
+def test_help_stops_at_the_end_of_the_header():
+    """`sed -n '2,50p'` spilled `set -euo pipefail` and the argument-parsing loop."""
+    proc = subprocess.run([BASH, DEPLOY, "--help"], capture_output=True, text=True,
+                          cwd=ROOT, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert "set -euo pipefail" not in proc.stdout, proc.stdout[-800:]
+    assert "unknown option" not in proc.stdout
+    assert "case \"$1\" in" not in proc.stdout
+    # and it still prints the whole header, including its last section
+    assert "§BOUNDARY" in proc.stdout and "reported a successful wait as a failure" in proc.stdout
+    assert all(ln.startswith("#") for ln in proc.stdout.splitlines()), proc.stdout
+
+
+def test_every_test_file_the_ops_tooling_names_actually_exists():
+    """The MP_DEPLOY_NOW_EPOCH seam pointed at tests/test_ops_deploy_preflight.py."""
+    texts = {DEPLOY: DEPLOY_TEXT, CHECKER: open(CHECKER, encoding="utf-8").read(),
+             RUNBOOK: RUNBOOK_TEXT}
+    named = {(src, m) for src, text in texts.items()
+             for m in re.findall(r"tests/test_[A-Za-z0-9_]+\.py", text)}
+    assert named, "no test file is referenced anywhere -- the seam lost its pointer"
+    missing = [(src, m) for src, m in named if not os.path.exists(os.path.join(ROOT, m))]
+    assert missing == [], f"referenced but absent: {missing}"
+
+
+@needs_bash
+def test_the_loaded_line_is_polled_to_a_deadline_not_read_once_after_a_blind_sleep(tmp_path):
+    """A bot that writes its loaded line late is a slow Pi, not a broken deploy."""
+    counter = tmp_path / "polls"
+    counter.write_text("0", encoding="utf-8")
+    cnt = str(counter).replace("\\", "/")
+    reader = (f'n=$(cat {cnt}); n=$((n+1)); echo $n > {cnt}; '
+              'if [ "$n" -ge 3 ]; then echo "[Weather] GenomeStrategy 0c4b loaded (mode=shadow)"; fi')
+    env = {"MP_GENOME_LOG_CMD": reader, "MP_LOADED_DEADLINE_S": "10", "MP_LOADED_POLL_S": "1"}
+
+    # the old behaviour -- one read, then a hard `die` -- reproduced with a zero deadline
+    single = _lib('if out="$(poll_genome_log fake)"; then echo "GOT $out"; else echo DIED; fi',
+                  epoch=None, **{**env, "MP_LOADED_DEADLINE_S": "0"})
+    assert "DIED" in single.stdout, single.stdout
+
+    counter.write_text("0", encoding="utf-8")
+    polled = _lib('if out="$(poll_genome_log fake)"; then echo "GOT $out"; else echo DIED; fi',
+                  epoch=None, **env)
+    assert "GOT [Weather] GenomeStrategy 0c4b loaded" in polled.stdout, polled.stdout
+    assert counter.read_text(encoding="utf-8").strip() == "3", "it did not actually poll"
+
+
+def test_the_loaded_gate_no_longer_blind_sleeps():
+    assert "\nsleep 10\n" not in DEPLOY_TEXT, "the blind 10 s sleep before the gate is back"
+    assert "MP_LOADED_DEADLINE_S" in DEPLOY_TEXT and "poll_genome_log" in DEPLOY_TEXT
+
+
 # ---------------------------------------------------------------------------
 # Finding 8 -- the runbook stated arithmetic and remedies that do not hold.
 # ---------------------------------------------------------------------------
@@ -412,13 +737,17 @@ def test_runbook_does_not_offer_the_two_inoperative_no_emit_remedies():
     assert "cannot widen it" in RUNBOOK_TEXT and "no ssh to maia" in RUNBOOK_TEXT
 
 
-def test_the_lines_clamp_the_runbook_describes_is_real():
-    """Both ends really do clamp at 500 -- the reason --lines is not a remedy."""
-    import inspect
+def test_the_lines_clamp_the_runbook_describes_is_real(stub_dashboard):
+    """Both ends really do clamp at 500 -- the reason --lines is not a remedy.
 
-    import scripts.check_maia_emit_cadence as chk
-
-    assert "min(max(lines, 1), 500)" in inspect.getsource(chk.fetch_log_tail)
+    Asserted by ASKING for more and reading what actually went over the wire, plus the
+    server-side half (which no test here can drive without the FastAPI app).
+    """
+    rc, verdict, err = _check("--url", stub_dashboard, "--no-data-log", "--timeout", "5",
+                              "--strategy", "Genome", "--lines", "5000")
+    assert rc == 0, err
+    assert _stub_requests and "lines=500" in _stub_requests[-1], _stub_requests
+    assert "lines=5000" not in _stub_requests[-1]
     server = open(os.path.join(ROOT, "src", "web", "server.py"), encoding="utf-8").read()
     assert "all_lines[-min(max(lines, 1), 500):]" in server
 
@@ -432,11 +761,17 @@ def test_runbook_drops_the_stale_xfail_parenthetical():
 
 def test_runbook_does_not_claim_the_protected_diff_is_empty():
     """§1.1 documents ONE allowed hunk in matching_engine.py, so the diff is never empty."""
+    if shutil.which("git") is None:
+        pytest.skip("git not on PATH; the premise cannot be checked here")
     proc = subprocess.run(
         ["git", "diff", "--stat", "38d5fdd", "--", "src/core/risk_manager.py",
          "src/bots/mixins.py", "src/core/matching_engine.py"],
         capture_output=True, text=True, cwd=ROOT, timeout=60,
     )
+    # without this, a checkout where `git diff` errors (no repo, unknown rev) produced
+    # empty stdout and the assertion below blamed the runbook for it
+    first_err = (proc.stderr.strip().splitlines() or ["<no stderr>"])[0]
+    assert proc.returncode == 0, f"git diff failed (rc={proc.returncode}): {first_err}"
     assert "matching_engine.py" in proc.stdout, "premise changed: the allowed hunk is gone"
     assert "empty on the merge commit" not in RUNBOOK_TEXT, \
         "the checklist still asserts an empty diff, which is false and contradicts §1.1"
