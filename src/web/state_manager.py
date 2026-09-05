@@ -2,6 +2,15 @@
 StateManager — produces a JSON-serializable snapshot of the full trading system
 for the HTML dashboard. Reads directly from risk_manager, exchange, bots, and
 the TUI Dashboard (for alerts/logs/strategy stats), bypassing the TUI render path.
+
+Genome observability (F3 red team, 2026-09-05). ``snapshot()["genome"]`` reports
+the promoted genome the weather bot is running: whether it was built at all or
+REFUSED at startup, its id, its spec mode, the EFFECTIVE shadow flag, its
+counters, and a bounded view of the persisted state file that decides whether it
+may emit. It is assembled by DUCK TYPING off the orchestrator's bots — this
+module must import nothing from ``src.factory`` or
+``src.strategies.genome_strategy`` (``tests/test_factory_isolation.py`` pins the
+runtime import graph of the two entry points).
 """
 
 import csv
@@ -9,11 +18,24 @@ import glob
 import os
 import time
 from collections import deque
+from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass  # avoid circular import; OrchestratorEngine imported at runtime
+
+# ---------------------------------------------------------------------------
+# Genome block bounds. The snapshot ships over /ws at 1 Hz, so the persisted
+# genome state is summarised, never mirrored: the per-city last evaluated hour
+# in full (at most four cities), plus only the most recent days of the
+# missed-day and traded sets, plus counts of the whole thing.
+# ---------------------------------------------------------------------------
+GENOME_STATE_DAYS = 2
+GENOME_STATE_MAX_ROWS = 100
+#: ``state_dict()`` iterates sets the market thread mutates. One retry turns the
+#: usual transient "Set changed size during iteration" into a served payload.
+GENOME_STATE_ATTEMPTS = 2
 
 
 def _fmt_uptime(start_time: datetime) -> str:
@@ -54,6 +76,41 @@ def _detect_mode(orchestrator) -> str:
     return "sandbox" if "demo" in api_url.lower() else "paper"
 
 
+def _as_float(value):
+    """A JSON-safe float, or None. NaN becomes None: Starlette's JSONResponse
+    serialises with ``allow_nan=False`` and would 500 the whole endpoint."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None  # NaN != NaN
+
+
+def _as_str(value):
+    """A non-empty str, or None. Anything else (a MagicMock in a test stub, a
+    dataclass, None) is dropped rather than serialised as its repr."""
+    return value if isinstance(value, str) and value else None
+
+
+def _recent_day_rows(rows, date_index, days=GENOME_STATE_DAYS, cap=GENOME_STATE_MAX_ROWS):
+    """The rows whose date field is one of the ``days`` most recent dates.
+
+    ``rows`` has the genome state file's shape: a list of ``[city, target_date]``
+    (missed_days) or ``[target_date, symbol]`` (traded), where ``date_index``
+    says which element is the ISO date. Sorted, then hard-capped at ``cap``
+    rows — the newest survive.
+    """
+    parsed = []
+    for row in rows or ():
+        if isinstance(row, (list, tuple)) and len(row) > date_index:
+            parsed.append([str(x) for x in row])
+    if not parsed:
+        return []
+    keep = set(sorted({row[date_index] for row in parsed})[-days:])
+    kept = sorted(row for row in parsed if row[date_index] in keep)
+    return kept[-cap:]
+
+
 class StateManager:
     """
     Wraps an OrchestratorEngine reference and exposes a snapshot() method
@@ -88,8 +145,12 @@ class StateManager:
         # market loop: snapshot() must be side-effect free on disk.)
         self._update_mascot(dashboard, rm)
 
+        genome = self._genome(orch)
+
         return {
             "mode": self._mode,
+            "modes": self._modes(genome),
+            "genome": genome,
             "uptime": self._fmt_uptime_seconds(orch.uptime_seconds)
             if hasattr(orch, "uptime_seconds")
             else "00:00:00",
@@ -108,6 +169,16 @@ class StateManager:
             "training_history": getattr(orch, "_training_history", []),
         }
 
+    def genome_snapshot(self) -> dict:
+        """Just the genome block and the mode disambiguation.
+
+        Side-effect free, unlike ``snapshot()``: it appends no equity point and
+        drives no mascot, so a monitoring agent can poll it as often as it
+        likes without writing phantom rows into the equity curve.
+        """
+        genome = self._genome(self._orch)
+        return {"mode": self._mode, "modes": self._modes(genome), "genome": genome}
+
     # ------------------------------------------------------------------
     # Section builders
     # ------------------------------------------------------------------
@@ -120,7 +191,9 @@ class StateManager:
                 "exposure": 0.0,
                 "exposure_pct": 0.0,
                 "realized_pnl": 0.0,
+                "realized_pnl_cycle": 0.0,
                 "unrealized_pnl": 0.0,
+                **self._lifetime_pnl(None),
             }
         bal = rm.balance
         realized_pnl = rm.daily_pnl
@@ -133,8 +206,266 @@ class StateManager:
             "cash": round(bal, 4),
             "exposure": round(exposure, 4),
             "exposure_pct": round(exposure_pct, 2),
+            # ``realized_pnl`` is RiskManager.daily_pnl — a per-CYCLE fragment
+            # that run_dashboard's 4-hourly update_balance() zeroes along with
+            # the equity re-peg. Kept under its historical name because the
+            # front-end reads it; ``realized_pnl_cycle`` is the same number
+            # under a name that cannot be mistaken for a lifetime total.
             "realized_pnl": round(realized_pnl, 4),
+            "realized_pnl_cycle": round(realized_pnl, 4),
             "unrealized_pnl": round(unrealized_pnl, 4),
+            **self._lifetime_pnl(rm),
+        }
+
+    @staticmethod
+    def _lifetime_pnl(rm) -> dict:
+        """The exchange's immutable lifetime ledger — the only PnL an operator
+        (or a real-capital decision) should read.
+
+        ``SimulatedExchange.reset_stats`` deliberately zeroes only the
+        per-sync ``realized_pnl`` fragment and never the cumulative
+        accumulators, so ``get_cumulative_net_pnl()`` (= cumulative realized
+        minus cumulative entry fees) survives every balance sync and restart.
+        Read through ``get_stats()`` so nothing here writes to the engine; any
+        field the engine cannot supply is reported as null rather than as a
+        confident zero.
+        """
+        out = {
+            "cumulative_net_pnl": None,
+            "cumulative_realized_pnl": None,
+            "cumulative_fees": None,
+            "closed_trades": None,
+        }
+        if rm is None:
+            return out
+        try:
+            stats = rm.exchange.get_stats()
+        except Exception:
+            return out
+        if isinstance(stats, Mapping):
+            for key, src in (
+                ("cumulative_net_pnl", "cumulative_net"),
+                ("cumulative_realized_pnl", "cumulative_realized"),
+                ("cumulative_fees", "cumulative_fees"),
+            ):
+                value = _as_float(stats.get(src))
+                out[key] = None if value is None else round(value, 4)
+        try:
+            out["closed_trades"] = int(len(rm.exchange.closed_trades))
+        except Exception:
+            pass
+        return out
+
+    # ---------------- genome (F3 red team, 2026-09-05) ----------------
+    #
+    # Before this block the ONLY genome-bearing endpoint was /api/logs/tail,
+    # hard-capped at 500 lines (an 8-16 minute keyhole), so "the genome stopped
+    # emitting", "a poll failure silently closed the day" and "the strategy was
+    # REFUSED at startup and you have been watching V2 for a week" were the
+    # same observation from outside the container.
+
+    def _modes(self, genome: dict) -> dict:
+        """``mode`` disambiguated.
+
+        ``snapshot["mode"]`` describes the KALSHI CREDENTIAL (the provider's
+        read_only flag plus the API URL) and nothing else — on maia it reads
+        'paper' while the promoted genome's execution mode is 'shadow'. Both
+        are reported here under names that say what they describe; ``mode``
+        keeps its historical value and meaning for the front-end pill.
+        """
+        if genome.get("present"):
+            genome_mode = genome.get("execution_mode") or "unknown"
+        elif genome.get("refused"):
+            genome_mode = "refused"
+        else:
+            genome_mode = "none"
+        return {
+            "capital": self._mode,
+            "genome": genome_mode,
+            "label": f"capital={self._mode} · genome={genome_mode}",
+        }
+
+    def _genome(self, orch) -> dict:
+        """The promoted genome's live status — never raises, never imports.
+
+        The genome's persisted state (last evaluated hour per city, missed
+        city-days, traded markets) is what decides whether it may emit at all,
+        so it belongs in the snapshot next to the positions it does or does not
+        produce. Every read is defensive: the market thread mutates those sets
+        while this runs on the web thread.
+        """
+        block = {
+            "present": False,
+            "refused": False,
+            "refused_reason": None,
+            "bot": None,
+            "strategy": None,
+            "genome_id": None,
+            "family": None,
+            "spec_mode": None,
+            "registry_status": None,
+            "shadow": None,
+            "execution_mode": None,
+            "state_path": None,
+            "stats": {},
+            "state": None,
+            "state_error": None,
+            "error": None,
+        }
+        try:
+            bot, strategy = self._find_genome(orch)
+        except Exception as exc:  # noqa: BLE001 — the snapshot outranks the block
+            block["error"] = f"{type(exc).__name__}: {exc}"
+            return block
+        if bot is None and strategy is None:
+            return block
+
+        try:
+            block["bot"] = _as_str(getattr(bot, "name", None))
+            reason = getattr(bot, "genome_refused_reason", None)
+            if isinstance(reason, str) and reason.strip():
+                block["refused"] = True
+                block["refused_reason"] = reason.strip()[:500]
+            shadow = getattr(bot, "genome_shadow", None)
+            if isinstance(shadow, bool):
+                block["shadow"] = shadow
+                block["execution_mode"] = "shadow" if shadow else "paper"
+        except Exception as exc:  # noqa: BLE001
+            block["error"] = f"{type(exc).__name__}: {exc}"
+
+        spec = getattr(bot, "genome_spec", None) if bot is not None else None
+        if spec is None and strategy is not None:
+            spec = getattr(strategy, "spec", None)
+        try:
+            block["genome_id"] = _as_str(getattr(spec, "genome_id", None))
+            block["family"] = _as_str(getattr(spec, "family", None))
+            block["spec_mode"] = _as_str(getattr(spec, "mode", None))
+            block["registry_status"] = _as_str(getattr(spec, "registry_status", None))
+        except Exception as exc:  # noqa: BLE001
+            block["error"] = f"{type(exc).__name__}: {exc}"
+        if block["execution_mode"] is None and block["spec_mode"]:
+            # The bot's effective flag was unreadable; the spec is the floor
+            # (the env can only tighten a spec to shadow, never loosen it).
+            block["execution_mode"] = block["spec_mode"]
+
+        if strategy is None:
+            # Refused at startup: no strategy, no state, and NO execution mode
+            # — the bot zeroes ``genome_shadow`` on the refusal path, which
+            # would otherwise read out as the far more alarming "paper".
+            block["shadow"] = None
+            block["execution_mode"] = None
+            return block
+
+        block["present"] = True
+        block["strategy"] = _as_str(getattr(strategy, "name", None))
+        block["state_path"] = _as_str(getattr(strategy, "state_path", None))
+        block["stats"] = self._genome_stats(strategy)
+        state, state_error = self._genome_state(strategy)
+        block["state"] = state
+        block["state_error"] = state_error
+        return block
+
+    @staticmethod
+    def _find_genome(orch):
+        """``(bot, strategy)`` for the first bot carrying a genome strategy;
+        ``(bot, None)`` for the first bot that recorded a refusal and carries
+        none; ``(None, None)`` when no bot knows about a genome.
+
+        Duck typing ONLY. ``state_dict`` + ``spec`` is the GenomeStrategy
+        signature (it is the only strategy in ``src/`` with a ``state_dict``),
+        and importing the class here would pull ``src.factory`` into the web
+        process — ``tests/test_factory_isolation.py`` forbids exactly that.
+        """
+        refused = None
+        for bot in getattr(orch, "bots", None) or ():
+            try:
+                strategies = getattr(bot, "strategies", None)
+                if isinstance(strategies, Mapping):
+                    for strategy in strategies.values():
+                        if callable(getattr(strategy, "state_dict", None)) and (
+                            getattr(strategy, "spec", None) is not None
+                        ):
+                            return bot, strategy
+                if refused is None and isinstance(
+                    getattr(bot, "genome_refused_reason", None), str
+                ):
+                    refused = bot
+            except Exception:
+                continue
+        return refused, None
+
+    @staticmethod
+    def _genome_stats(strategy) -> dict:
+        """The strategy's own counters (analyze_calls, hours_evaluated,
+        signals, rejects, poll_failures), ints only."""
+        out = {}
+        try:
+            stats = getattr(strategy, "stats", None)
+            if isinstance(stats, Mapping):
+                for key, value in list(stats.items()):
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        continue
+                    number = _as_float(value)
+                    if number is not None:
+                        out[str(key)] = int(number)
+        except Exception:
+            return out
+        return out
+
+    def _genome_state(self, strategy):
+        """``(bounded state dict, error string)`` from ``state_dict()``.
+
+        ``GenomeStrategy.state_dict`` iterates ``_last_hour`` / ``_missed_days``
+        / ``_traded`` — sets the market thread mutates on every tick — so an
+        unlucky snapshot raises ``RuntimeError: Set changed size during
+        iteration``. Retried once (the collision is transient), and any failure
+        degrades to an error string: the endpoint must never go down because
+        the genome happened to be writing.
+        """
+        error = None
+        for _ in range(max(1, GENOME_STATE_ATTEMPTS)):
+            try:
+                doc = strategy.state_dict()
+            except Exception as exc:  # noqa: BLE001 — includes the mutation race
+                error = f"{type(exc).__name__}: {exc}"
+                continue
+            try:
+                return self._bound_state(doc), None
+            except Exception as exc:  # noqa: BLE001
+                return None, f"{type(exc).__name__}: {exc}"
+        return None, error
+
+    @staticmethod
+    def _bound_state(doc) -> dict:
+        """The state file, summarised for a 1 Hz broadcast: every city's last
+        evaluated hour (at most four), the most recent days of the missed and
+        traded sets, and counts of the full sets."""
+        if not isinstance(doc, Mapping):
+            raise TypeError(f"state_dict() returned {type(doc).__name__}, not a mapping")
+        last_hour = {}
+        raw_last_hour = doc.get("last_hour_epoch")
+        if isinstance(raw_last_hour, Mapping):
+            for city, hour in list(raw_last_hour.items()):
+                epoch = _as_float(hour)
+                if epoch is not None:
+                    last_hour[str(city)] = int(epoch)
+        # missed_days rows are [city, target_date]; traded rows are
+        # [target_date, symbol] — the date sits in a different column in each
+        # (genome_strategy.py's own pruning uses k[1] and k[0] respectively).
+        missed = list(doc.get("missed_days") or [])
+        traded = list(doc.get("traded") or [])
+        missed_rows = _recent_day_rows(missed, date_index=1)
+        traded_rows = _recent_day_rows(traded, date_index=0)
+        return {
+            "genome_id": _as_str(doc.get("genome_id")),
+            "last_hour_epoch": last_hour,
+            "cities": len(last_hour),
+            "missed_days": missed_rows,
+            "missed_days_total": len(missed),
+            "traded": traded_rows,
+            "traded_total": len(traded),
+            "days_shown": GENOME_STATE_DAYS,
+            "truncated": len(missed_rows) < len(missed) or len(traded_rows) < len(traded),
         }
 
     def _market_data(self, dashboard) -> list:

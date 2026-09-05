@@ -14,8 +14,11 @@ Facts this runbook does not re-litigate:
   arch as maia). maia has **no ssh** for the orchestrator; every verification below is
   a `GET` on `http://maia.local:8050` (LAN only, pleiades trust boundary F1).
 - Protected files: `src/core/risk_manager.py`, `src/bots/mixins.py`,
-  `src/core/matching_engine.py` — `git diff 38d5fdd -- <them>` must stay empty
-  (`tests/test_protected_files.py`). Shadow handling lives in `weather_bot.py`.
+  `src/core/matching_engine.py` — unchanged against `38d5fdd` except the ONE
+  owner-ratified settlement hunk in `matching_engine.py` (§1.1), which
+  `tests/test_protected_files.py` allow-lists. That test passing is the gate; the raw
+  `git diff` is not empty and is not meant to be. Shadow handling lives in
+  `weather_bot.py`.
 
 ## 0. Dev-box gates (run before anything leaves the box)
 
@@ -29,11 +32,13 @@ python -m pytest tests/test_genome_dry_run.py tests/test_factory_isolation.py `
 - `tests/test_factory_isolation.py` — the runtime entry points' import graph reaches
   only `src.factory.{genome,features,promoted}` (+ their numpy-only deps `columns`,
   `fees`); `src.strategies.genome_strategy` imports with `lightgbm/scipy/pyarrow/torch/
-  xgboost` blocked in `sys.modules` (xfail until STRATEGY lands the module, a hard
-  assertion afterwards); no `datetime.now|time.time|utcnow|from datetime import` in
-  `genome_strategy.py`, `features.py`, `genome.py`.
-- `tests/test_protected_files.py` — the three protected files are byte-identical to
-  `38d5fdd` in the working tree.
+  xgboost` blocked in `sys.modules` (these were conditionally xfailed while the module
+  was missing; STRATEGY has landed it, so they are hard assertions now); no
+  `datetime.now|time.time|utcnow|from datetime import` in `genome_strategy.py`,
+  `features.py`, `genome.py`.
+- `tests/test_protected_files.py` — the three protected files match `38d5fdd` in the
+  working tree, except the one allow-listed settlement hunk in `matching_engine.py`
+  (§1.1). This test passing — not an empty `git diff` — is the gate.
 - `tests/test_genome_dry_run.py` — the accelerated 24-h dry run (§1) on a real
   city-day, with a real position opened and settled.
 
@@ -162,7 +167,93 @@ check 1 fails on a *missing* module; the design intent is numpy-only.
 ## 3. maia: shadow deploy of a promoted genome
 
 **One command (2026-09-05):** `bash deploy/pi/deploy_f3_shadow.sh <genome_id>` on maia does every step below
-plus the NO-side settlement repair of §1.1 with the sandbox stopped (`--no-repair` to skip). The manual steps stay as the reference.
+plus the NO-side settlement repair of §1.1 with the sandbox stopped. Flags:
+
+| Flag | Effect |
+|---|---|
+| `--no-repair` | skip the §1.1 NO-side state repair |
+| `--any-time` | deploy off-boundary, explicitly accepting the forfeited market-day (§3.1) |
+| `--at-boundary` | the default: wait for the `:00`-aligned launch window |
+| `--plan` | print the pre-flight and exit. Touches nothing — no git, no sudo, no docker |
+| `--max-wait N` | refuse rather than wait longer than `N` s for the boundary (default 3600) |
+| `--repair-budget N` | how long step 6 takes on this host (default 240 s); it is subtracted from the wait |
+
+Run `--plan` first; it is side-effect free and prints both the cost of deploying now and
+the exact schedule the run will follow (how long it will sleep, and why).
+The manual steps below stay as the reference.
+
+### 3.1 Deploy on a `:00` boundary or lose the market-day
+
+`GenomeStrategy` evaluates at the top of the hour with a **120 s** tolerance
+(`DEFAULT_TOP_OF_HOUR_TOLERANCE_S`). A container whose first tick lands later than that
+inside an hour records the hour as *missed*; at the next evaluated hour the missed-hour
+rule (§7) closes **every visible city-day** with `GENOME_MISSED_HOUR` for the rest of the
+market-day, and the persisted state remembers it for `STATE_KEEP_DAYS`. Nothing recovers it.
+
+This is not hypothetical: the 2026-09-05T03:49:28Z deploy landed 49 minutes past a
+boundary and cost all four cities that day — at 19:00Z the tape still read
+`GENOME_MISSED_HOUR` x 24 for `target_date=2026-09-05`. In F4 every such restart is one
+fewer of the **≥50 settled `target_date`s** the FR-5.2 gate needs, so an off-hour redeploy
+directly delays the gate.
+
+The script therefore **waits for the aligned window by default** and prints the cost up
+front. Deploy just after a `:00` when you can; use `--any-time` only when you have read
+the cost and accept it.
+
+Two details the first version of this gate got wrong (fixed 2026-09-05):
+
+- **The wait is budgeted for the work that follows it.** The repair (step 6 — `compose
+  stop` plus two to four `compose run` container starts) happens *between* the wait and
+  `up -d`. A wait sized as if only `up -d` followed could sleep most of an hour and still
+  launch past the tolerance. The wait now ends `LAUNCH_LEAD_S + REPAIR_BUDGET_S` before a
+  `:00`, and a short **capped** top-up runs immediately before `up -d`. The top-up is
+  capped on purpose: the sandbox is stopped there, so sleeping to a boundary an hour away
+  would take the other four bots down with it — the script launches late instead and says so.
+- **"Aligned" means near the *nearest* `:00`, on either side.** Measuring only
+  seconds-into-the-hour made everything past +45 s "LATE", so a deploy 50 s past the hour
+  got an unrecoverable-cost warning it did not deserve, and the spot the wait itself parks
+  in (75 s *before* a `:00`) was reported LATE after a *successful* wait.
+
+The wait is announced (duration and target UTC time), chunked with a progress line every
+five minutes, and safe to `Ctrl-C`: nothing has been stopped when it runs.
+
+### 3.2 Which configuration layer actually sets the mode
+
+`deploy/pi/docker-compose.yml` declares `GENOME_STRATEGY_MODE` under `environment:`, and
+Compose resolves `environment:` **above** `env_file:`. So:
+
+| Layer | Wins? | Notes |
+|---|---|---|
+| invoking shell (`GENOME_STRATEGY_MODE=paper docker compose ...`) | **yes** | how F4 flips to paper on purpose |
+| compose `environment:` default `${GENOME_STRATEGY_MODE:-shadow}` | yes, absent a shell value | pins shadow |
+| `/srv/money_printer/.env` (`env_file:`) | **never** | **dead config** — it can only mislead |
+
+The deploy script no longer writes `GENOME_STRATEGY_MODE` to the env file, comments out any
+line an earlier run left there, refuses to start when a non-shadow value is exported into
+its own shell, and asserts the **value** from the container
+(`docker exec … printenv GENOME_STRATEGY_MODE` must equal `shadow`, and the id must equal
+the requested genome). The old check — `docker exec … env | grep -E 'GENOME_'` — was
+satisfied by a lone `GENOME_STRATEGY_ID`, so it would have passed a `paper` deploy and then
+printed "loaded in shadow mode".
+
+### 3.3 The loaded / REFUSED line is NOT on container stdout
+
+`src/utils/logger.py` attaches only a `FileHandler` and forces any console `StreamHandler`
+to WARNING+, and the shared logger has `propagate=False`. **Nothing the bot logs reaches
+container stdout**, so `docker compose logs … | grep 'GenomeStrategy'` is empty on a
+correct deploy exactly as readily as on a broken one. Read the file log instead:
+
+```bash
+docker exec mp-sandbox sh -c 'grep GenomeStrategy $(ls -t /app/logs/money_printer_*.log | head -1) | tail -5'
+```
+
+Expect `[Weather] GenomeStrategy … loaded (genome_id=… mode=shadow …)`. A
+`[Weather] GenomeStrategy REFUSED: …` line means the bot is running V2 only — the genome
+was not loaded, and the reason is on that line. The deploy script now distinguishes the
+three cases (loaded / REFUSED / no line at all) instead of `die`ing on all of them, and
+**polls** for the line to `MP_LOADED_DEADLINE_S` (default 120 s) instead of reading once
+after a blind `sleep 10` — on a Pi 4 the bot can write it well after `/healthz` answers,
+and a single read turned a correct deploy into a reported failure.
 
 Prerequisite: a promoted spec committed under `configs/factory/promoted/<id>.json`
 (STRATEGY: `scripts/factory.py promote <id> --from-seed <name> --mode shadow`, which
@@ -177,16 +268,18 @@ git pull --ff-only
 sudo mkdir -p /srv/money_printer/data/forecast_cache
 sudo chown 1000:1000 /srv/money_printer/data/forecast_cache
 
-# runtime env (env_file). GENOME_STRATEGY_MODE here is documentation: the compose file
-# pins shadow unless the compose SHELL says otherwise (see deploy/pi/docker-compose.yml).
+# runtime env (env_file) -- the ID only. Do NOT put GENOME_STRATEGY_MODE here: compose's
+# `environment:` beats `env_file:`, so a line here can never change the mode (§3.2).
 sudo tee -a /srv/money_printer/.env >/dev/null <<'EOF'
 GENOME_STRATEGY_ID=<seed id>
-GENOME_STRATEGY_MODE=shadow
 EOF
 
+# land this inside 120 s of a :00 UTC boundary, or today's city-days are forfeited (§3.1)
 docker compose -f deploy/pi/docker-compose.yml up -d --build
 curl -s http://localhost:8050/healthz            # {"status":"ok","uptime_s":...}
-docker exec mp-sandbox env | grep -E 'GENOME_|MP_FORECAST'   # both GENOME_* present, mode=shadow
+docker exec mp-sandbox printenv GENOME_STRATEGY_MODE   # must print exactly: shadow
+docker exec mp-sandbox printenv GENOME_STRATEGY_ID     # must print the requested genome id
+docker exec mp-sandbox sh -c 'grep GenomeStrategy $(ls -t /app/logs/money_printer_*.log | head -1) | tail -5'
 ```
 
 Env plumbing (what carries what):
@@ -194,7 +287,7 @@ Env plumbing (what carries what):
 | Variable | Carried by | Default in the container |
 |---|---|---|
 | `GENOME_STRATEGY_ID` | `/srv/money_printer/.env` via `env_file` | unset → no genome slot |
-| `GENOME_STRATEGY_MODE` | compose `environment:` `${GENOME_STRATEGY_MODE:-shadow}` — the **invoking shell** wins, and this entry overrides the env_file value | `shadow` |
+| `GENOME_STRATEGY_MODE` | compose `environment:` `${GENOME_STRATEGY_MODE:-shadow}` — the **invoking shell** wins, and this entry overrides the env_file value, which is dead config (§3.2) | `shadow` |
 | `MP_FORECAST_CACHE_DIR` | compose `environment:` | `/app/data/forecast_cache` (bind → `/srv/money_printer/data/forecast_cache`) |
 
 To roll back: remove `GENOME_STRATEGY_ID` from `.env` and `docker compose ... up -d`;
@@ -207,28 +300,90 @@ Criterion (PRD F3): `GenomeStrategy` EMIT lines appear at **:00 UTC only**, each
 `[Risk] REJECT ... reason=GENOME_SHADOW` — and `limit_price = quote + 0.01`.
 
 ```powershell
-# from any LAN host, stdlib only
+# from any LAN host, stdlib only. --url is the BASE url; the client appends the path.
 python scripts/check_maia_emit_cadence.py                         # http://maia.local:8050
-python scripts/check_maia_emit_cadence.py --url http://maia.local:8050 --lines 500 --json
+python scripts/check_maia_emit_cadence.py --url http://maia.local:8050 --json
 python scripts/check_maia_emit_cadence.py --file money_printer_<stamp>.log   # a downloaded copy
 ```
 
-What it reads: `GET /api/logs/tail?pattern=money_printer_*.log&lines=500` (the newest log,
-500-line server cap; container `TZ=UTC`, so the log stamps are UTC) and
-`GET /api/logs/data` (last 100 data-log rows) for the quote. Verdict JSON fields:
-`n_emit`, `emit_off_hour` (minute ≠ 0), `emit_without_outcome`, `emit_multiple_outcomes`,
-`outcome_codes` (expect `{"GENOME_SHADOW": n_emit}` in shadow), `limit_price`
-(`verified_ok` / `verified_bad` / `unverified`, with examples). Exit 0 PASS, 1 FAIL, 3
-`NO_EMIT` (no genome line in the window yet — wait for the next :00 UTC and re-run, or
-raise `--lines`; at four cities × 24 candles a 500-line tail covers roughly one to two
-hours of the sandbox log).
+`--url http://maia.local:8050/api/logs/tail` is **wrong** — the client appends
+`/api/logs/tail` itself, so that requests the path twice and 404s. It now reports a
+readable error and exit 2 instead of a traceback.
 
-The quote for the limit-price check comes from a `quote=<x>` field on the EMIT line or
-on a same-second line for the same symbol (the strategy's decision line), else from the
-data-log row for that symbol nearest at-or-before the EMIT stamp (traded-side ask, or
-`1 - yes_bid` for NO when no NO-ask column is logged). An EMIT with no quote source is
-listed under `unverified` and is never counted as a pass. If everything is unverified,
-pull a longer data-log window from the bind mount on maia and pass it with `--data-log`.
+What it reads: `GET /api/logs/tail?pattern=money_printer_*.log&lines=500` (the newest log;
+container `TZ=UTC`, so the log stamps are UTC) and `GET /api/logs/data` (last 100 data-log
+rows) for the quote. Verdict JSON fields: `n_emit`, `no_emit_reason`, `boundaries_sampled`,
+`n_strategy_lines`, `emit_off_hour` (minute ≠ 0), `emit_without_outcome`,
+`emit_multiple_outcomes`, `emit_executed`, `outcome_codes` (expect
+`{"GENOME_SHADOW": n_emit}` in shadow), `strategy_skip_codes`, `limit_price`
+(`verified_ok` / `verified_bad` / `unverified`, with examples).
+
+Exit codes: **0** PASS, **1** FAIL, **2** the check could not be run (bad URL, HTTP error,
+unreadable file), **3** `NO_EMIT` or `UNVERIFIED`.
+
+**In shadow, an `EXECUTED` outcome is a FAIL.** An EMIT resolved by `[Signal] EXECUTED`
+satisfies "exactly one outcome line", so the verdict used to call it a PASS — even though
+nothing may reach the exchange in shadow, which is the whole claim under audit. It is now a
+hard FAIL; `--allow-executed` lifts it for F4 paper runs, where EXECUTED is expected.
+
+**Observed on 2026-09-05 at the 15:00Z boundary** (recorded here as evidence, not as a
+tick on §6): `PASS` with `outcome_codes == {"GENOME_SHADOW": 4}` and `verified_ok 4` —
+four EMITs, each paired with exactly one `GENOME_SHADOW` reject, `limit = quote + 0.01`,
+nothing executed. At 18:00Z those same four markets answered `GENOME_ALREADY_TRADED`,
+i.e. `entries_per_market: 1` held across a state reload.
+
+### 4.1 How wide is the window, really
+
+**A 500-line tail is 8–16 minutes of sandbox log, not one to two hours.** Measured on
+2026-09-05 (six samples over the day, three of them consecutive): 14.0 / 14.2 / 14.3 min,
+range across the day 8.1–16.3 min. The tail is all five bots' interleaved output, not the
+genome's alone, so a busy minute shrinks it further.
+
+Consequences, both of which the old remedies got wrong:
+
+- **`--lines` cannot widen it.** Both the client (`min(max(lines,1), 500)`) and the server
+  (`all_lines[-min(max(lines,1),500):]`, `src/web/server.py`) clamp at 500. Asking for
+  more is silently the same request.
+- **There is no ssh to maia,** so "pull a longer window from the bind mount" is not a thing
+  anyone can do. `GET /api/logs/data` (last 100 data-log rows) is the only wider source,
+  and the checker already uses it automatically.
+
+The working procedure is therefore: **run the checker within ~10 minutes after a `:00` UTC
+boundary.** Outside that, the tail has already scrolled past the decision points.
+
+### 4.2 `NO_EMIT` is the NORMAL verdict — read `no_emit_reason`
+
+The genome enters each market **once ever** (`entries_per_market: 1`), so the four markets
+that emitted at 15:00Z answered `GENOME_ALREADY_TRADED` at 18:00Z and `n_emit` was 0. A bare
+`NO_EMIT` cannot tell "no boundary sampled" from "genome silent" from "genome not loaded",
+so the checker now reports which:
+
+| `no_emit_reason` | Means | Do |
+|---|---|---|
+| `GENOME_ALIVE_NO_EMIT` | the genome logged skip codes (`GENOME_ALREADY_TRADED` / `MISSED_HOUR` / `MASK_FALSE` / `SIGMA_CAP` …) | nothing — it is loaded, deciding, and legitimately silent. `strategy_skip_codes` is the proof of life, and it outranks the other two reasons |
+| `NO_GENOME_LINES` | the tail **covered a whole decision interval** (`:00` … `:00 + 120 s`) and the strategy logged nothing in it | the genome is probably not loaded — read the REFUSED line from the container's file log (§3.3) |
+| `NO_BOUNDARY_IN_WINDOW` | no decision interval is fully inside the tail: it never spans a `:00`, **or it starts after one** (§4.1) | re-run within ~10 min of the next `:00 UTC`. `--lines` cannot help |
+
+`boundaries_sampled` lists the **covered** boundaries; `boundaries_seen` lists the raw
+`:00` stamps observed. Only the first supports a claim about the genome's silence: a tail
+beginning at 19:00:30 contains `:00` stamps but cannot see a decision taken at 19:00:07,
+and calling that "boundary sampled, genome silent" sent the operator hunting for a
+`REFUSED` line that was never written.
+
+### 4.3 Where the quote comes from
+
+In order: `quote=<x>` on the EMIT line itself; else the strategy's own
+`[Genome] DECIDE … quote= limit=` line for the same symbol within ±2 s (paper mode relies on
+this, because the protected mixin's EMIT carries no quote); else the data-log row for that
+symbol nearest at-or-before the EMIT stamp (traded-side ask, or `1 - yes_bid` for NO when no
+NO-ask column is logged). An EMIT with no quote source is listed under `unverified` and is
+never counted as a pass.
+
+**A REJECT or EXECUTED line is never a quote source.** `GENOME_MASK_FALSE` and
+`GENOME_NOT_EXECUTABLE` rejects carry a `quote=` of their own and land in the same log
+second as the EMIT, so accepting them let file order decide the limit-price clause —
+producing a FAIL and a PASS from the same content in two orderings. Only the EMIT's own
+field and a `[Genome] DECIDE` line count.
 
 Manual spot check (what the script automates):
 
@@ -261,12 +416,30 @@ commit again -- the gate fails while it is null. Pass `--realistic-fills true|fa
 
 ## 6. F3 exit checklist (INFRA items)
 
-- [ ] `pytest tests/test_genome_dry_run.py tests/test_factory_isolation.py tests/test_protected_files.py tests/test_weather_lifecycle.py tests/test_v3_risk_rules.py` green on the dev box (xfails: the NO-side sign defect, and the genome import checks until STRATEGY lands).
-- [ ] `reports/factory/dry_run_NY_2026-07-20.json` committed; the four lifecycle assertions `ok: true`; `settlement_pnl_matches_contract_side` recorded (false until the engine fix).
+Ticking these is the **owner's** call, not the tooling's. The wording below was
+corrected where it stated something false (see the notes); the boxes are left as the
+owner set them.
+
+- [ ] `pytest tests/test_genome_dry_run.py tests/test_factory_isolation.py tests/test_protected_files.py tests/test_weather_lifecycle.py tests/test_v3_risk_rules.py` green on the dev box. **No xfails remain** to allow for: the earlier parenthetical excused two of them, and neither survives — the NO-side sign defect is fixed (724d93c, §1.1) and `src/strategies/genome_strategy.py` has landed, so the conditionally-xfailed isolation checks are hard assertions now.
+- [ ] `reports/factory/dry_run_NY_2026-07-20.json` committed; the four lifecycle assertions
+      `ok: true`; `settlement_pnl_matches_contract_side` recorded. The committed copy still
+      records it **false**, i.e. it predates the 724d93c engine fix. The *code* is fixed and
+      asserted hard by `tests/test_genome_dry_run.py::test_settlement_pnl_matches_contract_side`
+      (green), so this is a stale artifact rather than a live defect: re-run
+      `scripts/genome_dry_run.py --city NY --date 2026-07-20` and commit the regenerated report.
 - [ ] alcyone §2 checks 1–4 pass on `money-printer-sandbox:f3`.
-- [ ] maia §3 deployed with `GENOME_STRATEGY_ID=<seed>`; `docker exec mp-sandbox env` shows `GENOME_STRATEGY_MODE=shadow`.
-- [ ] `scripts/check_maia_emit_cadence.py` → `PASS` with `outcome_codes == {"GENOME_SHADOW": n_emit}` and `verified_ok ≥ 1`.
-- [ ] `git diff 38d5fdd -- src/core/risk_manager.py src/bots/mixins.py src/core/matching_engine.py` empty on the merge commit.
+- [ ] maia §3 deployed with `GENOME_STRATEGY_ID=<seed>`; the container's own
+      `printenv GENOME_STRATEGY_MODE` prints `shadow`. (Was `docker exec mp-sandbox env |
+      grep GENOME_`, which a lone `GENOME_STRATEGY_ID` satisfied — see §3.2.)
+- [ ] `scripts/check_maia_emit_cadence.py` → `PASS` with `outcome_codes == {"GENOME_SHADOW": n_emit}`
+      and `verified_ok ≥ 1`. Run it within ~10 min of a `:00` (§4.1); the 2026-09-05 15:00Z
+      observation is recorded in §4.
+- [ ] `git diff 38d5fdd -- src/core/risk_manager.py src/bots/mixins.py src/core/matching_engine.py`
+      reviewed on the merge commit. It is **not** empty and is not supposed to be: it is exactly
+      the owner-ratified settlement hunk of §1.1 in `matching_engine.py`, which
+      `tests/test_protected_files.py` allow-lists. The gate is that test passing. (An earlier
+      revision of this line demanded an *empty* diff, which contradicted §1.1 of this same
+      document and was never true.)
 
 ## 7. Live-conditions parity: missed hours, restarts, authorization (F3 red team, 2026-09-05)
 
@@ -289,7 +462,8 @@ live process does when it misses an hour. `GenomeStrategy` now enforces:
   deploy (no persisted state). A Kalshi poll that FAILS on the Pi (`Market
   Fetch Fail`) is reported to the strategy (`record_poll_failure`) and counts
   as a miss like a late tick -- only an hour with no candle in the archive is a
-  data gap.
+  data gap. **This is what makes an off-hour deploy expensive: see §3.1 — deploy
+  inside the `:00` window or the restart itself forfeits every visible city-day.**
 - **Persisted state.** `<MP_FORECAST_CACHE_DIR>/genome_state_<genome_id>.json`
   holds last hour per city, missed city-days and traded (target_date, symbol);
   rewritten atomically on every change, loaded at construction. A restarted

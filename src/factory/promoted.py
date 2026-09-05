@@ -31,6 +31,24 @@ Schema (all keys required; ``spec_hash`` covers everything else)::
     spec_hash             sha256 of the canonical JSON of every other field
 
 numpy-free and pandas-free: the sandbox image imports this module.
+
+Why the cold-start sizing guard is NOT a field here
+---------------------------------------------------
+``reports/factory/sizing_cold_start_2026-09-05.md`` found that the factory
+promoted a shape the runtime cannot size: 117 of genome ``0c4b20502f2daf65``'s
+130 offline trades get 0 contracts from ``RiskManager.calculate_kelly_size``,
+because the cold-start blend caps the sizing probability at 0.70 and the genome
+buys at a median 0.84.  The guard that catches this lives in
+``src.factory.sizing`` (``assert_promotable``) and runs on the promotion path in
+``scripts/factory.py``, deliberately **not** as a spec field:
+
+* ``spec_hash`` covers every other key and ``_require`` rejects unknown ones, so
+  adding a field would move the hash of every spec already written -- including
+  the deployed one, breaking FR-5.2 condition 4 and the F3 replay-parity record.
+* the audit needs a frozen frame and numpy, which this module must not import.
+
+The guard is therefore a *promotion-time* check over the frame, and the spec
+stays exactly what the sandbox reads.
 """
 from __future__ import annotations
 

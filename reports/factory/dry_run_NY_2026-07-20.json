@@ -1,5 +1,6 @@
 {
   "analyze_calls": {
+    "genome": 38,
     "weather": 38
   },
   "assertions": {
@@ -9,10 +10,10 @@
           "closed": true,
           "contract_side": "NO",
           "entry_price": 0.33,
-          "exit_price": 0.0,
+          "exit_price": 1.0,
           "id": 1,
           "opened_at_candle": "2026-07-20T16:00:00+00:00",
-          "pnl": -16.5,
+          "pnl": 33.5,
           "quantity": 50,
           "reason": "EXPIRATION",
           "settlement_high": 81.0,
@@ -31,8 +32,24 @@
           "equal": true,
           "expected": "2026-07-21T00:00:00-04:00",
           "expiration_time": "2026-07-21T00:00:00-04:00",
+          "strategy": "genome",
+          "symbol": "KXHIGHNY-26JUL20-B77.5",
+          "tz_aware": true
+        },
+        {
+          "equal": true,
+          "expected": "2026-07-21T00:00:00-04:00",
+          "expiration_time": "2026-07-21T00:00:00-04:00",
           "strategy": "weather",
           "symbol": "KXHIGHNY-26JUL20-B79.5",
+          "tz_aware": true
+        },
+        {
+          "equal": true,
+          "expected": "2026-07-21T00:00:00-04:00",
+          "expiration_time": "2026-07-21T00:00:00-04:00",
+          "strategy": "genome",
+          "symbol": "KXHIGHNY-26JUL20-T77",
           "tz_aware": true
         },
         {
@@ -71,18 +88,18 @@
     "settlement_pnl_matches_contract_side": {
       "detail": [
         {
-          "booked_exit_price": 0.0,
-          "booked_pnl": -16.5,
+          "booked_exit_price": 1.0,
+          "booked_pnl": 33.5,
           "contract_side": "NO",
           "entry_price": 0.33,
           "expected_pnl": 33.5,
           "id": 1,
-          "ok": false,
+          "ok": true,
           "settlement_outcome": "no",
           "symbol": "KXHIGHNY-26JUL20-B79.5"
         }
       ],
-      "ok": false
+      "ok": true
     }
   },
   "availability_lag_min": 240,
@@ -91,7 +108,7 @@
   "dashboard": {
     "alerts": [],
     "price_updates": 266,
-    "signals_recorded": 1
+    "signals_recorded": 3
   },
   "date": "2026-07-20",
   "exchange_state_file_in_temp": true,
@@ -102,17 +119,26 @@
     "misses": 0
   },
   "genome": {
-    "requested": false
+    "bot_genome_shadow": true,
+    "constructed_via": "GenomeStrategy(replay ForecastVintageProvider, FrozenCalibrationProvider)",
+    "forecast_csv": "data/forecast_archive/forecast_series_gfs_mex.csv",
+    "genome_id": "0c4b20502f2daf65",
+    "mode": "shadow",
+    "paper_override_for_dry_run": false,
+    "requested": true,
+    "spec_mode": "shadow",
+    "spec_path": "configs/factory/promoted/0c4b20502f2daf65.json",
+    "strategy_name": "Genome 0c4b2050"
   },
   "ladder_root": "data/ladders",
   "last_candle_utc": "2026-07-21T04:00:00+00:00",
   "ml_weather_enabled": false,
   "n_candles": 38,
-  "ok": false,
+  "ok": true,
   "per_candle": [
     {
       "open_positions": 0,
-      "signals": 1,
+      "signals": 2,
       "ts_utc": "2026-07-19T15:00:00+00:00"
     },
     {
@@ -132,7 +158,7 @@
     },
     {
       "open_positions": 0,
-      "signals": 0,
+      "signals": 1,
       "ts_utc": "2026-07-19T19:00:00+00:00"
     },
     {
@@ -306,9 +332,9 @@
       {
         "contract_side": "NO",
         "entry_price": 0.33,
-        "exit_price": 0.0,
+        "exit_price": 1.0,
         "id": 1,
-        "pnl": -16.5,
+        "pnl": 33.5,
         "quantity": 50,
         "reason": "EXPIRATION",
         "settlement_high": 81.0,
@@ -316,7 +342,7 @@
         "symbol": "KXHIGHNY-26JUL20-B79.5"
       }
     ],
-    "realized": -17.28,
+    "realized": 32.72,
     "total_fees": 0.78
   },
   "positions": {
@@ -335,18 +361,23 @@
   "settlement_close": "2026-07-21T00:00:00-04:00",
   "signals": {
     "by_strategy": {
+      "genome": 2,
       "weather": 2
     },
-    "emit_lines": 2,
-    "emitted": 2,
+    "emit_lines": 4,
+    "emitted": 4,
     "executed_lines": 1,
     "rejected_by_code": {
+      "GENOME_ALREADY_TRADED": 70,
+      "GENOME_MASK_FALSE": 156,
+      "GENOME_SHADOW": 2,
       "KELLY_ZERO": 1
     }
   },
   "sim_balance": 3000.0,
   "station": "KNYC",
   "strategies": [
+    "genome",
     "weather"
   ],
   "truth": {

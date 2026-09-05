@@ -91,6 +91,11 @@ review_2026_*/
 # Claude Code scheduler lock (machine-local)
 .claude/scheduled_tasks.lock
 
+# Agent worktrees. Each is a full embedded checkout of this repo, so `git add -A`
+# tries to commit them as submodules; the F3 follow-up sprint left 1.6 GB here.
+# They are disposable scratch -- the work lands on a branch, never in this path.
+.claude/worktrees/
+
 
 
 # Playwright
