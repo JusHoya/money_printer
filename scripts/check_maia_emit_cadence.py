@@ -17,14 +17,19 @@ newest log file) and, for the quote check, ``GET /api/logs/data`` (the last 100
 rows of the dashboard data-log CSV). Log timestamps are the container clock,
 which is pinned ``TZ=UTC`` (deploy/pi/Dockerfile + compose), so ``:00`` is UTC.
 
-The limit-price check uses, in order: a ``quote=<x>`` field on the EMIT line
-or on any line for the same symbol within the same log second (a
-``GenomeStrategy`` decision line); otherwise the traded-side ask from the
-data-log row for that symbol nearest at-or-before the EMIT timestamp;
-otherwise the check is UNVERIFIED for that EMIT (reported, never counted as a
-pass). Stdlib only, so it runs anywhere.
+The limit-price check uses, in order: ``quote=<x>`` (and ``limit=<y>`` when
+present, else ``price=``) on the EMIT line -- the bot writes both on the shadow
+EMIT and GENOME_SHADOW lines -- or on any line for the same symbol within the
+same log second (the strategy's ``[Genome] DECIDE ... quote= limit=`` line,
+which paper mode relies on because the protected mixin's EMIT carries no
+quote); otherwise the traded-side ask from the data-log row for that symbol
+nearest at-or-before the EMIT timestamp; otherwise the EMIT is UNVERIFIED.
+A run with EMITs but ZERO verified limit prices is NOT a pass (F3 red team,
+2026-09-05): verdict ``UNVERIFIED``, exit 3, unless ``--allow-unverified``
+downgrades it to a reported PASS. Stdlib only, so it runs anywhere.
 
-Exit codes: 0 PASS, 1 FAIL, 3 NO_EMIT (no genome EMIT lines in the window yet).
+Exit codes: 0 PASS, 1 FAIL, 3 NO_EMIT (no genome EMIT lines in the window yet)
+or UNVERIFIED (EMITs present but no verified limit price).
 """
 from __future__ import annotations
 
@@ -47,6 +52,7 @@ EMIT_RE = re.compile(
 EXEC_RE = re.compile(r"\[Signal\] EXECUTED strategy=(?P<strategy>.+?) symbol=(?P<symbol>\S+) ")
 REJECT_RE = re.compile(r"\[Risk\] REJECT strategy=(?P<strategy>.+?) symbol=(?P<symbol>\S+) reason=(?P<reason>\S+)")
 QUOTE_RE = re.compile(r"\bquote=(?P<quote>\d+(?:\.\d+)?)")
+LIMIT_RE = re.compile(r"\blimit=(?P<limit>\d+(?:\.\d+)?)")
 SYMBOL_IN_LINE_RE = re.compile(r"symbol=(?P<symbol>\S+)")
 
 EXIT_PASS, EXIT_FAIL, EXIT_NO_EMIT = 0, 1, 3
@@ -131,7 +137,8 @@ def _quote_from_data_log(rows: List[Dict[str, Any]], symbol: str, contract: str,
 
 
 def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fill: float,
-             data_rows: Optional[List[Dict[str, Any]]] = None, tolerance: float = 0.0051) -> Dict[str, Any]:
+             data_rows: Optional[List[Dict[str, Any]]] = None, tolerance: float = 0.0051,
+             allow_unverified: bool = False) -> Dict[str, Any]:
     emits: List[Dict[str, Any]] = []
     outcomes: Dict[str, int] = {}
     skips: Dict[str, int] = {}
@@ -163,9 +170,13 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
     bad_examples: List[str] = []
     for em in emits:
         quote = None
-        qm = QUOTE_RE.search(entries[em["index"]]["msg"])
+        limit = None
+        msg0 = entries[em["index"]]["msg"]
+        qm = QUOTE_RE.search(msg0)
         if qm:
             quote = float(qm.group("quote"))
+            lm = LIMIT_RE.search(msg0)
+            limit = float(lm.group("limit")) if lm else None
         if quote is None:
             for e in entries:
                 if e["ts"] != em["ts"]:
@@ -174,6 +185,8 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
                 qm = QUOTE_RE.search(e["msg"])
                 if qm and sm and sm.group("symbol") == em["symbol"]:
                     quote = float(qm.group("quote"))
+                    lm = LIMIT_RE.search(e["msg"])
+                    limit = float(lm.group("limit")) if lm else None
                     break
         if quote is None and data_rows:
             quote = _quote_from_data_log(data_rows, em["symbol"], em["contract"], em["ts"])
@@ -186,6 +199,11 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
             price_bad += 1
             bad_examples.append(f"{em['symbol']} price={em['price']!r}")
             continue
+        if limit is not None and abs(limit - price) > tolerance:
+            # the line's own limit= disagrees with the EMIT price: never a pass
+            price_bad += 1
+            bad_examples.append(f"{em['ts']:%H:%M:%S} {em['symbol']} price={price} limit={limit}")
+            continue
         if abs(price - (quote + adverse_fill)) <= tolerance:
             price_ok += 1
         else:
@@ -197,6 +215,8 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
         verdict = "NO_EMIT"
     elif off_hour or no_outcome or multi_outcome or price_bad:
         verdict = "FAIL"
+    elif price_ok == 0 and not allow_unverified:
+        verdict = "UNVERIFIED"  # no verified limit prices: not evidence for the third clause
     else:
         verdict = "PASS"
     return {
@@ -213,7 +233,8 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
         "outcome_codes": dict(sorted(outcomes.items())),
         "strategy_skip_codes": dict(sorted(skips.items())),
         "limit_price": {"verified_ok": price_ok, "verified_bad": price_bad,
-                        "unverified": unverified, "bad_examples": bad_examples},
+                        "unverified": unverified, "bad_examples": bad_examples,
+                        "allow_unverified": bool(allow_unverified)},
         "verdict": verdict,
     }
 
@@ -230,6 +251,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--adverse-fill", type=float, default=0.01)
     p.add_argument("--timeout", type=float, default=10.0)
     p.add_argument("--json", action="store_true", help="print only the verdict JSON")
+    p.add_argument("--allow-unverified", action="store_true",
+                   help="report PASS even when no EMIT has a verifiable limit price (dry runs only)")
     return p
 
 
@@ -254,12 +277,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"[cadence] /api/logs/data unavailable ({exc}); quote check limited to log lines",
                   file=sys.stderr)
     result = evaluate(parse_lines(text), strategy_substr=args.strategy,
-                      adverse_fill=args.adverse_fill, data_rows=rows)
+                      adverse_fill=args.adverse_fill, data_rows=rows,
+                      allow_unverified=bool(args.allow_unverified))
     result["source"] = source
     print(json.dumps(result, indent=2, sort_keys=True))
     if not args.json:
         print(f"[cadence] verdict: {result['verdict']} ({result['n_emit']} EMIT lines from "
               f"{result['window']['first']} to {result['window']['last']})", file=sys.stderr)
+    if result["verdict"] == "UNVERIFIED":
+        print("[cadence] no verified limit prices: every EMIT lacks a quote= (log line or data-log row); "
+              "pass --allow-unverified to downgrade", file=sys.stderr)
     return {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(result["verdict"], EXIT_NO_EMIT)
 
 

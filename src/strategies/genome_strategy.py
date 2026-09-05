@@ -24,8 +24,38 @@ arithmetic only. Every instant comes from ``clock()``.
 Reject codes (``src.core.risk_manager.log_rejection``): GENOME_NO_VINTAGE,
 GENOME_MASK_FALSE, GENOME_ALREADY_TRADED, GENOME_FEE_MISMATCH,
 GENOME_NOT_TOP_OF_HOUR, GENOME_NOT_EXECUTABLE, GENOME_SIGMA_CAP (the search
-frame's pre-selection ``sigma_f <= sigma_cap`` row filter, R3 #1);
-GENOME_SHADOW is logged by the bot.
+frame's pre-selection ``sigma_f <= sigma_cap`` row filter, R3 #1),
+GENOME_MISSED_HOUR (below); GENOME_SHADOW is logged by the bot.
+
+Live-conditions parity (F3 red team, 2026-09-05). The offline trade set is the
+FIRST masked executable hourly snapshot per market. Live, the strategy can only
+claim that snapshot if it evaluated EVERY earlier hour of the market-day:
+
+* **Missed-hour rule.** Per city the strategy remembers the last hour it
+  evaluated. An hour is *missed* when the strategy had the chance and lost
+  it: (a) a tick reached it outside the top-of-hour tolerance
+  (``GENOME_NOT_TOP_OF_HOUR``, recorded per city-hour), or (b) the process
+  was down -- a restarted strategy whose persisted last hour is more than one
+  grid step before its first evaluation. Then every city-day visible at the
+  next evaluated hour is marked missed and rejects ``GENOME_MISSED_HOUR`` for
+  the rest of the market-day: the mask may already have been true at the
+  skipped hour, so a later emit would not be the offline trade. An hour at
+  which the bot polled NO ladder for the city is a *data* gap, not a missed
+  evaluation -- the frame has no row for it either (the ladder archive has
+  candle-less hours), so it is never a miss; this is what keeps the replay
+  parity exact. A market evaluated at every earlier hour (mask false, book
+  empty, not executable ...) and masked-executable now emits normally -- that
+  IS the offline rule. Newly tracked city-days that first appear at a missed
+  hour are marked missed too (conservative). The first evaluation after a
+  FRESH deploy (no persisted state) has no predecessor and never marks a
+  miss: the first visible city-days may emit later than the offline first
+  hour; ``factory_paper_reconcile.py`` flags those.
+* **Persisted state.** ``state_dir`` (the bot passes the forecast-cache dir)
+  holds ``genome_state_<genome_id>.json`` -- last evaluated hour per city,
+  missed city-days, traded (target_date, symbol) -- rewritten atomically on
+  every change and loaded at construction, so a restarted strategy neither
+  re-emits an already-traded market nor claims a first hour it did not see.
+  ``state_dir=None`` keeps the state in memory (replay parity, tests).
 
 What the live poll cannot reproduce (documented, not fudged):
 
@@ -43,6 +73,7 @@ What the live poll cannot reproduce (documented, not fudged):
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import logging
 import math
 import os
@@ -94,6 +125,7 @@ REASON_FEE_MISMATCH = "GENOME_FEE_MISMATCH"
 REASON_NOT_TOP_OF_HOUR = "GENOME_NOT_TOP_OF_HOUR"
 REASON_NOT_EXECUTABLE = "GENOME_NOT_EXECUTABLE"
 REASON_SIGMA_CAP = "GENOME_SIGMA_CAP"
+REASON_MISSED_HOUR = "GENOME_MISSED_HOUR"
 REASON_SHADOW = "GENOME_SHADOW"  # logged by weather_bot, never here
 
 #: Evaluator constants the row rebuild needs (``ev_analysis.EVConfig`` defaults, pinned by tests).
@@ -102,6 +134,8 @@ SUPPORT_SIGMAS = 8.0
 DEFAULT_GRID_S = 3600
 DEFAULT_TOP_OF_HOUR_TOLERANCE_S = 120
 KEEP_HOURS_S = 48 * 3600
+STATE_FILE_FMT = "genome_state_{genome_id}.json"
+STATE_KEEP_DAYS = 7
 LADDER_KEY = "ladder_markets"
 SERIES_PREFIX = "KXHIGH"
 
@@ -214,6 +248,7 @@ class GenomeStrategy(Strategy):
         prob_cache: Optional[Dict[Any, Any]] = None,
         quiet_engine: bool = True,
         row_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
+        state_dir: Optional[str] = None,
     ) -> None:
         self.spec = spec
         self.genome = spec.genome()
@@ -236,6 +271,14 @@ class GenomeStrategy(Strategy):
         self._traded: Set[Tuple[str, str]] = set()
         # (city, hour_epoch) -> "done" | "missed"
         self._hours: Dict[Tuple[str, int], str] = {}
+        # city -> last evaluated hour epoch (missed-hour rule); (city, target_date) marked missed;
+        # city -> persisted last hour at construction (downtime detection, consumed on first evaluation)
+        self._last_hour: Dict[str, int] = {}
+        self._missed_days: Set[Tuple[str, str]] = set()
+        self._resumed: Dict[str, int] = {}
+        self.state_path: Optional[str] = (
+            os.path.join(state_dir, STATE_FILE_FMT.format(genome_id=spec.genome_id)) if state_dir else None
+        )
         self._prob_cache: Dict[Any, Any] = prob_cache if prob_cache is not None else {}
         #: parity hook: every visible row analyze() evaluates is handed here (replay only)
         self.row_sink = row_sink
@@ -245,6 +288,7 @@ class GenomeStrategy(Strategy):
             # every pricing; lanes/weather.py silences them the same way for the frame
             _engine_logger.setLevel(logging.ERROR)
         self._verify_inputs()
+        self._load_state()
 
     # -- construction-time refusals ---------------------------------------
     def _verify_inputs(self) -> None:
@@ -324,6 +368,23 @@ class GenomeStrategy(Strategy):
         self._hours[key] = "done"
         self.stats["hours_evaluated"] += 1
         decision_ts = _dt.datetime.fromtimestamp(hour_epoch, _dt.timezone.utc)
+        groups = self._group_by_date(ladder)
+        prev_hour = self._last_hour.get(city)
+        resumed_from = self._resumed.pop(city, None)
+        if prev_hour is not None and hour_epoch - prev_hour > self.grid_s:
+            late_tick = any(
+                c == city and st == "missed" and prev_hour < h < hour_epoch
+                for (c, h), st in self._hours.items()
+            )
+            downtime = resumed_from is not None and hour_epoch - resumed_from > self.grid_s
+            if late_tick or downtime:
+                # the module docstring's missed-hour rule: a chance was lost, so
+                # every visible city-day is closed for the rest of the day
+                missed_now = {(city, d) for d in groups} - self._missed_days
+                self._missed_days |= missed_now
+                self.stats["missed_days"] = self.stats.get("missed_days", 0) + len(missed_now)
+        self._last_hour[city] = hour_epoch
+        self._save_state()
 
         fee_type = self._fee_type_at(hour_epoch)
         if fee_type != self.spec.fee.fee_type:
@@ -332,7 +393,7 @@ class GenomeStrategy(Strategy):
             return []
 
         out: List[TradeSignal] = []
-        for target_date, group in self._group_by_date(ladder).items():
+        for target_date, group in groups.items():
             out.extend(self._evaluate_day(city, target_date, group, decision_ts))
         return out
 
@@ -352,6 +413,9 @@ class GenomeStrategy(Strategy):
             if (target_date, m.symbol) in self._traded:
                 self._reject(REASON_ALREADY_TRADED, m.symbol, target_date=target_date)
                 continue
+            if (city, target_date) in self._missed_days:
+                self._reject(REASON_MISSED_HOUR, m.symbol, target_date=target_date, hour_utc=_epoch(decision_ts))
+                continue
             masked = bool(G.to_mask(self.genome, row))
             if not masked:
                 self._reject(
@@ -367,7 +431,17 @@ class GenomeStrategy(Strategy):
                 continue
             sig = self._signal(m, row)
             self._traded.add((target_date, m.symbol))
+            self._save_state()
             self.stats["signals"] += 1
+            # the quote the limit was derived from, on its own line, so the maia
+            # cadence check (scripts/check_maia_emit_cadence.py) can verify
+            # limit == quote + adverse_fill in paper mode too (the protected
+            # mixin's EMIT line carries no quote)
+            logger.info(
+                "[Genome] DECIDE strategy=%s symbol=%s contract=%s quote=%.4f limit=%.4f p_win=%.4f target_date=%s",
+                self._name, m.symbol, self.contract_side, float(row["quote"]), float(row["price_paid"]),
+                float(row["p_win"]), target_date,
+            )
             out.append(sig)
         return out
 
@@ -516,6 +590,10 @@ class GenomeStrategy(Strategy):
         distance = abs(midpoint - mu_f)
         yes_bid = _nan_if_none(m.bid)
         yes_ask = _nan_if_none(m.ask)
+        if yes_ask <= 0.0:
+            # kalshi_provider._parse_price returns 0.0 for a missing/null ask; a
+            # zero ask is not a quote (features.quote only caps ask < 1.0)
+            yes_ask = float("nan")
         dc = np.int16(self.direction_code)
         mc = np.int16(self.mode_code)
         quote = feat.quote(yes_bid, yes_ask, dc, mc)
@@ -617,9 +695,44 @@ class GenomeStrategy(Strategy):
         old = [k for k in self._hours if hour_epoch - k[1] > KEEP_HOURS_S]
         for k in old:
             del self._hours[k]
+        cutoff = (_dt.datetime.fromtimestamp(hour_epoch, _dt.timezone.utc)
+                  - _dt.timedelta(days=STATE_KEEP_DAYS)).date().isoformat()
         if len(self._traded) > 4096:
-            cutoff = (_dt.datetime.fromtimestamp(hour_epoch, _dt.timezone.utc) - _dt.timedelta(days=7)).date().isoformat()
             self._traded = {k for k in self._traded if k[0] >= cutoff}
+        if self._missed_days:
+            self._missed_days = {k for k in self._missed_days if k[1] >= cutoff}
+
+    # -- persisted state (module docstring) -----------------------------------
+    def state_dict(self) -> Dict[str, Any]:
+        return {
+            "genome_id": self.spec.genome_id,
+            "last_hour_epoch": {c: int(h) for c, h in sorted(self._last_hour.items())},
+            "missed_days": sorted([list(k) for k in self._missed_days]),
+            "traded": sorted([list(k) for k in self._traded]),
+        }
+
+    def _load_state(self) -> None:
+        if not self.state_path or not os.path.exists(self.state_path):
+            return
+        with open(self.state_path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if doc.get("genome_id") != self.spec.genome_id:
+            raise GenomeSpecMismatch(
+                f"state file {self.state_path} belongs to genome {doc.get('genome_id')!r}, not {self.spec.genome_id!r}"
+            )
+        self._last_hour = {str(c): int(h) for c, h in (doc.get("last_hour_epoch") or {}).items()}
+        self._resumed = dict(self._last_hour)
+        self._missed_days = {(str(c), str(d)) for c, d in (doc.get("missed_days") or [])}
+        self._traded = {(str(d), str(sym)) for d, sym in (doc.get("traded") or [])}
+
+    def _save_state(self) -> None:
+        if not self.state_path:
+            return
+        os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
+        tmp = f"{self.state_path}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(self.state_dict(), sort_keys=True, indent=2) + "\n")
+        os.replace(tmp, self.state_path)
 
     def _reject(self, code: str, symbol: str, **context: Any) -> None:
         self.stats["rejects"] += 1
@@ -635,12 +748,14 @@ __all__ = [
     "REASON_ALREADY_TRADED",
     "REASON_FEE_MISMATCH",
     "REASON_MASK_FALSE",
+    "REASON_MISSED_HOUR",
     "REASON_NOT_EXECUTABLE",
     "REASON_NOT_TOP_OF_HOUR",
     "REASON_NO_VINTAGE",
     "REASON_SHADOW",
     "REASON_SIGMA_CAP",
     "REGIME_SINGLE",
+    "STATE_FILE_FMT",
     "SUPPORT_SIGMAS",
     "bracket_edge_distance_f",
     "bracket_midpoint_f",

@@ -270,10 +270,13 @@ commit again -- the gate fails while it is null. Pass `--realistic-fills true|fa
 The replay parity script visits every hourly candle, so it cannot see what a
 live process does when it misses an hour. `GenomeStrategy` now enforces:
 
-- **Missed-hour rule.** Per city it remembers the last evaluated hour. If the next
-  evaluated hour is more than one hour later (a tick that missed the 120-s
-  top-of-hour tolerance, or downtime), every city-day visible at that hour is
-  marked missed and rejects `GENOME_MISSED_HOUR` for the rest of the market-day.
+- **Missed-hour rule.** Per city it remembers the last evaluated hour. An hour is
+  missed when the strategy had the chance and lost it: a tick outside the 120-s
+  top-of-hour tolerance (recorded per city-hour), or a restart whose persisted
+  last hour is more than one hour old. Then every city-day visible at the next
+  evaluated hour is marked missed and rejects `GENOME_MISSED_HOUR` for the rest
+  of the market-day. An hour with no ladder poll for the city is a DATA gap (the
+  frame has no row either) and never a miss -- that keeps replay parity exact.
   The offline trade set is the FIRST masked executable snapshot per market; a
   strategy that skipped an hour cannot claim it. A market evaluated at every
   earlier hour (mask false / book empty / not executable) and masked-executable

@@ -189,7 +189,9 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.genome_spec = None
         genome_id = (os.getenv(GENOME_STRATEGY_ID_ENV) or "").strip()
         if genome_id:
-            self.strategies[GENOME_STRATEGY_KEY] = self._build_genome_strategy(genome_id)
+            genome_strategy = self._build_genome_strategy(genome_id)
+            if genome_strategy is not None:  # None = refused (logged); the bot runs V2 only
+                self.strategies[GENOME_STRATEGY_KEY] = genome_strategy
         if ML_WEATHER_ENABLED:
             self.strategies["ml_weather"] = MLWeatherStrategy()
         self.strategies["weather"] = WeatherArbitrageStrategyV2()
@@ -220,7 +222,33 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
         spec = load_promoted(genome_id)
         env_mode = (os.getenv(GENOME_STRATEGY_MODE_ENV) or "").strip().lower()
+        # Authorization (F3 red team, 2026-09-05): the env can only TIGHTEN a
+        # spec to shadow; asking for paper on a shadow spec is a configuration
+        # error and the genome is refused outright rather than silently run in
+        # shadow. Paper mode additionally needs the family's CURRENT registry
+        # status (reports/factory/registry.jsonl, tracked, shipped in the image)
+        # to be PROPOSED/RATIFIED and to match the spec -- spec_hash is
+        # integrity, not authorization.
+        if env_mode == "paper" and spec.mode == GENOME_SHADOW:
+            logger.error(
+                "[Weather] GenomeStrategy REFUSED: GENOME_STRATEGY_MODE=paper but spec %s is mode=shadow "
+                "(promote it with --mode paper once the family is PROPOSED); running V2 only",
+                spec.genome_id,
+            )
+            self.genome_shadow = False
+            self.genome_spec = None
+            return None
         self.genome_shadow = spec.mode == GENOME_SHADOW or env_mode == GENOME_SHADOW
+        if not self.genome_shadow:
+            registry_status = self._registry_status(spec.family)
+            if registry_status not in ("PROPOSED", "RATIFIED") or registry_status != spec.registry_status:
+                logger.error(
+                    "[Weather] GenomeStrategy REFUSED paper mode: family %s registry status is %s, spec says %s "
+                    "(paper requires PROPOSED/RATIFIED and a matching spec); running V2 only",
+                    spec.family, registry_status, spec.registry_status,
+                )
+                self.genome_spec = None
+                return None
         self.genome_spec = spec
         # Repo-relative spec paths resolve against the checkout, never the CWD.
         cal_dir = spec.calibration.dir
@@ -242,12 +270,42 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             forecast_provider=provider,
             fee_regime=fees_mod.load_regime(),
             calibration_provider=calibration,
+            state_dir=cache_dir,  # persisted traded/missed-hour state survives restarts
         )
         logger.info(
             "[Weather] GenomeStrategy %s loaded (genome_id=%s mode=%s registry=%s shadow=%s)",
             strategy.name, spec.genome_id, spec.mode, spec.registry_status, self.genome_shadow,
         )
         return strategy
+
+    @staticmethod
+    def _registry_status(family: str):
+        """Current registry status of ``family`` from the tracked registry.jsonl (no factory import)."""
+        import json as _json
+
+        from src.factory.promoted import REPO_ROOT as _REPO_ROOT
+
+        path = os.path.join(_REPO_ROOT, "reports", "factory", "registry.jsonl")
+        status = None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for raw in fh:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        line = _json.loads(raw)
+                    except ValueError:
+                        continue
+                    if line.get("family") != family:
+                        continue
+                    if line.get("event") == "family" and status is None:
+                        status = "OPEN"
+                    elif line.get("event") == "transition":
+                        status = line.get("status")
+        except OSError:
+            return None
+        return status
 
     def _strategy_label(self, key: str, strategy) -> str:
         if key == GENOME_STRATEGY_KEY:
@@ -268,9 +326,11 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             signals = [signals]
         for sig in signals:
             conf = getattr(sig, "confidence", 0.0)
+            quote = getattr(sig, "quote", None)
+            quote_s = f"{quote:.4f}" if isinstance(quote, (int, float)) else "n/a"
             logger.info(
                 "[Signal] EMIT strategy=%s symbol=%s side=%s contract=%s "
-                "price=%s qty=%s confidence=%.3f",
+                "price=%s qty=%s confidence=%.3f quote=%s limit=%s",
                 strategy_name,
                 sig.symbol,
                 sig.side,
@@ -278,6 +338,8 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 sig.limit_price,
                 sig.quantity,
                 conf,
+                quote_s,
+                sig.limit_price,
             )
             log_rejection(
                 "GENOME_SHADOW",
@@ -288,6 +350,8 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 price=sig.limit_price,
                 quantity=sig.quantity,
                 confidence=conf,
+                quote=quote,
+                limit=sig.limit_price,
                 expiration=(
                     sig.expiration_time.isoformat()
                     if getattr(sig, "expiration_time", None) is not None

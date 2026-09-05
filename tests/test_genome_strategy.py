@@ -1,6 +1,7 @@
 """GenomeStrategy (FR-F3.1/F3.3): row parity, signal shape, refusals, cadence, shadow mode, replay parity."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -110,7 +111,7 @@ def _obs(ts=TS, ladder=None):
                              "floor_strike": a.extra["floor_strike"], "cap_strike": a.extra["cap_strike"]})
 
 
-def _strategy(genome=None, clock=None, lag=240, **over):
+def _strategy(genome=None, clock=None, lag=240, state_dir=None, **over):
     genome = genome or G.SEEDS["nofilter_no"]
     spec = _spec(genome, **over)
     return GenomeStrategy(
@@ -118,6 +119,7 @@ def _strategy(genome=None, clock=None, lag=240, **over):
         forecast_provider=ForecastVintageProvider.from_rows(VINTAGE_ROWS, lag_min=lag),
         fee_regime=load_regime(),
         calibration_provider=FrozenCalibrationProvider(str(CAL_DIR), source="gfs_mex"),
+        state_dir=state_dir,
     ), spec
 
 
@@ -340,16 +342,125 @@ class TestCadence:
         rows = strat.build_rows(_obs(), strat.clock.now)
         assert int(rows["KXHIGHNY-26JUL20-T83"]["ts_utc"]) == int(TS.timestamp())
 
+    # -- missed-hour rule (F3 red team defect 1) -----------------------------
+    def test_missed_hour_never_emits_later_in_the_market_day(self, mp_caplog):
+        # H evaluated at the top of the hour with an EMPTY book: evaluated, nothing executable
+        strat, _ = _strategy(clock=Clock(TS))
+        rows = strat.build_rows(_obs(), TS)
+        masked = [t for t, r in rows.items() if bool(G.to_mask(strat.genome, r))]
+        empty = {t: (0.0, 0.05) for t in masked}
+        assert strat.analyze(_obs(ladder=_ladder(quotes=empty))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_NOT_EXECUTABLE)) == len(masked)
+        # H+1: the tick lands 3 min late -> the hour is missed
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=1, minutes=3)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_NOT_TOP_OF_HOUR)) == 1
+        # H+2 on time with a full book: the mask is true and executable, but the
+        # strategy cannot know whether it was already true at H+1 -> GENOME_MISSED_HOUR
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert sorted(re.search(r"symbol=(\S+)", m).group(1) for m in got) == sorted(t for t, *_ in LADDER)
+        assert strat.stats["signals"] == 0 and strat.stats.get("missed_days") == 1
+        # ... and for the rest of the market-day
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=3)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=3))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_MISSED_HOUR)) == len(LADDER)
+
+    def test_evaluated_false_then_true_emits_at_the_later_hour(self, mp_caplog):
+        # the offline rule: FIRST masked EXECUTABLE snapshot -- an empty book at H
+        # counts as evaluated, so the first executable hour H+1 is the trade
+        strat, _ = _strategy(clock=Clock(TS))
+        rows = strat.build_rows(_obs(), TS)
+        expected = sorted(t for t, r in rows.items() if bool(G.to_mask(strat.genome, r)) and bool(r["executable"]))
+        empty = {t: (0.0, 0.05) for t in expected}
+        assert strat.analyze(_obs(ladder=_ladder(quotes=empty))) == []
+        strat.clock.now = TS + timedelta(hours=1)
+        sigs = strat.analyze(_obs(ts=TS + timedelta(hours=1)))
+        assert sorted(x.symbol for x in sigs) == expected
+        assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+        assert strat.stats.get("missed_days", 0) == 0
+        # the decision line carries the quote the limit came from (cadence checker, paper mode)
+        decide = [m for m in mp_caplog.messages if m.startswith("[Genome] DECIDE ")]
+        assert len(decide) == len(sigs)
+        for m in decide:
+            q = float(re.search(r"quote=(\S+)", m).group(1))
+            lim = float(re.search(r"limit=(\S+)", m).group(1))
+            assert lim == pytest.approx(q + 0.01, abs=1e-9)
+
+    # -- persisted state (restart) --------------------------------------------
+    def test_restart_with_persisted_state_does_not_re_emit(self, tmp_path, mp_caplog):
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        sigs = strat.analyze(_obs())
+        assert sigs
+        state_file = tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)
+        doc = json.loads(state_file.read_text(encoding="utf-8"))
+        assert doc["genome_id"] == spec.genome_id
+        assert sorted(sym for _d, sym in doc["traded"]) == sorted(x.symbol for x in sigs)
+        assert doc["last_hour_epoch"] == {"NY": int(TS.timestamp())}
+        assert doc["missed_days"] == []
+        assert not any(k for k in doc if "time" in k and k != "last_hour_epoch")
+        # a fresh process one hour later: continuous coverage (no gap), traded markets are not re-emitted
+        mp_caplog.clear()
+        fresh, _ = _strategy(clock=Clock(TS + timedelta(hours=1)), state_dir=str(tmp_path))
+        assert fresh.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        got = _rejects(mp_caplog, gs.REASON_ALREADY_TRADED)
+        assert sorted(re.search(r"symbol=(\S+)", m).group(1) for m in got) == sorted(x.symbol for x in sigs)
+        assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+
+    def test_restart_after_downtime_marks_the_day_missed(self, tmp_path, mp_caplog):
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        rows = strat.build_rows(_obs(), TS)
+        masked = [t for t, r in rows.items() if bool(G.to_mask(strat.genome, r))]
+        empty = {t: (0.0, 0.05) for t in masked}
+        assert strat.analyze(_obs(ladder=_ladder(quotes=empty))) == []  # evaluated at H, nothing executable
+        # process down for two hours; the restarted strategy sees H+2 after a gap
+        mp_caplog.clear()
+        fresh, _ = _strategy(clock=Clock(TS + timedelta(hours=2)), state_dir=str(tmp_path))
+        assert fresh.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_MISSED_HOUR)) == len(LADDER)
+        doc = json.loads((tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)).read_text(encoding="utf-8"))
+        assert doc["missed_days"] == [["NY", "2026-07-20"]]
+
+    def test_state_file_of_another_genome_is_refused(self, tmp_path):
+        strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        strat.analyze(_obs())
+        other = G.SEEDS["fr31a_taker"]
+        other_spec = _spec(other)
+        path = tmp_path / gs.STATE_FILE_FMT.format(genome_id=other_spec.genome_id)
+        path.write_text(json.dumps({"genome_id": spec.genome_id}), encoding="utf-8")
+        with pytest.raises(GenomeSpecMismatch):
+            _strategy(genome=other, clock=Clock(TS), state_dir=str(tmp_path))
+
+    # -- empty-ask sentinel (F3 red team defect 4) -----------------------------
+    def test_zero_ask_sentinel_is_not_a_quote(self, mp_caplog):
+        # kalshi_provider._parse_price returns 0.0 for a missing ask; a buy_yes taker
+        # would otherwise see quote 0.00 -> limit 0.01 -> executable
+        strat, _ = _strategy(genome=G.SEEDS["far_yes_taker"], clock=Clock(TS))
+        rows = strat.build_rows(_obs(), TS)
+        masked = [t for t, r in rows.items() if bool(G.to_mask(strat.genome, r))]
+        assert masked, "fixture must mask at least one market for far_yes_taker"
+        zero_ask = {t: (0.02, 0.0) for t in masked}
+        rows0 = strat.build_rows(_obs(ladder=_ladder(quotes=zero_ask)), TS)
+        for t in masked:
+            assert np.isnan(rows0[t]["yes_ask"]) and np.isnan(rows0[t]["quote"]) and not bool(rows0[t]["executable"])
+        assert strat.analyze(_obs(ladder=_ladder(quotes=zero_ask))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_NOT_EXECUTABLE)) == len(masked)
+
 
 # ---------------------------------------------------------------------------
 # weather_bot wiring: env, clock injection, shadow mode
 # ---------------------------------------------------------------------------
 class TestBotShadowMode:
-    def _bot(self, tmp_path, monkeypatch, mode_env="shadow", spec_mode="shadow"):
+    def _bot(self, tmp_path, monkeypatch, mode_env="shadow", spec_mode="shadow", registry_status="CLOSED",
+             expect_genome=True):
         import src.bots.weather_bot as weather_bot
         from src.bots.weather_bot import CITY_CONFIG, WeatherBot
 
-        spec = _spec(G.SEEDS["nofilter_no"], mode=spec_mode)
+        spec = _spec(G.SEEDS["nofilter_no"], mode=spec_mode, registry_status=registry_status)
         path = P.write_promoted(spec, tmp_path / f"{spec.genome_id}.json")
         monkeypatch.setenv("GENOME_STRATEGY_ID", path)
         monkeypatch.setenv("GENOME_STRATEGY_MODE", mode_env)
@@ -364,9 +475,13 @@ class TestBotShadowMode:
 
         monkeypatch.setattr(weather_bot, "datetime", FrozenDatetime)
         bot = WeatherBot()
+        if not expect_genome:
+            assert list(bot.strategies) == ["weather"] and bot.genome_spec is None
+            return bot, None
         assert list(bot.strategies) == ["genome", "weather"]
         assert bot.genome_shadow is True
         genome = bot.strategies["genome"]
+        assert genome.state_path and genome.state_path.startswith(str(tmp_path / "cache"))
         assert isinstance(genome, GenomeStrategy) and genome.spec.genome_id == spec.genome_id
         # the bot's clock is the ET wall clock (frozen here); the strategy never reads one itself
         assert genome.clock().utcoffset() == timedelta(hours=-4) and genome.clock() == TS
@@ -415,9 +530,28 @@ class TestBotShadowMode:
         assert "contract=NO" in emits[0]
         assert genome.stats["signals"] == len(emits)
 
-    def test_env_paper_cannot_override_a_shadow_spec(self, tmp_path, monkeypatch):
-        bot, _ = self._bot(tmp_path, monkeypatch, mode_env="paper", spec_mode="shadow")
-        assert bot.genome_shadow is True
+    def test_env_paper_on_a_shadow_spec_is_refused(self, tmp_path, monkeypatch, mp_caplog):
+        bot, _ = self._bot(tmp_path, monkeypatch, mode_env="paper", spec_mode="shadow", expect_genome=False)
+        assert bot.genome_shadow is False
+        assert any("GenomeStrategy REFUSED" in m and "mode=shadow" in m for m in mp_caplog.messages)
+
+    def test_paper_spec_is_refused_while_the_registry_is_not_proposed(self, tmp_path, monkeypatch, mp_caplog):
+        # the spec CLAIMS PROPOSED; the tracked registry says CLOSED for family #1
+        bot, _ = self._bot(tmp_path, monkeypatch, mode_env="paper", spec_mode="paper",
+                           registry_status="PROPOSED", expect_genome=False)
+        assert any("REFUSED paper mode" in m and "CLOSED" in m for m in mp_caplog.messages)
+
+    def test_shadow_emit_line_carries_quote_and_limit(self, tmp_path, monkeypatch, mp_caplog):
+        bot, genome = self._bot(tmp_path, monkeypatch)
+        bot._process_signals = lambda signals, strategy_name, risk_manager, dashboard: False
+        bot.tick(MagicMock(), MagicMock())
+        emits = [m for m in mp_caplog.messages if m.startswith("[Signal] EMIT strategy=" + genome.name)]
+        shadows = _rejects(mp_caplog, "GENOME_SHADOW")
+        assert emits and len(shadows) == len(emits)
+        for line in emits + shadows:
+            q = float(re.search(r"quote=(\S+)", line).group(1))
+            lim = float(re.search(r"limit=(\S+)", line).group(1))
+            assert lim == pytest.approx(q + 0.01, abs=1e-9)
 
     def test_bot_without_env_has_no_genome_and_v2_path_unchanged(self, monkeypatch):
         from src.bots.weather_bot import WeatherBot

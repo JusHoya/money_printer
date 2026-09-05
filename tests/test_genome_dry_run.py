@@ -361,3 +361,30 @@ def test_cadence_checker_passes_on_the_shadow_log(genome_shadow):
     assert verdict["verdict"] == "PASS"
     assert verdict["emit_multiple_outcomes"] == [] and verdict["emit_without_outcome"] == []
     assert verdict["strategy_skip_codes"].get("GENOME_ALREADY_TRADED", 0) > 0
+    # the limit price is VERIFIED from the quote= on the EMIT line (F3 red team defect 2)
+    assert verdict["limit_price"]["verified_ok"] >= 1 and verdict["limit_price"]["unverified"] == []
+    assert verdict["limit_price"]["verified_bad"] == 0
+
+
+def test_cadence_checker_refuses_a_log_without_verifiable_quotes(tmp_path):
+    log = tmp_path / "noquote.log"
+    log.write_text(
+        "2026-07-19 15:00:00 | INFO | [Signal] EMIT strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+        "side=buy contract=NO price=0.86 qty=20 confidence=0.870\n"
+        "2026-07-19 15:00:00 | INFO | [Risk] REJECT strategy=Genome 0c4b2050 symbol=KXHIGHNY-26JUL20-B77.5 "
+        "reason=GENOME_SHADOW side=buy contract=NO price=0.86 quantity=20\n",
+        encoding="utf-8",
+    )
+    cmd = [sys.executable, os.path.join(ROOT, "scripts", "check_maia_emit_cadence.py"),
+           "--file", str(log), "--no-data-log", "--strategy", "Genome", "--json"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT, timeout=120)
+    assert proc.returncode == 3, proc.stdout[-800:] + proc.stderr[-400:]
+    assert json.loads(proc.stdout)["verdict"] == "UNVERIFIED"
+    assert "no verified limit prices" in proc.stderr
+    proc = subprocess.run(cmd + ["--allow-unverified"], capture_output=True, text=True, cwd=ROOT, timeout=120)
+    assert proc.returncode == 0 and json.loads(proc.stdout)["verdict"] == "PASS"
+    # a quote= that contradicts the price is a hard FAIL
+    log.write_text(log.read_text(encoding="utf-8").replace("confidence=0.870", "confidence=0.870 quote=0.80 limit=0.86"),
+                   encoding="utf-8")
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT, timeout=120)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["verdict"] == "FAIL"
