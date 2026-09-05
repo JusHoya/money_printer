@@ -46,6 +46,15 @@ log "2/6 forecast cache bind"
 sudo mkdir -p "$STATE_ROOT/data/forecast_cache"
 sudo chown 1000:1000 "$STATE_ROOT/data/forecast_cache"
 
+log "2b/6 frozen calibration payloads into the data bind"
+# The image excludes data/ (.dockerignore) and the /srv/money_printer/data bind shadows
+# /app/data, so the spec's calibration dir (data/calibration, tracked in git) must be
+# copied into the bind or GenomeStrategy cannot be built (maia 2026-09-05 crash-loop).
+sudo mkdir -p "$STATE_ROOT/data/calibration"
+sudo cp -f "$ROOT"/data/calibration/*.json "$STATE_ROOT/data/calibration/"
+sudo chown -R 1000:1000 "$STATE_ROOT/data/calibration"
+echo "  $(ls "$STATE_ROOT/data/calibration" | wc -l) calibration files in $STATE_ROOT/data/calibration"
+
 log "3/6 runtime env ($ENV_FILE)"
 sudo touch "$ENV_FILE"
 upsert() {  # upsert KEY VALUE -- replace the line if present, append otherwise
@@ -71,10 +80,10 @@ if [[ "$DO_REPAIR" == 1 ]]; then
   REPAIR=(python scripts/repair_no_settlement_pnl.py --state /app/data/exchange_state.json --journal /app/data/trade_journal.jsonl)
   RUN=("${COMPOSE[@]}" run --rm --no-deps --entrypoint python "$SERVICE")
   "${RUN[@]}" -c 'import src.core.matching_engine; print("repair image OK")' || die "the $SERVICE image cannot import the engine"
-  set +e
-  "${RUN[@]}" "${REPAIR[@]:1}"                      # dry run: exit 1 = repairs pending, 0 = nothing to do
-  rc=$?
-  set -e
+  # dry run: exit 1 = repairs pending, 0 = nothing to do. Evaluated in an `if` so the
+  # expected non-zero exit does not fire the ERR trap (which restarted the sandbox
+  # mid-repair on 2026-09-05).
+  if "${RUN[@]}" "${REPAIR[@]:1}"; then rc=0; else rc=$?; fi
   if [[ $rc -eq 1 ]]; then
     "${RUN[@]}" "${REPAIR[@]:1}" --apply || die "repair --apply failed; backups are next to the files as .bak-n"
     log "repair applied; second dry run must now be clean:"
@@ -91,11 +100,18 @@ fi
 log "5/6 docker compose up -d --build"
 "${COMPOSE[@]}" up -d --build
 STOPPED=0   # set to 1 while the sandbox is stopped for the repair
-sleep 8
-curl -sf http://localhost:8050/healthz || die "healthz failed"
+for i in $(seq 1 30); do curl -sf http://localhost:8050/healthz && break || sleep 3; done
+curl -sf http://localhost:8050/healthz >/dev/null || die "healthz failed after 90 s -- see: ${COMPOSE[*]} logs --tail 100 $SERVICE"
 echo
 CID="$("${COMPOSE[@]}" ps -q "$SERVICE")"
 docker exec "$CID" env | grep -E 'GENOME_|MP_FORECAST' || die "GENOME_* not visible in the container"
+sleep 5
+if "${COMPOSE[@]}" logs --tail 300 "$SERVICE" 2>/dev/null | grep -E 'GenomeStrategy .* loaded' | tail -n 1; then
+  log "genome strategy loaded in shadow mode"
+else
+  "${COMPOSE[@]}" logs --tail 300 "$SERVICE" 2>/dev/null | grep -E 'GenomeStrategy|REFUSED' | tail -n 3
+  die "GenomeStrategy did not report loaded -- the bot is running V2 only (see the REFUSED line above)"
+fi
 
 log "6/6 done. After the next :00 UTC boundary, from any LAN host:"
 echo "   python scripts/check_maia_emit_cadence.py --url http://maia.local:8050/api/logs/tail"

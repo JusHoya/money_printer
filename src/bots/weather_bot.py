@@ -189,7 +189,21 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         self.genome_spec = None
         genome_id = (os.getenv(GENOME_STRATEGY_ID_ENV) or "").strip()
         if genome_id:
-            genome_strategy = self._build_genome_strategy(genome_id)
+            # A genome that cannot be built must never take the sandbox down
+            # (maia 2026-09-05: the promoted spec pointed at data/calibration,
+            # which the image excludes and the /srv data bind shadows, so
+            # WeatherBot() raised and the container crash-looped). Any failure
+            # here is logged as a REFUSED line and the bot runs V2 only.
+            try:
+                genome_strategy = self._build_genome_strategy(genome_id)
+            except Exception as exc:  # noqa: BLE001 -- deliberate: never crash the sandbox
+                logger.error(
+                    "[Weather] GenomeStrategy REFUSED: %s could not be built (%s: %s); running V2 only",
+                    genome_id, type(exc).__name__, exc,
+                )
+                self.genome_shadow = False
+                self.genome_spec = None
+                genome_strategy = None
             if genome_strategy is not None:  # None = refused (logged); the bot runs V2 only
                 self.strategies[GENOME_STRATEGY_KEY] = genome_strategy
         if ML_WEATHER_ENABLED:
