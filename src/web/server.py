@@ -8,6 +8,7 @@ Routes:
     POST /api/bots/{name}/start  → start a bot
     POST /api/bots/{name}/stop   → stop a bot
     GET  /api/portfolio_history  → merged equity curve from logs/portfolio_*.csv
+    GET  /api/genome             → the promoted genome's status alone
     GET  /api/journal            → recent trade-journal entries
     GET  /api/training           → ML training state (offline-produced)
     GET  /api/win_rates          → raw per-strategy win-rate file
@@ -19,10 +20,12 @@ The two POST bot-control routes optionally require an X-MP-Token header
 matching the MP_CONTROL_TOKEN env var (open when the env var is unset);
 GET routes never require it.
 
-The /api/journal, /api/training, /api/win_rates, /api/stats/rolling and
-/api/logs/tail routes exist for remote monitoring: the Hermes agent on
-alcyone reads them over the LAN when the sandbox runs on maia, where the
-data files are not on the agent's filesystem (deploy/README.md).
+The /api/genome, /api/journal, /api/training, /api/win_rates,
+/api/stats/rolling and /api/logs/tail routes exist for remote monitoring: the
+Hermes agent on alcyone reads them over the LAN when the sandbox runs on maia,
+where the data files are not on the agent's filesystem (deploy/README.md).
+/api/genome serves the ``genome`` block of the snapshot on its own — the same
+object /api/status carries, minus the ~120 KB of market data around it.
 """
 
 import asyncio
@@ -313,6 +316,24 @@ def create_app(state_manager, orchestrator) -> FastAPI:
         except Exception as e:
             log.error(f"[api] status error: {e}")
             return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @app.get("/api/genome")
+    async def get_genome():
+        """The promoted genome's status alone (F3 red team, 2026-09-05).
+
+        Identical to ``/api/status["genome"]`` plus the disambiguated mode
+        block, without the market-data payload around it — /api/status is
+        ~120 KB on maia, which is a poor thing to poll over the LAN just to
+        learn whether the genome is still allowed to emit. Side-effect free:
+        ``genome_snapshot()`` writes no equity point and drives no mascot.
+        """
+        try:
+            body = dict(state_manager.genome_snapshot())
+        except Exception as e:
+            log.error(f"[api] genome error: {e}")
+            return JSONResponse(content={"ok": False, "error": str(e)}, status_code=500)
+        body["ok"] = True
+        return JSONResponse(content=body)
 
     @app.get("/api/logs/data")
     async def get_data_log():

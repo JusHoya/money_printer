@@ -326,6 +326,66 @@ function updateMode(mode) {
 }
 
 /**
+ * Disambiguate the mode pill (F3 red team, 2026-09-05). snapshot.mode names the
+ * KALSHI CREDENTIAL only — it reads 'paper' while a promoted genome runs in
+ * shadow. snapshot.modes = {capital, genome, label} says both; the pill keeps
+ * its capital-mode text and carries the full label as its tooltip.
+ */
+function updateModes(modes) {
+  const pill = $('mode-pill');
+  if (pill && modes && modes.label) pill.title = modes.label;
+}
+
+/**
+ * Genome card. snapshot.genome is always present; the card only appears once a
+ * genome is loaded or was refused at startup.
+ * HTML: #genome-card, #genome-mode, #genome-signals, ...
+ */
+function updateGenome(g) {
+  const card = $('genome-card');
+  if (!card) return;
+  if (!g || (!g.present && !g.refused)) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const mode = $('genome-mode');
+  if (mode) mode.textContent = (g.refused ? 'REFUSED' : (g.execution_mode || 'unknown')).toUpperCase();
+
+  const st = g.stats || {};
+  const state = g.state || {};
+  const setText = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+
+  setText('genome-signals', g.present ? (st.signals != null ? st.signals : '--') : '--');
+  setText('genome-rejects', `${st.rejects || 0} rejects`);
+  setText('genome-hours',   g.present ? (st.hours_evaluated != null ? st.hours_evaluated : '--') : '--');
+  setText('genome-polls',   `${st.poll_failures || 0} poll failures`);
+  setText('genome-traded',  state.traded_total != null ? state.traded_total : '--');
+  setText('genome-missed',  `${state.missed_days_total || 0} missed days`);
+  setText('genome-cities',  state.cities != null ? state.cities : '--');
+
+  const hours = state.last_hour_epoch || {};
+  const newest = Object.values(hours).reduce((a, b) => (b > a ? b : a), 0);
+  setText('genome-lasthour', newest ? `last hour ${formatTime(newest)}` : 'last hour --');
+
+  const detail = $('genome-detail');
+  if (detail) {
+    if (g.refused) {
+      detail.textContent = `REFUSED: ${g.refused_reason || 'reason not reported'}`;
+    } else if (g.state_error) {
+      detail.textContent = `state unreadable: ${g.state_error}`;
+    } else {
+      const parts = [g.strategy || 'genome', `id ${g.genome_id || '--'}`];
+      if (g.family) parts.push(g.family);
+      if (g.registry_status) parts.push(`registry ${g.registry_status}`);
+      if (g.spec_mode && g.spec_mode !== g.execution_mode) parts.push(`spec ${g.spec_mode}`);
+      detail.textContent = parts.join(' · ');
+    }
+  }
+}
+
+/**
  * Update uptime clock.
  */
 function updateUptime(uptime) {
@@ -1172,6 +1232,8 @@ async function fetchLogTail() {
 //   mode, uptime, portfolio, market_data, alerts, logs,
 //   strategy_stats, positions, pnl_history, bots, mascot_state
 registerSection('mode',           updateMode);
+registerSection('modes',          updateModes);
+registerSection('genome',         updateGenome);
 registerSection('uptime',         updateUptime);
 registerSection('portfolio',      updatePortfolio);
 registerSection('market_data',    updateMarketData);

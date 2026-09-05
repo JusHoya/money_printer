@@ -65,6 +65,12 @@ class TestStateManagerSnapshot:
         snap = sm.snapshot()
         expected_keys = {
             "mode",
+            # F3 red team 2026-09-05: 'modes' disambiguates 'mode' (which
+            # describes the Kalshi credential, not what a strategy is doing)
+            # and 'genome' makes the promoted genome visible at all. Both are
+            # covered by tests/test_web_genome_observability.py.
+            "modes",
+            "genome",
             "uptime",
             "portfolio",
             "market_data",
@@ -937,6 +943,9 @@ class TestSnapshotCompleteness:
         snap = sm.snapshot()
         expected = {
             "mode",
+            # See the note in TestStateManagerSnapshot.test_snapshot_has_all_keys.
+            "modes",
+            "genome",
             "uptime",
             "portfolio",
             "market_data",

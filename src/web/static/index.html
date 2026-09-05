@@ -251,6 +251,39 @@
         </div>
       </div>
 
+      <!-- Genome (snapshot.genome — hidden until a genome is loaded/refused) -->
+      <div class="card" id="genome-card" style="display:none;">
+        <div class="card-header">
+          <span class="card-title">Genome</span>
+          <span class="card-badge" id="genome-mode">--</span>
+        </div>
+        <div class="card-body">
+          <div class="stat-tiles" id="genome-tiles">
+            <div class="stat-tile">
+              <div class="stat-label">Signals</div>
+              <div class="stat-value neu" id="genome-signals">--</div>
+              <div class="stat-sub" id="genome-rejects">0 rejects</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Hours Evaluated</div>
+              <div class="stat-value neu" id="genome-hours">--</div>
+              <div class="stat-sub" id="genome-polls">0 poll failures</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Traded Today</div>
+              <div class="stat-value neu" id="genome-traded">--</div>
+              <div class="stat-sub" id="genome-missed">0 missed days</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Cities Tracked</div>
+              <div class="stat-value neu" id="genome-cities">--</div>
+              <div class="stat-sub" id="genome-lasthour">last hour --</div>
+            </div>
+          </div>
+          <div id="genome-detail" class="empty-state"></div>
+        </div>
+      </div>
+
       <!-- Alerts Panel -->
       <div class="card" id="alerts-card">
         <div class="card-header">
