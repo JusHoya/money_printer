@@ -418,7 +418,9 @@ design), and search only over rows the runtime can actually size.
 - **Files:** `src/factory/frame.py`, `src/factory/lanes/weather.py`, `src/factory/columns.py` —
   **none protected**, all offline, none imported by the runtime beyond `features.py`/`genome.py`.
   Requires a new freeze-frame (new frame sha), a new parity run, and a new gate registration.
-- **Honest cost:** it removes 86 % of the executable NO-taker rows from the search space. On this
+- **Honest cost:** it removes ~40 % of the executable NO-taker rows from the search space
+  (830 -> 500 first-entry markets; the 86 % figure quoted here before was 112/130 of the
+  GENOME's own trades, a different denominator). On this
   frame the surviving universe realizes **−0.048/contract** unfiltered (§3), so a v2 search may well
   return CLOSED again — quickly, and for a defensible reason. That is information, and HANDOFF §3
   rule 6 says a documented "no" satisfies the criterion.

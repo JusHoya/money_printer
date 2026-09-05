@@ -213,9 +213,19 @@ class TestV2RouteIsRecordedWithItsCost(unittest.TestCase):
             )
 
     def test_honest_cost_is_recorded(self):
+        """The v2 cost is ~40% of the NO-taker UNIVERSE, not the 86% first recorded.
+
+        86% was 112/130 of the GENOME's own trades priced >= 0.71 -- a different
+        denominator that reached three docs and the memo. Measured on the frozen frame:
+        the executable NO-taker universe goes 830 -> 500 first-entry markets once the
+        cold-start sizing law is folded into admissibility, i.e. ~40% removed. (Holding
+        the first-executable candle instead of re-picking gives 194/830; v2 re-picks,
+        because folding the law into `sandbox_admissible` changes what `executable` means.)
+        """
         for path in (HANDOFF, PRD, ROADMAP):
             text = norm(read(path))
-            self.assertIn("86 %", text, os.path.basename(path))
+            self.assertIn("40 %", text, os.path.basename(path))
+            self.assertNotIn("86 %", text, os.path.basename(path))
             self.assertIn("0.048", text, os.path.basename(path))
             self.assertIn("CLOSED", text, os.path.basename(path))
 

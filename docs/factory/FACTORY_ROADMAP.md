@@ -322,7 +322,7 @@ paper record toward FR-5.2.
     phase — new frame freeze, search, parity run and gate registration — and it must not
     disturb the v1 frame schema or `executable`/`sandbox_admissible` semantics, on which
     the frozen frames, the promoted specs' `frame_search_sha256` and F3's
-    `n_discrepancies: 0` all depend. Budget for v2 returning CLOSED: it removes ~86 % of
+    `n_discrepancies: 0` all depend. Budget for v2 returning CLOSED: it removes ~40 % of
     the executable NO-taker rows and the survivors realize about −0.048/contract
     unfiltered on this frame. A documented "no" satisfies the criterion.
 

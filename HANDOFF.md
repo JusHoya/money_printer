@@ -442,10 +442,11 @@ not. Across the genome's 130 trades the blended `p` spans only [0.638, 0.700], s
 at a median quote of 0.83 (min 0.37, max 0.94) — median **price paid 0.84**, since the
 signal prices at `quote + 1c`.
 Replaying the genome's 130 offline trades through the real sizing arithmetic,
-**117 of 130 (90 %) return 0 contracts with `KELLY_ZERO`**, and the surviving 13 size at
-the `MAX_CONTRACTS = 50` cap: **identically at every bankroll stage from $100 (Seed) to
-$60,000 (Compound), including the sandbox's actual ~$2,873**, because what binds is the
-blend, not the balance. It cannot be funded away and there is no caller-side workaround —
+**117 of 130 (90 %) return 0 contracts with `KELLY_ZERO`**. Which 13 survive is
+**identical at every bankroll stage from $100 (Seed) to $60,000 (Compound), including the
+sandbox's actual ~$2,873**, because admission depends only on the sign of `f` and the
+stage merely scales it. The QUANTITY does move with the balance (median 7 contracts at
+$100, 38 at $500, at the `MAX_CONTRACTS = 50` cap from the live balance up). It cannot be funded away and there is no caller-side workaround —
 reaching `p = 0.80` would need `confidence = 1.25`. Shadow mode hides it:
 `GENOME_SHADOW` rejects before sizing is ever reached.
 
@@ -505,7 +506,8 @@ fee(price_paid)` — into the frame's `sandbox_admissible`, and register
 `weather/gfs_mex/taker/v2` (the registry refuses to re-register a CLOSED family name by
 design; a rerun is a new family). Then everything promoted is executable from trade 1 and
 the pre-registration becomes true rather than worked around. Honest cost: it removes
-**~86 %** of the executable NO-taker rows, and the surviving universe realizes about
+**~40 %** of the executable NO-taker rows (830 -> 500 first-entry markets on this
+frame), and the surviving universe realizes about
 **−0.048/contract** unfiltered on this frame — so **budget for it returning CLOSED**, which
 a documented "no" satisfies (§3 rule 6). This branch does **not** do it: it needs a new
 frame freeze (new frame sha), a fresh search, a new parity run and a new gate registration.

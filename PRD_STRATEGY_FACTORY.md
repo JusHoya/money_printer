@@ -502,7 +502,8 @@ is set by dates of tape, not by compute.
      `sandbox_admissible` and register `weather/gfs_mex/taker/v2` (the registry refuses to
      re-register a CLOSED family name; a rerun is a new family, by design). Then everything
      promoted is executable from trade 1 and the pre-registration is true rather than worked
-     around. **Honest cost:** it removes ~86 % of the executable NO-taker rows, and the
+     around. **Honest cost:** it removes ~40 % of the executable NO-taker rows (830 -> 500
+     first-entry markets on this frame), and the
      surviving universe realizes about **−0.048/contract** unfiltered on this frame — so
      budget for v2 returning CLOSED, which a documented "no" satisfies (HANDOFF section 3
      rule 6). It is a **separate phase**: new frame freeze (new frame sha), fresh search,
