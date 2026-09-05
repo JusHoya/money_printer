@@ -886,16 +886,23 @@ class TestClosureIsVisible:
         assert [m for m in mp_caplog.messages if m.startswith("[Genome] DAY CLOSED ")] == []
 
     def test_a_recorded_miss_logs_one_line_of_its_own(self, mp_caplog):
-        # record_poll_failure marked the hour and logged NOTHING; the next on-time
-        # tick of that hour returns [] in silence, so the hour left no trace at all.
+        # record_poll_failure marked the hour and logged NOTHING; the hour left no
+        # trace at all.
         strat, _ = _strategy(clock=Clock(TS))
         strat.record_poll_failure("NY")
         miss = [m for m in mp_caplog.messages if m.startswith("[Genome] MISS ")]
         assert len(miss) == 1
         assert f"city=NY hour_utc={int(TS.timestamp())}" in miss[0]
         assert f"cause={gs.CAUSE_POLL_FAILURE}" in miss[0]
-        assert strat.analyze(_obs()) == []  # the hour is consumed, still silent
         assert strat.stats.get("missed_hours") == 1
+        # a tick that arrives OUTSIDE the tolerance cannot evaluate the hour, so the
+        # hour stays lost -- and says so once, not once per poll
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(minutes=5)
+        assert strat.analyze(_obs()) == []
+        assert [m for m in mp_caplog.messages if m.startswith("[Genome] MISS ")] == []
+        assert strat.stats.get("missed_hours") == 1
+        assert strat._hours[("NY", int(TS.timestamp()))] == gs.HOUR_MISSED_PREFIX + gs.CAUSE_POLL_FAILURE
 
     def test_the_observation_failure_cause_travels_to_the_reject(self, mp_caplog):
         strat, _ = _strategy(clock=Clock(TS))
@@ -976,3 +983,231 @@ class TestStateDurability:
         assert fresh.analyze(_obs()) == []
         got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
         assert got and all("cause=unknown" in m for m in got)
+
+
+# ---------------------------------------------------------------------------
+# F3 remediation (2026-09-05): the missed-hour bookkeeping flooded the only
+# diagnostic surface it exists to feed, and one transient tick-level failure was
+# read as a final verdict on the hour.
+# ---------------------------------------------------------------------------
+class TestALostHourIsRecordedOnce:
+    """maia ticks every ~23 s, so the hook fires ~155x per lost city-hour per city.
+
+    Every one of those used to re-mark the hour, re-count ``missed_hours`` and
+    re-emit ``[Genome] MISS`` -- ~620 lines/hour across four cities against a
+    500-line log tail, i.e. one outage erased the whole diagnostic window.
+    """
+
+    HOUR_TICKS = 155  # what the reviewer measured for ONE distinct lost city-hour
+
+    def test_a_sustained_outage_records_one_miss_per_city_hour(self, mp_caplog):
+        strat, _ = _strategy(clock=Clock(TS))
+        for i in range(self.HOUR_TICKS):
+            strat.clock.now = TS + timedelta(seconds=23 * i)  # all inside hour H
+            strat.record_missed_hour("NY", gs.CAUSE_OBSERVATION_FAILURE)
+        miss = [m for m in mp_caplog.messages if m.startswith("[Genome] MISS ")]
+        assert len(miss) == 1, f"{len(miss)} lines for one lost city-hour"
+        assert strat.stats.get("missed_hours") == 1
+        assert strat._hours[("NY", int(TS.timestamp()))] == gs.HOUR_MISSED_PREFIX + gs.CAUSE_OBSERVATION_FAILURE
+
+    def test_a_sustained_poll_outage_counts_one_poll_failure_per_city_hour(self, mp_caplog):
+        strat, _ = _strategy(clock=Clock(TS))
+        for i in range(self.HOUR_TICKS):
+            strat.clock.now = TS + timedelta(seconds=23 * i)
+            strat.record_poll_failure("NY")
+        assert strat.stats.get("poll_failures") == 1 and strat.stats.get("missed_hours") == 1
+        assert len([m for m in mp_caplog.messages if m.startswith("[Genome] MISS ")]) == 1
+
+    def test_a_late_hour_logs_one_reject_however_often_it_is_polled(self, mp_caplog):
+        # the same flood on the other recording path: every late poll of a lost
+        # hour used to add a GENOME_NOT_TOP_OF_HOUR line
+        strat, _ = _strategy(clock=Clock(TS + timedelta(minutes=5)))
+        for i in range(20):
+            strat.clock.now = TS + timedelta(minutes=5, seconds=23 * i)
+            assert strat.analyze(_obs()) == []
+        assert len(_rejects(mp_caplog, gs.REASON_NOT_TOP_OF_HOUR)) == 1
+
+    def test_the_hour_is_still_lost_and_still_closes_the_day(self, mp_caplog):
+        # idempotence must not turn a real miss into a no-op
+        strat, _ = _strategy(clock=Clock(TS))
+        assert strat.analyze(_empty_book_obs(strat)) == []  # H evaluated, nothing executable
+        for i in range(40):
+            strat.clock.now = TS + timedelta(hours=1, seconds=23 * i)
+            strat.record_missed_hour("NY", gs.CAUSE_OBSERVATION_FAILURE)
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert _symbols_of(got) == sorted(t for t, *_ in LADDER)
+        assert all(f"cause={gs.CAUSE_OBSERVATION_FAILURE}" in m for m in got)
+        assert strat.stats.get("missed_days") == 1
+
+
+class TestATransientTickFailureIsRecoverable:
+    """A bot-side miss reports ONE TICK, not the hour.
+
+    maia's control emits ``KXHIGHNY-26JUL20-T83`` at H+23 s. With one METAR
+    failure at H+0 s the identical H+23 s tick emitted nothing and the city-day
+    closed -- 97 s INSIDE the 120 s tolerance, and for three market-days at once
+    (``_ladder_for_city`` returns D-1/D/D+1). ``HOUR_NO_DATA`` already had this
+    recovery hatch; a bot-side skip is equally recoverable within its own hour.
+    """
+
+    def test_the_next_in_tolerance_tick_evaluates_the_hour_after_all(self, mp_caplog):
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.tick_driven = True
+        strat.record_missed_hour("NY", gs.CAUSE_OBSERVATION_FAILURE)  # H+0 s: no METAR, city skipped
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(seconds=23)  # the very next maia tick
+        sigs = strat.analyze(_obs())
+        assert sigs, "an in-tolerance tick with a ladder must evaluate the hour"
+        assert strat._hours[("NY", int(TS.timestamp()))] == gs.HOUR_DONE
+        assert strat.stats.get("missed_hours", 0) == 0 and strat.stats.get("hours_recovered") == 1
+        assert [m for m in mp_caplog.messages if m.startswith("[Genome] DAY CLOSED ")] == []
+        recovered = [m for m in mp_caplog.messages if m.startswith("[Genome] MISS RECOVERED ")]
+        assert len(recovered) == 1 and f"cause={gs.CAUSE_OBSERVATION_FAILURE}" in recovered[0]
+        # ... and the market-day is still open at the next hour
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=1)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+        assert strat.stats.get("missed_days", 0) == 0
+
+    def test_a_recovered_poll_failure_is_not_counted_as_one(self):
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.record_poll_failure("NY")
+        assert strat.stats["poll_failures"] == 1
+        strat.clock.now = TS + timedelta(seconds=23)
+        assert strat.analyze(_obs())
+        assert strat.stats["poll_failures"] == 0 and strat.stats["missed_hours"] == 0
+
+    def test_an_hour_no_in_tolerance_tick_ever_evaluates_is_still_lost(self, mp_caplog):
+        # the semantics that must survive: only an IN-TOLERANCE evaluation recovers
+        strat, _ = _strategy(clock=Clock(TS))
+        assert strat.analyze(_empty_book_obs(strat)) == []
+        strat.clock.now = TS + timedelta(hours=1, seconds=5)
+        strat.record_missed_hour("NY", gs.CAUSE_OBSERVATION_FAILURE)
+        strat.clock.now = TS + timedelta(hours=1, minutes=4)  # back, but far too late
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        assert strat._hours[("NY", int(TS.timestamp()) + 3600)].startswith(gs.HOUR_MISSED_PREFIX)
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_MISSED_HOUR)) == len(LADDER)
+
+    def test_a_restart_gap_and_a_tick_gap_still_close_the_day(self, tmp_path, mp_caplog):
+        # recovery is per-hour and per-tick; it must not reach the two gap rules
+        strat, _ = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+        assert strat.analyze(_empty_book_obs(strat)) == []
+        fresh, _ = _strategy(clock=Clock(TS + timedelta(hours=2)), state_dir=str(tmp_path))
+        assert fresh.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert len(got) == len(LADDER) and all(f"cause={gs.CAUSE_DOWNTIME}" in m for m in got)
+        mp_caplog.clear()
+        tick, _ = _strategy(clock=Clock(TS))
+        tick.tick_driven = True
+        assert tick.analyze(_empty_book_obs(tick)) == []
+        tick.clock.now = TS + timedelta(hours=2)  # H+1 never reached the strategy
+        assert tick.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert len(got) == len(LADDER) and all(f"cause={gs.CAUSE_TICK_GAP}" in m for m in got)
+
+
+def test_the_first_recorded_cause_of_a_lost_hour_wins(mp_caplog):
+    # a poll failure at H+5 s is what lost the hour; the observation failure and
+    # the late tick that follow only inherit an hour that was already gone, and
+    # "[Genome] DAY CLOSED cause=..." must not name one of them.
+    strat, _ = _strategy(clock=Clock(TS))
+    assert strat.analyze(_empty_book_obs(strat)) == []
+    h1 = int(TS.timestamp()) + 3600
+    strat.clock.now = TS + timedelta(hours=1, seconds=5)
+    strat.record_poll_failure("NY")
+    strat.clock.now = TS + timedelta(hours=1, seconds=30)
+    strat.record_missed_hour("NY", gs.CAUSE_OBSERVATION_FAILURE)
+    strat.clock.now = TS + timedelta(hours=1, minutes=3)  # a late tick over the same hour
+    assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+    assert strat._hours[("NY", h1)] == gs.HOUR_MISSED_PREFIX + gs.CAUSE_POLL_FAILURE
+    mp_caplog.clear()
+    strat.clock.now = TS + timedelta(hours=2)
+    assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+    closed = [m for m in mp_caplog.messages if m.startswith("[Genome] DAY CLOSED ")]
+    assert len(closed) == 1 and f"cause={gs.CAUSE_POLL_FAILURE}" in closed[0]
+    assert all(f"cause={gs.CAUSE_POLL_FAILURE}" in m for m in _rejects(mp_caplog, gs.REASON_MISSED_HOUR))
+
+
+def test_a_pruned_hour_is_not_a_tick_gap(mp_caplog):
+    # _prune drops _hours entries older than KEEP_HOURS_S, and _lost_chance read
+    # the resulting hole as "the loop was not there". A city whose ladder was
+    # absent for two days recorded a data gap EVERY hour and still got a tick_gap.
+    strat, _ = _strategy(clock=Clock(TS))
+    strat.tick_driven = True
+    assert strat.analyze(_empty_book_obs(strat)) == []  # H evaluated
+    hours = gs.KEEP_HOURS_S // 3600 + 3
+    for i in range(1, hours):  # the bot LOOKED every hour and there was no ladder
+        strat.clock.now = TS + timedelta(hours=i, seconds=5)
+        strat.record_no_ladder("NY")
+    mp_caplog.clear()
+    strat.clock.now = TS + timedelta(hours=hours)
+    strat.analyze(_obs(ts=TS + timedelta(hours=hours)))
+    pruned = int(TS.timestamp()) + 3600
+    assert ("NY", pruned) not in strat._hours, "the fixture must actually prune the first gap hour"
+    assert [m for m in mp_caplog.messages if m.startswith("[Genome] DAY CLOSED ")] == []
+    assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+    assert strat.stats.get("missed_days", 0) == 0
+
+
+def test_a_failed_vintage_fetch_closure_survives_a_restart(tmp_path, mp_caplog):
+    # _analyze saves BEFORE the per-day loop, but this closure fires from
+    # _rows_for_day inside it: the restart reopened the city-day and re-emitted.
+    strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+    strat.forecast_provider = FlakyVintages(strat.forecast_provider, fail_hours=[TS])
+    assert strat.analyze(_obs()) == []
+    doc = json.loads((tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)).read_text(encoding="utf-8"))
+    assert doc["missed_days"] == [["NY", "2026-07-20"]]
+    assert doc["missed_causes"]["NY|2026-07-20"] == [int(TS.timestamp()), gs.CAUSE_VINTAGE_FETCH_FAILURE]
+    mp_caplog.clear()
+    fresh, _ = _strategy(clock=Clock(TS + timedelta(hours=1)), state_dir=str(tmp_path))
+    assert fresh.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+    got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+    assert _symbols_of(got) == sorted(t for t, *_ in LADDER)
+    assert all(f"cause={gs.CAUSE_VINTAGE_FETCH_FAILURE}" in m for m in got)
+
+
+#: state files that DECODE but hold the wrong shapes -- each raised straight out of
+#: the constructor into WeatherBot.__init__'s broad except, refusing the genome for
+#: the rest of the deploy, which is exactly what the unreadable-file recovery exists
+#: to prevent.
+CORRUPT_STATE_SHAPES = {
+    "last_hour_epoch_is_a_list": {"last_hour_epoch": ["NYC"], "missed_days": [], "traded": []},
+    "an_hour_that_is_not_a_number": {"last_hour_epoch": {"NY": "soon"}, "missed_days": [], "traded": []},
+    "missed_days_entry_is_not_a_pair": {"last_hour_epoch": {}, "missed_days": [["NY"]], "traded": []},
+    "traded_is_a_bare_string": {"last_hour_epoch": {}, "missed_days": [], "traded": "KXHIGHNY-26JUL20-T83"},
+    "missed_causes_is_a_list": {"last_hour_epoch": {}, "missed_days": [["NY", "2026-07-20"]],
+                                "missed_causes": ["NY|2026-07-20"], "traded": []},
+}
+
+
+@pytest.mark.parametrize("shape", sorted(CORRUPT_STATE_SHAPES))
+def test_a_decodable_but_corrupt_state_file_starts_fresh_instead_of_refusing(shape, tmp_path, mp_caplog):
+    strat, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+    path = tmp_path / gs.STATE_FILE_FMT.format(genome_id=spec.genome_id)
+    doc = dict(CORRUPT_STATE_SHAPES[shape], genome_id=spec.genome_id)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    mp_caplog.clear()
+    fresh, _ = _strategy(clock=Clock(TS), state_dir=str(tmp_path))  # must not raise
+    assert fresh.state_recovered_from, shape
+    assert fresh.stats.get("state_resets") == 1
+    assert any("STARTING FROM AN EMPTY STATE" in m for m in mp_caplog.messages)
+    # nothing half-applied survives the reset
+    assert fresh._traded == set() and fresh._missed_days == {} and fresh._last_hour == {}
+    assert fresh.analyze(_obs())  # and it trades on
+
+
+def test_a_state_file_naming_another_genome_is_not_read_as_corruption(tmp_path):
+    # the shape-error recovery must not swallow the one refusal that IS fatal
+    _s, spec = _strategy(clock=Clock(TS), state_dir=str(tmp_path))
+    other = G.SEEDS["fr31a_taker"]
+    path = tmp_path / gs.STATE_FILE_FMT.format(genome_id=_spec(other).genome_id)
+    path.write_text(json.dumps({"genome_id": spec.genome_id, "last_hour_epoch": ["NYC"]}), encoding="utf-8")
+    with pytest.raises(GenomeSpecMismatch):
+        _strategy(genome=other, clock=Clock(TS), state_dir=str(tmp_path))

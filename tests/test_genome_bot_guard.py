@@ -122,3 +122,38 @@ def test_every_city_skip_tells_the_genome_which_kind_of_skip_it_was(monkeypatch)
     bot.kalshi.fetch_market_ladder.side_effect = RuntimeError("503")
     bot.tick(MagicMock(), MagicMock())
     genome.record_missed_hour.assert_called_once_with("NY", "poll_failure")
+
+
+def test_a_corrupt_state_file_does_not_refuse_the_genome_for_the_deploy(monkeypatch, mp_caplog, tmp_path):
+    """A state file that DECODES but holds the wrong shapes must not be fatal.
+
+    ``_load_state`` recovered only from files it could not decode; a decodable one
+    whose ``last_hour_epoch`` is a list (or whose hour is not a number, or whose
+    ``missed_days``/``traded`` entries are not pairs) raised out of the
+    constructor into ``WeatherBot.__init__``'s broad except -- the genome was then
+    REFUSED for the rest of the deploy, which is exactly what the unreadable-file
+    recovery exists to prevent.
+    """
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    from src.factory.promoted import load_promoted
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    spec = load_promoted(src)
+    state = cache / f"genome_state_{spec.genome_id}.json"
+    state.write_text(
+        json.dumps({"genome_id": spec.genome_id, "last_hour_epoch": ["NYC"], "missed_days": [], "traded": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GENOME_STRATEGY_ID", src)
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(cache))
+    from src.bots.weather_bot import WeatherBot
+
+    bot = WeatherBot()
+    assert bot.genome_refused_reason is None
+    assert "genome" in bot.strategies, "a corrupt state file must not cost the deploy its genome"
+    assert bot.strategies["genome"].state_recovered_from
+    assert any("STARTING FROM AN EMPTY STATE" in r.getMessage() for r in mp_caplog.records)

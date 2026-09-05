@@ -44,12 +44,21 @@ claim that snapshot if it evaluated EVERY earlier hour of the market-day:
       is more than one grid step before its first evaluation (``downtime``);
   (c) the bot could not look -- its Kalshi poll for the city raised
       (``record_poll_failure``) or it never got an observation and skipped the
-      city entirely (``record_missed_hour(city, "observation_failure")``);
+      city entirely (``record_missed_hour(city, "observation_failure")``).
+      Recorded once per city-hour (the bot calls the hook every tick of a
+      sustained outage) and RECOVERABLE: the report is about one tick, so a
+      later tick of the same hour that has the ladder AND is still inside the
+      top-of-hour tolerance evaluates the hour and upgrades the record to
+      ``done`` (``[Genome] MISS RECOVERED``). An hour is lost only when no
+      in-tolerance tick ever evaluates it. When two ticks report different
+      causes the FIRST wins -- it is the one that lost the hour;
   (d) the strategy was not there at all -- an hour with NO record of any kind
       between two evaluated hours (``tick_gap``). Only a ``tick_driven``
       caller can conclude this: the live bot polls every city every tick and
       therefore leaves a record for every hour it is alive for, so a hole in
-      that record is a stalled loop, a hung HTTP call or a paused container;
+      that record is a stalled loop, a hung HTTP call or a paused container.
+      Only back to ``KEEP_HOURS_S``, though -- older records were *pruned*, and
+      a pruned hour is not an hour the loop was absent for;
   (e) the forecast fetch FAILED at an evaluated hour
       (``vintage_fetch_failure``): the provider swallows the fault and returns
       no vintage, but the archive holds the run the offline frame priced that
@@ -80,14 +89,17 @@ claim that snapshot if it evaluated EVERY earlier hour of the market-day:
 * **Persisted state.** ``state_dir`` (the bot passes the forecast-cache dir)
   holds ``genome_state_<genome_id>.json`` -- last evaluated hour per city,
   missed city-days and why, traded (target_date, symbol) -- rewritten
-  atomically (write, ``fsync``, ``os.replace``) on every change and loaded at
+  atomically (write, ``fsync``, ``os.replace``) on every change (``_close_day``
+  saves too: the ``vintage_fetch_failure`` closure fires AFTER ``_analyze``'s
+  own save and a restart used to reopen the city-day) and loaded at
   construction, so a restarted strategy neither re-emits an already-traded
   market nor claims a first hour it did not see. A state file that cannot be
-  read (the zero-byte file a power cut leaves) is NOT fatal: the strategy
-  starts from an empty state -- conservative, since an empty state claims no
-  predecessor hour -- and says so at ERROR (``state_recovered_from``). A state
-  file belonging to a DIFFERENT genome is still a refusal. ``state_dir=None``
-  keeps the state in memory (replay parity, tests).
+  USED -- unreadable, undecodable, or decodable with the wrong shapes -- is NOT
+  fatal: the strategy starts from an empty state -- conservative, since an empty
+  state claims no predecessor hour -- and says so at ERROR
+  (``state_recovered_from``). A state file belonging to a DIFFERENT genome is
+  still a refusal. ``state_dir=None`` keeps the state in memory (replay parity,
+  tests).
 
 What the live poll cannot reproduce (documented, not fudged):
 
@@ -442,22 +454,43 @@ class GenomeStrategy(Strategy):
         city = self._city_of(data, ladder)
         key = (city, hour_epoch)
         state = self._hours.get(key)
-        if state is not None and state != HOUR_NO_DATA:
-            # HOUR_NO_DATA is not a decision: an earlier tick this hour saw no
-            # ladder and this one does, so the hour is still evaluable.
+        if state in HOUR_EVALUATED:
+            # An EVALUATION is the only decision about an hour.
             if state == HOUR_DONE:
                 # the bot polls every ~15 s; log the off-grid skip ONCE per (city, hour)
                 self._hours[key] = HOUR_DONE_LOGGED
                 self._reject(REASON_NOT_TOP_OF_HOUR, ladder[0].symbol, city=city, hour_utc=hour_epoch, evaluated=True)
             return []
+        # Everything else the hour may hold -- nothing, HOUR_NO_DATA, or a
+        # bot-side ``missed:<cause>`` -- is a report about ONE tick, not a verdict
+        # on the hour:
+        #   HOUR_NO_DATA -- an earlier tick this hour saw no ladder and this one does;
+        #   missed:<cause> -- an earlier tick lost the city (its Kalshi poll raised,
+        #     or it never got an observation), and THIS tick has both. An hour is
+        #     only truly lost when no in-tolerance tick ever evaluates it, so an
+        #     in-tolerance evaluation below upgrades the miss to HOUR_DONE
+        #     (``_recover_hour``). Without that, one transient METAR failure at
+        #     H+0 s made the identical tick 23 s later -- 97 s INSIDE the
+        #     tolerance -- a no-op and closed every visible city-day (D-1/D/D+1,
+        #     since the bot's ladder spans three market-days).
         self._prune(hour_epoch)
         if now_epoch - hour_epoch > self.top_of_hour_tolerance_s:
-            self._hours[key] = _missed(CAUSE_LATE_TICK)
-            self._reject(
-                REASON_NOT_TOP_OF_HOUR, ladder[0].symbol, city=city,
-                late_s=int(now_epoch - hour_epoch), tolerance_s=self.top_of_hour_tolerance_s,
-            )
+            # ``_mark_hour``, not a bare write: a poll failure already recorded at
+            # H+5 s keeps ITS cause rather than being renamed "late_tick" by the
+            # tick that shows up at H+3 min (first cause wins). And the reject is
+            # logged only for the tick that LOSES the hour -- every later tick of
+            # a lost hour is one more duplicate against a 500-line log tail
+            # (the bot polls every ~23 s).
+            already_missed = _is_missed(state)
+            self._mark_hour(city, hour_epoch, _missed(CAUSE_LATE_TICK))
+            if not already_missed:
+                self._reject(
+                    REASON_NOT_TOP_OF_HOUR, ladder[0].symbol, city=city,
+                    late_s=int(now_epoch - hour_epoch), tolerance_s=self.top_of_hour_tolerance_s,
+                )
             return []
+        if _is_missed(state):
+            self._recover_hour(city, hour_epoch, str(state), now_epoch)
         self._hours[key] = HOUR_DONE
         self.stats["hours_evaluated"] += 1
         decision_ts = _dt.datetime.fromtimestamp(hour_epoch, _dt.timezone.utc)
@@ -537,18 +570,45 @@ class GenomeStrategy(Strategy):
             out.append(sig)
         return out
 
+    def _recover_hour(self, city: str, hour_epoch: int, state: str, now_epoch: int) -> None:
+        """An in-tolerance tick evaluated an hour an EARLIER tick had recorded as lost.
+
+        The lost record was one tick's report (a failed Kalshi poll, a missing
+        observation); this tick has the ladder and is inside the tolerance, so the
+        hour is evaluated after all and nothing is forfeited. ``missed_hours``
+        therefore counts city-hours still held lost -- it is decremented here and
+        the recovery counted separately, so the operator sees both. A
+        ``late_tick`` miss cannot reach this: the tolerance gate above returns first.
+        """
+        cause = _cause_of(state)
+        self.stats["missed_hours"] = max(0, self.stats.get("missed_hours", 0) - 1)
+        if cause == CAUSE_POLL_FAILURE:
+            self.stats["poll_failures"] = max(0, self.stats.get("poll_failures", 0) - 1)
+        self.stats["hours_recovered"] = self.stats.get("hours_recovered", 0) + 1
+        logger.info(
+            "[Genome] MISS RECOVERED strategy=%s city=%s hour_utc=%d cause=%s late_s=%d -- an "
+            "in-tolerance tick evaluated the hour after all; no city-day closes",
+            self._name, city, int(hour_epoch), cause, int(now_epoch - hour_epoch),
+        )
+
     def _close_day(self, city: str, target_date: str, lost_hour: int, cause: str, hour_epoch: int) -> bool:
         """Close ``(city, target_date)`` for the rest of the market-day and SAY SO once.
 
         The closure is the only moment the lost hour and its cause are known -- the
         ``GENOME_MISSED_HOUR`` rejects that follow name the current decision hour --
         so it is logged here, exactly once per city-day, at WARNING.
+
+        It also persists itself. ``_analyze`` saves once, BEFORE the per-day loop,
+        so the ``vintage_fetch_failure`` closure raised from ``_rows_for_day``
+        missed that write entirely: a restart reopened the city-day and re-emitted
+        into a day the offline set had already lost.
         """
         key = (city, target_date)
         if key in self._missed_days:
             return False
         self._missed_days[key] = (int(lost_hour), str(cause))
         self.stats["missed_days"] = self.stats.get("missed_days", 0) + 1
+        self._save_state()
         logger.warning(
             "[Genome] DAY CLOSED strategy=%s city=%s target_date=%s lost_hour_utc=%d cause=%s hour_utc=%d "
             "-- the mask may already have been true at the lost hour, so every market of this city-day "
@@ -842,11 +902,18 @@ class GenomeStrategy(Strategy):
 
         An evaluation is final (nothing downgrades a ``done`` hour) and a recorded
         miss is never downgraded to a data gap -- the bot can report an empty ladder
-        on one tick of an hour and a failed poll on the next.
+        on one tick of an hour and a failed poll on the next. A recorded miss also
+        keeps the FIRST cause: the poll failure at H+5 s is what lost the hour, and
+        the observation failure (or the late tick) that follows it only inherits an
+        hour that was already gone. Overwriting made ``[Genome] DAY CLOSED
+        cause=...`` name the wrong one.
+
+        Only an in-tolerance evaluation may raise a miss (``_recover_hour``), and
+        it writes ``HOUR_DONE`` directly.
         """
         key = (str(city).upper(), int(hour_epoch))
         current = self._hours.get(key)
-        if current in HOUR_EVALUATED:
+        if current in HOUR_EVALUATED or _is_missed(current):
             return
         if state == HOUR_NO_DATA and current is not None:
             return
@@ -885,6 +952,15 @@ class GenomeStrategy(Strategy):
         if start is not None and (resumed_from is not None or self.tick_driven):
             limit = best_hour if best_hour is not None else hour_epoch
             h = int(start) + self.grid_s
+            if resumed_from is None:
+                # A tick gap reads the ABSENCE of a record as proof the loop was not
+                # there -- which it only is for hours ``_prune`` still keeps. Past
+                # the retention horizon the record was DELETED, not never written,
+                # so walking further back manufactures a miss out of pruning (a city
+                # whose ladder was absent for two days recorded ``no_data`` every
+                # hour and still got a ``tick_gap``). ``_prune(hour_epoch)`` ran just
+                # above, and it keeps every hour with ``hour_epoch - h <= KEEP_HOURS_S``.
+                h = max(h, hour_epoch - KEEP_HOURS_S)
             while h < limit:
                 if self._hours.get((city, h)) is None:
                     return h, (CAUSE_DOWNTIME if resumed_from is not None else CAUSE_TICK_GAP)
@@ -937,38 +1013,65 @@ class GenomeStrategy(Strategy):
             if not isinstance(doc, dict):
                 raise ValueError(f"top level is {type(doc).__name__}, not an object")
         except (OSError, ValueError) as exc:
-            # A truncated or zero-byte state file is what a Pi power cut leaves
-            # behind. Starting from an empty state is CONSERVATIVE -- the first
-            # evaluated hour then has no predecessor, so nothing is claimed as a
-            # first masked snapshot the process did not see -- but it IS a
-            # decision, so it is logged loudly here instead of being raised into
-            # WeatherBot.__init__'s broad except, where one ERROR line refused the
-            # whole genome for the rest of the deploy.
-            self.state_recovered_from = f"{type(exc).__name__}: {exc}"
-            self.stats["state_resets"] = self.stats.get("state_resets", 0) + 1
-            logger.error(
-                "[%s] state file %s is unreadable (%s); STARTING FROM AN EMPTY STATE: markets "
-                "traded before this restart can be emitted once more and this process has no "
-                "predecessor hour for the missed-hour rule",
-                self._name, self.state_path, self.state_recovered_from,
-            )
+            self._reset_state(exc)
             return
+        # A state file naming a DIFFERENT genome is not corruption, it is the wrong
+        # file: still a refusal, and RuntimeError is deliberately outside the
+        # shape-error tuple below so it cannot be swallowed as "corrupt".
         if doc.get("genome_id") != self.spec.genome_id:
             raise GenomeSpecMismatch(
                 f"state file {self.state_path} belongs to genome {doc.get('genome_id')!r}, not {self.spec.genome_id!r}"
             )
-        self._last_hour = {str(c): int(h) for c, h in (doc.get("last_hour_epoch") or {}).items()}
+        try:
+            self._apply_state(doc)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+            # A file that DECODES but holds the wrong shapes -- "last_hour_epoch"
+            # a list, an hour that is not a number, a "missed_days"/"traded" entry
+            # that is not a pair, "missed_causes" not an object -- used to raise
+            # straight out of the constructor into WeatherBot.__init__'s broad
+            # except, i.e. exactly the deploy-long refusal the unreadable-file
+            # recovery below exists to prevent. Same recovery, same loud line.
+            self._reset_state(exc)
+
+    def _apply_state(self, doc: Mapping[str, Any]) -> None:
+        """Read a decoded state document into the strategy; raises on any wrong shape."""
+        self._last_hour = {str(c): int(h) for c, h in dict(doc.get("last_hour_epoch") or {}).items()}
         self._resumed = dict(self._last_hour)
-        causes = doc.get("missed_causes") or {}
-        self._missed_days = {}
+        causes = dict(doc.get("missed_causes") or {})
+        missed: Dict[Tuple[str, str], Tuple[int, str]] = {}
         for c, d in (doc.get("missed_days") or []):
             key = (str(c), str(d))
             raw = causes.get(f"{key[0]}|{key[1]}")
             if isinstance(raw, (list, tuple)) and len(raw) == 2:
-                self._missed_days[key] = (int(raw[0]), str(raw[1]))
+                missed[key] = (int(raw[0]), str(raw[1]))
             else:  # written before missed_causes existed
-                self._missed_days[key] = (-1, CAUSE_UNKNOWN)
-        self._traded = {(str(d), str(sym)) for d, sym in (doc.get("traded") or [])}
+                missed[key] = (-1, CAUSE_UNKNOWN)
+        traded = {(str(d), str(sym)) for d, sym in (doc.get("traded") or [])}
+        self._missed_days = missed
+        self._traded = traded
+
+    def _reset_state(self, exc: BaseException) -> None:
+        """Start from an empty state and SAY SO (never raise into ``WeatherBot.__init__``).
+
+        A truncated or zero-byte state file is what a Pi power cut leaves behind.
+        Starting from an empty state is CONSERVATIVE -- the first evaluated hour
+        then has no predecessor, so nothing is claimed as a first masked snapshot
+        the process did not see -- but it IS a decision, so it is logged loudly
+        here instead of being raised into WeatherBot.__init__'s broad except,
+        where one ERROR line refused the whole genome for the rest of the deploy.
+        """
+        self._last_hour = {}
+        self._resumed = {}
+        self._missed_days = {}
+        self._traded = set()
+        self.state_recovered_from = f"{type(exc).__name__}: {exc}"
+        self.stats["state_resets"] = self.stats.get("state_resets", 0) + 1
+        logger.error(
+            "[%s] state file %s is unusable (%s); STARTING FROM AN EMPTY STATE: markets "
+            "traded before this restart can be emitted once more and this process has no "
+            "predecessor hour for the missed-hour rule",
+            self._name, self.state_path, self.state_recovered_from,
+        )
 
     def _save_state(self) -> None:
         if not self.state_path:
@@ -1005,13 +1108,24 @@ class GenomeStrategy(Strategy):
         bot reports: ``poll_failure`` (its Kalshi call raised) and
         ``observation_failure`` (no observation, so the city was skipped entirely).
 
+        IDEMPOTENT per city-hour, like ``record_no_ladder`` and the once-per-
+        city-day ``[Genome] DAY CLOSED`` line. The bot calls this from its tick
+        loop, so a sustained METAR/Kalshi outage calls it every ~23 s for the same
+        hour: guarding only on ``HOUR_EVALUATED`` re-marked the hour, re-counted
+        ``missed_hours``/``poll_failures`` and re-emitted the WARNING on every tick
+        (measured: 155 identical lines and ``missed_hours == 155`` for ONE lost
+        city-hour, ~620 lines/hour across four cities against a 500-line log tail).
+        That flushed the whole diagnostic window with duplicates -- the opposite of
+        what the line is for.
+
         The hour is otherwise INVISIBLE -- the next on-time tick of the same hour
         returns ``[]`` without a reject line -- so this is the one place it can be
         seen; it logs one line.
         """
         hour_epoch = (_epoch(self.clock()) // self.grid_s) * self.grid_s
         city = str(city).upper()
-        if self._hours.get((city, hour_epoch)) in HOUR_EVALUATED:
+        current = self._hours.get((city, hour_epoch))
+        if current in HOUR_EVALUATED or _is_missed(current):
             return
         cause = str(cause or CAUSE_UNKNOWN).strip().replace(" ", "_") or CAUSE_UNKNOWN
         self._mark_hour(city, hour_epoch, _missed(cause))
