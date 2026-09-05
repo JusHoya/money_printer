@@ -48,20 +48,46 @@ def test_protected_files_exist():
         assert os.path.exists(os.path.join(ROOT, *rel.split("/"))), rel
 
 
-def test_protected_files_unchanged_since_f2_base():
+# 2026-09-04: the F3 accelerated dry run found that binary settlement booked the
+# YES-leg payoff against NO entries (every settled NO paper trade sign-flipped).
+# The fix is ONE hunk in ``_close_position`` (commit 724d93c), a deliberate,
+# owner-ratified deviation: risk_manager.py and mixins.py stay byte-identical and
+# matching_engine.py may differ from the base by exactly that hunk.
+ENGINE_HUNK_MARKER = "NO-SIDE SETTLEMENT (2026-09-04, F3 dry run finding)"
+ENGINE_HUNK_MAX_ADDED = 20
+
+
+def test_risk_and_mixins_unchanged_since_f2_base():
     _skip_unless_git_checkout()
-    diff = _git("diff", "--stat", BASE_COMMIT, "--", *PROTECTED)
+    files = PROTECTED[:2]
+    diff = _git("diff", "--stat", BASE_COMMIT, "--", *files)
     assert diff.returncode == 0, diff.stderr
     assert diff.stdout.strip() == "", (
-        f"protected files differ from {BASE_COMMIT} (F3 may not touch them):\n{diff.stdout}"
+        f"risk_manager/mixins differ from {BASE_COMMIT} (F3 may not touch them):
+{diff.stdout}"
     )
-    # Belt and braces: the exit-code form, which also covers mode changes.
-    quiet = _git("diff", "--quiet", BASE_COMMIT, "--", *PROTECTED)
-    assert quiet.returncode == 0
+
+
+def test_engine_differs_only_by_the_no_side_settlement_hunk():
+    _skip_unless_git_checkout()
+    diff = _git("diff", "-U0", BASE_COMMIT, "--", PROTECTED[2])
+    assert diff.returncode == 0, diff.stderr
+    hunks = [l for l in diff.stdout.splitlines() if l.startswith("@@")]
+    added = [l for l in diff.stdout.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    removed = [l for l in diff.stdout.splitlines() if l.startswith("-") and not l.startswith("---")]
+    assert len(hunks) <= 1, f"more than one hunk in matching_engine.py:
+{diff.stdout}"
+    assert removed == [], f"matching_engine.py must only ADD the NO-side hunk:
+{diff.stdout}"
+    if hunks:
+        assert any(ENGINE_HUNK_MARKER in l for l in added), diff.stdout
+        assert len(added) <= ENGINE_HUNK_MAX_ADDED, diff.stdout
+        assert any("exit_price = 1.0 - exit_price" in l for l in added), diff.stdout
 
 
 def test_protected_files_have_no_staged_changes():
     _skip_unless_git_checkout()
-    staged = _git("diff", "--cached", "--stat", BASE_COMMIT, "--", *PROTECTED)
+    staged = _git("diff", "--cached", "--stat", "--", *PROTECTED)
     assert staged.returncode == 0, staged.stderr
-    assert staged.stdout.strip() == "", f"staged edits to protected files:\n{staged.stdout}"
+    assert staged.stdout.strip() == "", f"staged edits to protected files:
+{staged.stdout}"
