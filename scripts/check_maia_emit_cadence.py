@@ -48,17 +48,20 @@ ever (``entries_per_market: 1``): the markets that emitted at 15:00Z answer
 cases it is, so the operator can act:
 
 ===========================  ===================================================
-``NO_BOUNDARY_IN_WINDOW``    the tail never spans a ``:00`` -- a 500-line tail is
-                             only ~8-16 min of sandbox log. Re-run just after the
-                             next ``:00 UTC``; raising ``--lines`` cannot help
-                             (client AND server clamp at 500).
-``GENOME_ALIVE_NO_EMIT``     a boundary was sampled and the genome logged skip
-                             codes (``GENOME_ALREADY_TRADED`` / ``MISSED_HOUR`` /
-                             ``MASK_FALSE`` / ``SIGMA_CAP`` ...): it is loaded and
-                             deciding, and legitimately silent. Nothing to do.
-``NO_GENOME_LINES``          a boundary was sampled and the genome logged NOTHING
-                             at all -- it is most likely not loaded. Check the
-                             REFUSED line in the container's file log.
+``GENOME_ALIVE_NO_EMIT``     the genome logged skip codes (``GENOME_ALREADY_TRADED``
+                             / ``MISSED_HOUR`` / ``MASK_FALSE`` / ``SIGMA_CAP`` ...):
+                             it is loaded and deciding, and legitimately silent.
+                             Proof of life outranks the other two. Nothing to do.
+``NO_GENOME_LINES``          the tail COVERED a whole decision interval
+                             (``:00`` .. ``:00 + DECISION_WINDOW_S``) and the genome
+                             logged nothing at all -- it is most likely not loaded.
+                             Check the REFUSED line in the container's file log.
+``NO_BOUNDARY_IN_WINDOW``    no decision interval was fully covered -- the tail never
+                             spans a ``:00``, or it STARTS after one and the decision
+                             instant already scrolled past. A 500-line tail is only
+                             ~8-16 min of sandbox log. Re-run just after the next
+                             ``:00 UTC``; raising ``--lines`` cannot help (client AND
+                             server clamp at 500).
 ===========================  ===================================================
 
 Exit codes: 0 PASS, 1 FAIL, 2 the check could not be run (HTTP/URL/file error),
@@ -76,7 +79,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta as _timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 LINE_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (?P<level>\w+)\s*\| (?P<msg>.*)$")
@@ -114,6 +117,34 @@ STRATEGY_SKIP_CODES = {
 # many seconds (nearest wins); the two are logged microseconds apart but may
 # straddle a second boundary.
 DECIDE_PAIR_TOLERANCE_S = 2.0
+# Mirrors src/strategies/genome_strategy.py DEFAULT_TOP_OF_HOUR_TOLERANCE_S: the genome
+# may log its decision anywhere in [:00, :00 + this]. A tail that does not span that WHOLE
+# interval proves nothing about the genome's silence.
+DECISION_WINDOW_S = 120
+
+
+def _covered_boundaries(entries: List[Dict[str, Any]]) -> List[str]:
+    """The `:00` boundaries whose ENTIRE decision interval lies inside the tail.
+
+    ``{ts.minute == 0}`` is not that test. A tail that starts at 19:00:30 contains
+    stamps whose minute is 0, but the genome's decision instant for 19:00 may have been
+    19:00:07 -- already scrolled past -- so "a boundary was sampled and the genome said
+    nothing" would be a wrong diagnosis dressed up as the informative one (F3
+    remediation, 2026-09-05). A boundary counts only when the tail was capturing from
+    at-or-before ``:00`` through ``:00 + DECISION_WINDOW_S``, i.e. when a decision line,
+    had there been one, could not have fallen outside it.
+    """
+    if not entries:
+        return []
+    stamps = [e["ts"] for e in entries]
+    first, last = min(stamps), max(stamps)
+    hour = first.replace(minute=0, second=0, microsecond=0)
+    out: List[str] = []
+    while hour <= last:
+        if hour >= first and (last - hour).total_seconds() >= DECISION_WINDOW_S:
+            out.append(f"{hour:%Y-%m-%dT%H:00}")
+        hour += _timedelta(hours=1)
+    return out
 
 
 def _base_url_hint(base_url: str) -> str:
@@ -293,16 +324,22 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
 
     # NO_EMIT is the NORMAL verdict (entries_per_market: 1), so say WHICH of the three
     # cases it is or the operator learns to ignore the check (F3 review, 2026-09-05).
-    boundaries = sorted({f"{e['ts']:%Y-%m-%dT%H:00}" for e in entries if e["ts"].minute == 0})
+    boundaries_seen = sorted({f"{e['ts']:%Y-%m-%dT%H:00}" for e in entries if e["ts"].minute == 0})
+    boundaries = _covered_boundaries(entries)
     n_genome_lines = sum(1 for e in entries if strategy_substr.lower() in e["msg"].lower())
     no_emit_reason = None
     if not emits:
-        if not boundaries:
-            no_emit_reason = "NO_BOUNDARY_IN_WINDOW"
-        elif skips or n_genome_lines:
+        # Proof of life first: a skip code or any strategy line settles it, whatever the
+        # window looks like. Only THEN may silence be blamed on the genome, and only when
+        # the tail actually covered a whole decision interval (F3 remediation, 2026-09-05:
+        # a tail starting at 19:00:30 was calling a genome that decided at 19:00:07
+        # "silent", which is a confidently wrong diagnosis).
+        if skips or n_genome_lines:
             no_emit_reason = "GENOME_ALIVE_NO_EMIT"
-        else:
+        elif boundaries:
             no_emit_reason = "NO_GENOME_LINES"
+        else:
+            no_emit_reason = "NO_BOUNDARY_IN_WINDOW"
 
     if not emits:
         verdict = "NO_EMIT"
@@ -321,6 +358,7 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
         "window": {"first": entries[0]["ts"].isoformat() if entries else None,
                    "last": entries[-1]["ts"].isoformat() if entries else None},
         "boundaries_sampled": boundaries,
+        "boundaries_seen": boundaries_seen,
         "n_strategy_lines": n_genome_lines,
         "n_emit": len(emits),
         "no_emit_reason": no_emit_reason,
@@ -340,19 +378,21 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
 
 NO_EMIT_EXPLANATION = {
     "NO_BOUNDARY_IN_WINDOW": (
-        "the tail never spans a :00 boundary (a 500-line tail is only ~8-16 min of "
-        "sandbox log). Re-run within ~10 min of the next :00 UTC. Raising --lines cannot "
+        "no :00 decision interval is fully inside the tail -- either it never spans a :00, "
+        "or it STARTS after one (a tail beginning 19:00:30 cannot see a decision taken at "
+        "19:00:07), so the genome's silence proves nothing. A 500-line tail is only ~8-16 min "
+        "of sandbox log. Re-run within ~10 min of the next :00 UTC. Raising --lines cannot "
         "widen it: client AND server clamp at 500."
     ),
     "GENOME_ALIVE_NO_EMIT": (
-        "a boundary WAS sampled and the genome logged skip codes (see strategy_skip_codes), "
-        "so it is loaded and deciding -- it is legitimately silent. With entries_per_market:1 "
-        "a market that already emitted answers GENOME_ALREADY_TRADED every later hour. "
-        "Nothing to do."
+        "the genome logged skip codes (see strategy_skip_codes), so it is loaded and "
+        "deciding -- it is legitimately silent. With entries_per_market:1 a market that "
+        "already emitted answers GENOME_ALREADY_TRADED every later hour. Nothing to do."
     ),
     "NO_GENOME_LINES": (
-        "a boundary WAS sampled and the strategy logged NOTHING at all -- it is most likely "
-        "not loaded. Check the container's file log for the REFUSED line: "
+        f"the tail covered a whole decision interval (:00 .. :00+{DECISION_WINDOW_S}s, see "
+        "boundaries_sampled) and the strategy logged NOTHING in it -- it is most likely not "
+        "loaded. Check the container's file log for the REFUSED line: "
         "docker exec mp-sandbox sh -c 'grep GenomeStrategy $(ls -t /app/logs/money_printer_*.log | head -1)'"
     ),
 }
