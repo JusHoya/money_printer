@@ -1,0 +1,37 @@
+{
+  "adverse_fill": 0.01,
+  "availability_lag_min": 240,
+  "calibration": {
+    "dir": "data/calibration",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
+  "contracts_frame": 20,
+  "family": "weather/gfs_mex/taker/v1",
+  "fee": {
+    "fee_type": "quadratic",
+    "regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+    "type": "taker"
+  },
+  "forecast_source": "gfs_mex",
+  "frame_search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "genome_id": "ad4825b831cbd887",
+  "genome_json": "{\"encoding\":[1,0,3,48,0,0,0,0,0,0,7,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"4-5F\",\"5F+\"],\"direction\":\"buy_no\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\",\"medium\",\"long\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":\"OFF\",\"quote_lo\":\"OFF\",\"sigma_cap\":\"OFF\",\"windows\":[\">=24h\",\"12-24h\"]},\"n_active_clauses\":2,\"name\":\"nofilter_no\",\"notes\":\"The Phase-2 BASELINE shape ('BASELINE far-bracket NO, no 8pt filter, taker, >=12h'): buy NO, taker, windows {>=24h,12-24h}, bands {4-5F,5F+}, no p/margin filter. Pinned to 664 trades / +0.0209 on the parity frame; supersedes the architecture's 'all windows, all bands' wording.\",\"source\":\"gfs_mex\"}",
+  "mode": "shadow",
+  "parity": {
+    "frame": "search",
+    "frame_sha12": "bfcf94654a3a",
+    "n_discrepancies": 0,
+    "n_live": 241,
+    "n_markets": 1656,
+    "n_markets_frame": 1518,
+    "n_offline": 241,
+    "p_yes_max_abs_diff": 0.0,
+    "report": "reports/factory/replay_parity_bfcf94654a3a_ad4825b831cbd887.json",
+    "rows_compared": 54159
+  },
+  "registry_status": "CLOSED",
+  "sigma_cap": 4.0,
+  "source": "seed",
+  "spec_hash": "318eef35b7674ac352f19a6a61158505cd1b2fcd06d64afbf8dea67628c48288"
+}

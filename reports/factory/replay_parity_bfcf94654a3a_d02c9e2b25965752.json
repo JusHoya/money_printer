@@ -1,0 +1,97 @@
+{
+  "calibration": {
+    "dir": "data/calibration",
+    "replay_kind": "walk_forward",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "candle_only_columns": [
+    "price_mean",
+    "volume",
+    "open_interest",
+    "last"
+  ],
+  "discrepancies_gating": 0,
+  "discrepancies_total": 0,
+  "fee_regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+  "fee_type": "quadratic",
+  "frames_dir": "weather_2026-07-25_bfcf94654a3a",
+  "gefs_twin_sha256": "5d6611a3cbb7e6053db15f5793d2ff2f01e5ac1749da9db58b3662b63bdabe4b",
+  "genomes": {
+    "mlweather_fallback": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b111) & band_code in bits(0b111110) & quote <= 0.85",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "d02c9e2b25965752",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 599,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 599,
+      "n_snapshots": 10750,
+      "name": "mlweather_fallback",
+      "offline_shape": {
+        "dates": 69,
+        "markets": 599,
+        "realized": -0.01886048597135554,
+        "trades": 599
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 63901,
+        "signals": 599
+      }
+    }
+  },
+  "kind": "replay_parity",
+  "ladder_root": "data/ladders",
+  "n_city_days": 276,
+  "n_genomes": 1,
+  "n_markets_ladder": 1656,
+  "n_markets_search_frame": 1518,
+  "n_snapshots": 10750,
+  "ok": true,
+  "ok_strict": true,
+  "p_yes_all_within_tol": true,
+  "p_yes_tol": 1e-09,
+  "search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "skip_columns": [
+    "target_date_code",
+    "market_code"
+  ]
+}
