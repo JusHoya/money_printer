@@ -1,6 +1,7 @@
 """GenomeStrategy (FR-F3.1/F3.3): row parity, signal shape, refusals, cadence, shadow mode, replay parity."""
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -638,3 +639,73 @@ def test_poll_failure_after_an_evaluated_hour_is_ignored():
     strat.record_poll_failure("NY")  # same hour, already done -> not a miss
     assert strat.stats.get("poll_failures", 0) == 0
     assert strat._hours[("NY", int(TS.timestamp()))] == "done"
+
+
+# ---------------------------------------------------------------------------
+# F3 review follow-up (2026-09-05)
+#   1. a refusal path RAISED instead of skipping (log_rejection kwarg collision)
+#   2. the missed-hour rule had three silent holes
+#   3. a city-day closing was invisible
+#   5. state-file durability and the refusal reason
+# ---------------------------------------------------------------------------
+SOURCE_FILES = (
+    REPO_ROOT / "src" / "strategies" / "genome_strategy.py",
+    REPO_ROOT / "src" / "bots" / "weather_bot.py",
+)
+
+
+class TestRejectContextIsNeverAKwargCollision:
+    """``_reject`` forwards reason/strategy/symbol positionally into ``log_rejection``."""
+
+    def test_no_call_site_passes_a_reserved_context_key(self):
+        # maia: `_reject(..., reason="probability_engine")` raised
+        # `TypeError: log_rejection() got multiple values for argument 'reason'`
+        # from inside analyze() -- the documented skip crashed the tick instead.
+        bad = []
+        for path in SOURCE_FILES:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func
+                name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                if name not in ("_reject", "log_rejection"):
+                    continue
+                for kw in node.keywords:
+                    if kw.arg in gs.RESERVED_CONTEXT_KEYS:
+                        bad.append(f"{path.name}:{node.lineno}: {name}(..., {kw.arg}=...)")
+        assert bad == [], bad
+
+    def test_reserved_keys_are_read_off_log_rejection_itself(self):
+        assert gs.RESERVED_CONTEXT_KEYS == frozenset({"reason", "strategy", "symbol"})
+
+    def test_a_colliding_context_key_is_renamed_not_raised(self, mp_caplog):
+        strat, _ = _strategy()
+        strat._reject("GENOME_NOT_EXECUTABLE", "KXHIGHNY-26JUL20-T83", reason="probability_engine", detail="x")
+        line = _rejects(mp_caplog, "GENOME_NOT_EXECUTABLE")
+        assert len(line) == 1
+        assert "ctx_reason=probability_engine" in line[0] and "detail=x" in line[0]
+        assert "reason=GENOME_NOT_EXECUTABLE" in line[0]  # the CODE keeps the reason= slot
+        assert any("collides with log_rejection" in m for m in mp_caplog.messages)
+
+    def test_probability_engine_refusal_is_a_skip_not_a_crash(self, mp_caplog, monkeypatch):
+        strat, _ = _strategy()
+
+        def _boom(*a, **k):
+            raise ValueError("thin calibration for NY 2026-07-20")
+
+        monkeypatch.setattr(strat, "_probabilities", _boom)
+        assert strat.analyze(_obs()) == []  # must NOT raise: this escaped analyze() and killed the tick
+        got = _rejects(mp_caplog, gs.REASON_NOT_EXECUTABLE)
+        assert len(got) == len(LADDER)
+        assert all("cause=probability_engine" in m for m in got)
+
+    def test_bracket_spec_and_close_time_refusals_are_skips(self, mp_caplog):
+        strat, _ = _strategy()
+        ladder = _ladder()
+        ladder[0].extra = dict(ladder[0].extra, strike_type=None, floor_strike=None, cap_strike=None)
+        ladder[1].extra = dict(ladder[1].extra, close_time=None)
+        assert strat.analyze(_obs(ladder=ladder)) is not None  # must not raise
+        got = _rejects(mp_caplog, gs.REASON_NOT_EXECUTABLE)
+        assert any("cause=bracket_spec" in m for m in got)
+        assert any("cause=no_close_time_or_closed" in m for m in got)

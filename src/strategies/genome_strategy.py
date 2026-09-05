@@ -25,7 +25,10 @@ Reject codes (``src.core.risk_manager.log_rejection``): GENOME_NO_VINTAGE,
 GENOME_MASK_FALSE, GENOME_ALREADY_TRADED, GENOME_FEE_MISMATCH,
 GENOME_NOT_TOP_OF_HOUR, GENOME_NOT_EXECUTABLE, GENOME_SIGMA_CAP (the search
 frame's pre-selection ``sigma_f <= sigma_cap`` row filter, R3 #1),
-GENOME_MISSED_HOUR (below); GENOME_SHADOW is logged by the bot.
+GENOME_MISSED_HOUR (below); GENOME_SHADOW is logged by the bot. Every reject
+goes through ``_reject``, which passes reason/strategy/symbol POSITIONALLY --
+so a context key named after one of them (``RESERVED_CONTEXT_KEYS``) is renamed
+``ctx_<key>`` rather than raising ``TypeError`` inside ``analyze()``.
 
 Live-conditions parity (F3 red team, 2026-09-05). The offline trade set is the
 FIRST masked executable hourly snapshot per market. Live, the strategy can only
@@ -78,6 +81,7 @@ What the live poll cannot reproduce (documented, not fudged):
 from __future__ import annotations
 
 import datetime as _dt
+import inspect
 import json
 import logging
 import math
@@ -132,6 +136,20 @@ REASON_NOT_EXECUTABLE = "GENOME_NOT_EXECUTABLE"
 REASON_SIGMA_CAP = "GENOME_SIGMA_CAP"
 REASON_MISSED_HOUR = "GENOME_MISSED_HOUR"
 REASON_SHADOW = "GENOME_SHADOW"  # logged by weather_bot, never here
+
+#: ``log_rejection``'s own leading parameters. ``_reject`` passes reason/strategy/
+#: symbol POSITIONALLY, so a context key with one of these names raised
+#: ``TypeError: log_rejection() got multiple values for argument 'reason'`` from
+#: inside ``analyze()`` -- crashing the bot's tick on the very path documented as
+#: "a skip, never a crash" (maia, 3 of 60 archived city-days). Read off the
+#: function itself so a rename in ``risk_manager.py`` cannot silently reopen the
+#: hole, and enforced statically by ``tests/test_genome_strategy.py``.
+RESERVED_CONTEXT_KEYS = frozenset(
+    name
+    for name, p in inspect.signature(log_rejection).parameters.items()
+    if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+)
+
 
 #: Evaluator constants the row rebuild needs (``ev_analysis.EVConfig`` defaults, pinned by tests).
 REGIME_SINGLE = "single"
@@ -281,6 +299,7 @@ class GenomeStrategy(Strategy):
         self._last_hour: Dict[str, int] = {}
         self._missed_days: Set[Tuple[str, str]] = set()
         self._resumed: Dict[str, int] = {}
+        self._warned_context_keys: Set[str] = set()
         self.state_path: Optional[str] = (
             os.path.join(state_dir, STATE_FILE_FMT.format(genome_id=spec.genome_id)) if state_dir else None
         )
@@ -511,7 +530,7 @@ class GenomeStrategy(Strategy):
                 specs[m.symbol] = parse_bracket_spec(m.symbol, m.extra)
             except BracketSpecError as exc:
                 if reject:
-                    self._reject(REASON_NOT_EXECUTABLE, m.symbol, reason="bracket_spec", detail=str(exc)[:80])
+                    self._reject(REASON_NOT_EXECUTABLE, m.symbol, cause="bracket_spec", detail=str(exc)[:80])
         if not specs:
             return {}
         vintage = self.forecast_provider.latest_vintage(city, target_date, decision_ts)
@@ -528,7 +547,7 @@ class GenomeStrategy(Strategy):
             if reject:
                 logger.warning("[%s] %s %s: probability engine refused: %s", self._name, city, target_date, exc)
                 for sym in specs:
-                    self._reject(REASON_NOT_EXECUTABLE, sym, reason="probability_engine", detail=str(exc)[:80])
+                    self._reject(REASON_NOT_EXECUTABLE, sym, cause="probability_engine", detail=str(exc)[:80])
             return {}
         ts_epoch = _epoch(decision_ts)
         out: Dict[str, Dict[str, Any]] = {}
@@ -539,7 +558,7 @@ class GenomeStrategy(Strategy):
             row = self._row(m, spec, probs, width, vintage, decision_ts, ts_epoch, city, target_date)
             if row is None:
                 if reject:
-                    self._reject(REASON_NOT_EXECUTABLE, m.symbol, reason="no_close_time_or_closed")
+                    self._reject(REASON_NOT_EXECUTABLE, m.symbol, cause="no_close_time_or_closed")
                 continue
             out[m.symbol] = row
             if reject and self.row_sink is not None:
@@ -763,7 +782,34 @@ class GenomeStrategy(Strategy):
 
     def _reject(self, code: str, symbol: str, **context: Any) -> None:
         self.stats["rejects"] += 1
-        log_rejection(code, self._name, symbol, **context)
+        log_rejection(code, self._name, symbol, **self._safe_context(context))
+
+    def _safe_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Rename any context key that collides with ``log_rejection``'s positionals.
+
+        ``_reject`` forwards reason/strategy/symbol positionally, so a caller's
+        ``reason="probability_engine"`` used to raise ``TypeError: got multiple
+        values for argument 'reason'`` -- inside ``analyze()``, i.e. it crashed the
+        bot's tick on the path documented as "a skip, never a crash of the bot".
+        The colliding key is renamed (``ctx_<key>``), never dropped, and the
+        collision is logged once per key so the class of bug cannot recur silently.
+        """
+        if not context or RESERVED_CONTEXT_KEYS.isdisjoint(context):
+            return context
+        out: Dict[str, Any] = {}
+        for key, value in context.items():
+            if key in RESERVED_CONTEXT_KEYS:
+                if key not in self._warned_context_keys:
+                    self._warned_context_keys.add(key)
+                    logger.warning(
+                        "[%s] reject context key %r collides with log_rejection(%s); logged as %r "
+                        "(a caller bug: rename it at the call site)",
+                        self._name, key, ", ".join(sorted(RESERVED_CONTEXT_KEYS)), f"ctx_{key}",
+                    )
+                key = f"ctx_{key}"
+            out[key] = value
+        return out
+
 
 
 __all__ = [
@@ -782,6 +828,7 @@ __all__ = [
     "REASON_SHADOW",
     "REASON_SIGMA_CAP",
     "REGIME_SINGLE",
+    "RESERVED_CONTEXT_KEYS",
     "STATE_FILE_FMT",
     "SUPPORT_SIGMAS",
     "bracket_edge_distance_f",
