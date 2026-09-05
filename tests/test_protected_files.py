@@ -63,8 +63,7 @@ def test_risk_and_mixins_unchanged_since_f2_base():
     diff = _git("diff", "--stat", BASE_COMMIT, "--", *files)
     assert diff.returncode == 0, diff.stderr
     assert diff.stdout.strip() == "", (
-        f"risk_manager/mixins differ from {BASE_COMMIT} (F3 may not touch them):
-{diff.stdout}"
+        f"risk_manager/mixins differ from {BASE_COMMIT} (F3 may not touch them):\n{diff.stdout}"
     )
 
 
@@ -75,10 +74,8 @@ def test_engine_differs_only_by_the_no_side_settlement_hunk():
     hunks = [l for l in diff.stdout.splitlines() if l.startswith("@@")]
     added = [l for l in diff.stdout.splitlines() if l.startswith("+") and not l.startswith("+++")]
     removed = [l for l in diff.stdout.splitlines() if l.startswith("-") and not l.startswith("---")]
-    assert len(hunks) <= 1, f"more than one hunk in matching_engine.py:
-{diff.stdout}"
-    assert removed == [], f"matching_engine.py must only ADD the NO-side hunk:
-{diff.stdout}"
+    assert len(hunks) <= 1, f"more than one hunk in matching_engine.py:\n{diff.stdout}"
+    assert removed == [], f"matching_engine.py must only ADD the NO-side hunk:\n{diff.stdout}"
     if hunks:
         assert any(ENGINE_HUNK_MARKER in l for l in added), diff.stdout
         assert len(added) <= ENGINE_HUNK_MAX_ADDED, diff.stdout
@@ -89,5 +86,4 @@ def test_protected_files_have_no_staged_changes():
     _skip_unless_git_checkout()
     staged = _git("diff", "--cached", "--stat", "--", *PROTECTED)
     assert staged.returncode == 0, staged.stderr
-    assert staged.stdout.strip() == "", f"staged edits to protected files:
-{staged.stdout}"
+    assert staged.stdout.strip() == "", f"staged edits to protected files:\n{staged.stdout}"
