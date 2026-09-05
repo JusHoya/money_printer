@@ -492,6 +492,9 @@ class TestBotShadowMode:
         genome = bot.strategies["genome"]
         assert genome.state_path and genome.state_path.startswith(str(tmp_path / "cache"))
         assert isinstance(genome, GenomeStrategy) and genome.spec.genome_id == spec.genome_id
+        # the bot reaches every city on every tick, so an hour with no record at all
+        # is a stalled loop rather than an archive gap (F3 review, missed-hour hole a)
+        assert genome.tick_driven is True
         # the bot's clock is the ET wall clock (frozen here); the strategy never reads one itself
         assert genome.clock().utcoffset() == timedelta(hours=-4) and genome.clock() == TS
         # swap the live MOS-backed provider for the replay table (no network in tests)
@@ -654,6 +657,40 @@ SOURCE_FILES = (
 )
 
 
+def _obs_no_ladder(ts=TS):
+    """What the bot hands the strategy when the city has NO ladder this tick."""
+    return MarketData(symbol="KNYC", timestamp=ts, price=0.0, volume=0, bid=0.0, ask=0.0,
+                      extra={"city_key": "NY", "kalshi_series": "KXHIGHNY", "settlement_station": "KNYC"})
+
+
+def _empty_book_obs(strat, ts=TS):
+    """The fixture ladder with every masked market's YES bid pulled: evaluated, nothing executable."""
+    rows = strat.build_rows(_obs(ts=ts), ts)
+    masked = [t for t, r in rows.items() if bool(G.to_mask(strat.genome, r))]
+    return _obs(ts=ts, ladder=_ladder(ts=ts, quotes={t: (0.0, 0.05) for t in masked}))
+
+
+class FlakyVintages:
+    """``latest_vintage`` that FAILS (bumps the provider's fetch_errors, as the live
+    one does on a network fault) or simply has nothing, at chosen decision hours."""
+
+    def __init__(self, inner, fail_hours=(), blank_hours=()):
+        self.inner = inner
+        self.lag_min = inner.lag_min
+        self.stats = {"fetch_errors": 0}
+        self.fail_hours = {int(h.timestamp()) for h in fail_hours}
+        self.blank_hours = {int(h.timestamp()) for h in blank_hours}
+
+    def latest_vintage(self, city, target_date, as_of):
+        ts = int(as_of.timestamp())
+        if ts in self.fail_hours:
+            self.stats["fetch_errors"] += 1  # what the provider does when the fetch raises
+            return None
+        if ts in self.blank_hours:
+            return None
+        return self.inner.latest_vintage(city, target_date, as_of)
+
+
 class TestRejectContextIsNeverAKwargCollision:
     """``_reject`` forwards reason/strategy/symbol positionally into ``log_rejection``."""
 
@@ -709,3 +746,135 @@ class TestRejectContextIsNeverAKwargCollision:
         got = _rejects(mp_caplog, gs.REASON_NOT_EXECUTABLE)
         assert any("cause=bracket_spec" in m for m in got)
         assert any("cause=no_close_time_or_closed" in m for m in got)
+
+
+class TestMissedHourHoles:
+    """The rule that makes "the offline trade set is the first masked executable
+    snapshot" true live. A hole in it breaks parity the one way parity cannot see."""
+
+    def test_in_process_tick_gap_closes_the_city_day(self, mp_caplog):
+        # hole (a): downtime was gated on the restart watermark, so a stalled loop /
+        # hung HTTP call / paused container inside ONE process was not a miss.
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.tick_driven = True  # the live bot polls every city every tick
+        assert strat.analyze(_empty_book_obs(strat)) == []  # H evaluated, nothing executable
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=2)  # H+1 never reached the strategy at all
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert _symbols_of(got) == sorted(t for t, *_ in LADDER)
+        assert all(f"lost_hour_utc={int(TS.timestamp()) + 3600}" in m for m in got)
+        assert all(f"cause={gs.CAUSE_TICK_GAP}" in m for m in got)
+        assert strat.stats["signals"] == 0 and strat.stats.get("missed_days") == 1
+
+    def test_a_replay_driver_is_untouched_by_the_tick_gap_rule(self, mp_caplog):
+        # parity: a replay visits only the hours the archive HAS; a candle-less hour
+        # is a data gap, and tick_driven stays False for every offline driver.
+        strat, _ = _strategy(clock=Clock(TS))
+        assert strat.tick_driven is False
+        assert strat.analyze(_empty_book_obs(strat)) == []
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2)))  # emits, exactly as before
+        assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+
+    def test_an_hour_the_bot_looked_at_with_no_ladder_is_a_data_gap(self, mp_caplog):
+        # the runbook's distinction: no candle in the archive is NOT a miss, even
+        # though the strategy evaluated nothing at that hour.
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.tick_driven = True
+        assert strat.analyze(_empty_book_obs(strat)) == []
+        strat.clock.now = TS + timedelta(hours=1)
+        assert strat.analyze(_obs_no_ladder(TS + timedelta(hours=1))) == []  # the bot LOOKED: nothing there
+        assert strat._hours[("NY", int(TS.timestamp()) + 3600)] == gs.HOUR_NO_DATA
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2)))  # emits: no chance was lost
+        assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+        assert strat.stats.get("missed_days", 0) == 0
+
+    def test_record_no_ladder_marks_the_same_data_gap(self):
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.tick_driven = True
+        strat.analyze(_empty_book_obs(strat))
+        strat.clock.now = TS + timedelta(hours=1, seconds=5)
+        strat.record_no_ladder("NY")
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2)))
+        assert strat.stats.get("missed_days", 0) == 0
+
+    def test_a_no_data_hour_is_still_evaluable_when_the_ladder_comes_back(self):
+        strat, _ = _strategy(clock=Clock(TS))
+        assert strat.analyze(_obs_no_ladder(TS)) == []  # first tick of the hour: no ladder
+        assert strat._hours[("NY", int(TS.timestamp()))] == gs.HOUR_NO_DATA
+        assert strat.analyze(_obs())  # a later tick of the SAME hour has one -> evaluated
+        assert strat._hours[("NY", int(TS.timestamp()))] == gs.HOUR_DONE
+
+    def test_a_failed_forecast_fetch_closes_the_city_day(self, mp_caplog):
+        # hole (b): latest_vintage returns None on a network fault too, and only
+        # GENOME_NO_VINTAGE was logged -- the hour was silently forfeited.
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.forecast_provider = FlakyVintages(strat.forecast_provider, fail_hours=[TS])
+        assert strat.analyze(_obs()) == []
+        no_vintage = _rejects(mp_caplog, gs.REASON_NO_VINTAGE)
+        assert len(no_vintage) == len(LADDER) and all("fetch_failed=True" in m for m in no_vintage)
+        assert any(
+            "DAY CLOSED" in m and f"cause={gs.CAUSE_VINTAGE_FETCH_FAILURE}" in m for m in mp_caplog.messages
+        )
+        # the next hour prices fine, but the day is closed
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=1)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        assert len(_rejects(mp_caplog, gs.REASON_MISSED_HOUR)) == len(LADDER)
+
+    def test_a_vintage_that_does_not_exist_yet_is_not_a_miss(self, mp_caplog):
+        # the mirror image: no fetch error means the frame has no row for the hour
+        # either, so the day stays open and the next hour emits normally.
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.forecast_provider = FlakyVintages(strat.forecast_provider, blank_hours=[TS])
+        assert strat.analyze(_obs()) == []
+        assert all("fetch_failed=False" in m for m in _rejects(mp_caplog, gs.REASON_NO_VINTAGE))
+        strat.clock.now = TS + timedelta(hours=1)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1)))
+        assert _rejects(mp_caplog, gs.REASON_MISSED_HOUR) == []
+
+
+class TestClosureIsVisible:
+    def test_the_closure_is_logged_once_per_city_day_with_the_lost_hour_and_cause(self, mp_caplog):
+        strat, _ = _strategy(clock=Clock(TS + timedelta(hours=1, minutes=3)))  # late FIRST tick
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=2)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=2))) == []
+        closed = [m for m in mp_caplog.messages if m.startswith("[Genome] DAY CLOSED ")]
+        assert len(closed) == 1, closed  # one city-day, one line
+        assert "city=NY" in closed[0] and "target_date=2026-07-20" in closed[0]
+        assert f"lost_hour_utc={int(TS.timestamp()) + 3600}" in closed[0]
+        assert f"cause={gs.CAUSE_LATE_TICK}" in closed[0]
+        # ... and the rejects that follow carry the same two facts
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert got and all(f"cause={gs.CAUSE_LATE_TICK}" in m for m in got)
+        # the rest of the day adds no second closure line
+        mp_caplog.clear()
+        strat.clock.now = TS + timedelta(hours=3)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=3))) == []
+        assert [m for m in mp_caplog.messages if m.startswith("[Genome] DAY CLOSED ")] == []
+
+    def test_a_recorded_miss_logs_one_line_of_its_own(self, mp_caplog):
+        # record_poll_failure marked the hour and logged NOTHING; the next on-time
+        # tick of that hour returns [] in silence, so the hour left no trace at all.
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.record_poll_failure("NY")
+        miss = [m for m in mp_caplog.messages if m.startswith("[Genome] MISS ")]
+        assert len(miss) == 1
+        assert f"city=NY hour_utc={int(TS.timestamp())}" in miss[0]
+        assert f"cause={gs.CAUSE_POLL_FAILURE}" in miss[0]
+        assert strat.analyze(_obs()) == []  # the hour is consumed, still silent
+        assert strat.stats.get("missed_hours") == 1
+
+    def test_the_observation_failure_cause_travels_to_the_reject(self, mp_caplog):
+        strat, _ = _strategy(clock=Clock(TS))
+        strat.record_missed_hour("NY", gs.CAUSE_OBSERVATION_FAILURE)
+        strat.clock.now = TS + timedelta(hours=1)
+        assert strat.analyze(_obs(ts=TS + timedelta(hours=1))) == []
+        got = _rejects(mp_caplog, gs.REASON_MISSED_HOUR)
+        assert got and all(f"cause={gs.CAUSE_OBSERVATION_FAILURE}" in m for m in got)
+        assert strat.stats.get("poll_failures", 0) == 0  # not every miss is a poll failure

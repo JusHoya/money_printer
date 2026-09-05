@@ -285,6 +285,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             fee_regime=fees_mod.load_regime(),
             calibration_provider=calibration,
             state_dir=cache_dir,  # persisted traded/missed-hour state survives restarts
+            # This bot reaches every city on every tick and reports every hour it is
+            # alive for (evaluated, late, poll failure, observation failure, empty
+            # ladder), so the strategy may read a hole in that record as a stalled
+            # loop / paused container rather than an archive gap. Replay drivers do
+            # not set this.
+            tick_driven=True,
         )
         logger.info(
             "[Weather] GenomeStrategy %s loaded (genome_id=%s mode=%s registry=%s shadow=%s)",
@@ -320,6 +326,26 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         except OSError:
             return None
         return status
+
+    def _genome_hour_hook(self, method: str, city_key: str, *args) -> None:
+        """Tell the genome what happened to ``city_key``'s current hour; never break the tick.
+
+        The genome's missed-hour rule is what makes "the offline trade set is the
+        FIRST masked executable snapshot" true live, so every path that skips a city
+        for an hour has to say which kind of skip it was (FR-F3.1):
+        ``record_missed_hour`` = the sandbox HAD the hour and lost it (the archive
+        keeps the candle), ``record_no_ladder`` = the sandbox looked and there was
+        nothing to see (a data gap, never a miss). A silent skip is the one outcome
+        that breaks replay parity in the way parity cannot detect.
+        """
+        genome = self.strategies.get(GENOME_STRATEGY_KEY)
+        hook = getattr(genome, method, None) if genome is not None else None
+        if hook is None:
+            return
+        try:
+            hook(city_key, *args)
+        except Exception as e:  # bookkeeping must never break the tick
+            logger.warning(f"[Weather] genome {method} bookkeeping failed: {e}")
 
     def _strategy_label(self, key: str, strategy) -> str:
         if key == GENOME_STRATEGY_KEY:
@@ -461,6 +487,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     obs_data = nws_data
 
             if not obs_data:
+                # The whole city is skipped for this tick, so the genome never gets
+                # this hour: an hour it HAD and lost, exactly like a failed Kalshi
+                # poll (the ladder archive keeps the candle -- only the sandbox did
+                # not look). Silence here would let a later hour be claimed as the
+                # first masked executable snapshot.
+                self._genome_hour_hook("record_missed_hour", city.key, "observation_failure")
                 continue
 
             # --- Merge NWS forecast into METAR observation ---
@@ -534,6 +566,12 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                                 f"{m.symbol} (Market)", best_price, **kwargs
                             )
                     else:
+                        # Kalshi answered and this city has no ladder: a DATA gap,
+                        # not a lost chance (the offline frame has no row for an
+                        # hour with no candle either). Recorded rather than ignored
+                        # so the genome can tell it from an hour the bot was not
+                        # there for at all.
+                        self._genome_hour_hook("record_no_ladder", city.key)
                         # Fallback: legacy single-market resolution path
                         active_ticker = self._resolve_smart_ticker(
                             kalshi_ticker, criteria="sentiment", kalshi=self.kalshi
@@ -591,16 +629,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     # F3 missed-hour rule: a poll the sandbox could not make is
                     # a lost chance for the genome (the archive keeps the
                     # candle), never a silent gap it may fill at a later hour.
-                    genome = self.strategies.get(GENOME_STRATEGY_KEY)
-                    if genome is not None and hasattr(genome, "record_poll_failure"):
-                        try:
-                            from src.core.weather_settlement import city_key_for_station
-
-                            genome.record_poll_failure(
-                                city_key_for_station(station) or kalshi_ticker.replace("KXHIGH", "")
-                            )
-                        except Exception as e2:  # never let bookkeeping break the tick
-                            logger.warning(f"[Weather] genome poll-failure bookkeeping failed: {e2}")
+                    self._genome_hour_hook("record_missed_hour", city.key, "poll_failure")
 
             # Use real Kalshi market price for position valuation (not raw temp)
             kalshi_market_price = None
