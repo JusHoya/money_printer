@@ -59,6 +59,26 @@ def prediction_correct_for(position: Dict[str, Any], pnl: float) -> Optional[boo
     Falls back to the PnL sign only when no outcome was recorded -- a price
     based exit (stop-loss, time limit), a ``SETTLEMENT_UNRESOLVED`` close, or a
     row predating FR-1.2. ``None`` still means "not knowable from this row".
+
+    TRADEOFF -- the reconcile's cross-check is now PARTLY CIRCULAR
+    -------------------------------------------------------------
+    ``settlement_reconcile.sim_recorded_result`` reconstructs the contract's
+    outcome as ``contract_side`` flipped by ``prediction_correct``. With the
+    rule above that composition collapses back to ``settlement_outcome``
+    itself, so on a settled row the reconcile now compares the sim's recorded
+    settlement against external truth (the IEM CLI high) -- still a real check
+    of the SETTLEMENT EVALUATION, but no longer a check of the MONEY. Under
+    the old ``pnl > 0`` rule the reconcile was, by accident, also asserting
+    "the PnL sign agrees with the settlement", and that accident is what
+    surfaced the F3 NO-side bug: three rows whose PnL said one thing and whose
+    bracket said another.
+
+    That detector is not silently dropped -- it is made explicit and stronger
+    as :func:`settlement_pnl_disagreement` below, which re-derives the whole
+    settlement PnL (not just its sign) from the row's own inputs and compares.
+    ``scripts/repair_no_settlement_pnl.py`` reports it on every run; wiring it
+    into the scheduled 06:00Z reconcile belongs to ``settlement_reconcile.py``
+    and has not been done here (that file is owned elsewhere).
     """
     outcome = str(position.get("settlement_outcome") or "").strip().lower()
     if outcome in ("yes", "no"):
@@ -66,6 +86,74 @@ def prediction_correct_for(position: Dict[str, Any], pnl: float) -> Optional[boo
         # A NO holder wins exactly when the contract settled NO.
         return (side == "NO") == (outcome == "no")
     return pnl > 0 if pnl != 0.0 else None
+
+
+# Close reasons that pay the binary payoff (0.00 / 1.00) rather than a
+# mid-book price. Kept next to the settlement rules that read it.
+SETTLEMENT_CLOSE_REASONS = ("EXPIRATION", "EARLY_SETTLEMENT")
+
+
+def expected_settlement_pnl(position: Dict[str, Any]) -> Optional[float]:
+    """The PnL a settled binary's OWN inputs imply, or ``None`` if not derivable.
+
+    ``(payoff - entry_price) * quantity - exit_fee``, where ``payoff`` is 1.00
+    when the holder's side won (``contract_side`` matches
+    ``settlement_outcome``) and 0.00 when it did not. Nothing here reads the
+    recorded ``pnl`` or ``exit_price``, which is the point: this is an
+    INDEPENDENT re-derivation, not a restatement.
+
+    ``None`` for anything it cannot judge -- a non-settlement close (the exit
+    was a mid-book price, so there is no payoff to compute), a row with no
+    recorded ``settlement_outcome``, or one missing ``entry_price``/
+    ``quantity``. Never guesses.
+    """
+    outcome = str(position.get("settlement_outcome") or "").strip().lower()
+    if outcome not in ("yes", "no"):
+        return None
+    reason = str(position.get("close_reason") or position.get("reason") or "").strip().upper()
+    if reason not in SETTLEMENT_CLOSE_REASONS:
+        return None
+    entry = _opt_float(position.get("entry_price"))
+    qty = _opt_float(position.get("quantity"))
+    if entry is None or qty is None:
+        return None
+    side = str(position.get("contract_side") or "YES").strip().upper()
+    payoff = 1.0 if (side == "NO") == (outcome == "no") else 0.0
+    fee = _opt_float(position.get("exit_fee")) or 0.0
+    direction = str(position.get("side") or "buy").strip().lower()
+    gross = (entry - payoff) * qty if direction == "sell" else (payoff - entry) * qty
+    return gross - fee
+
+
+def settlement_pnl_disagreement(
+    position: Dict[str, Any], tol: float = 0.01
+) -> Optional[float]:
+    """``recorded pnl - implied pnl`` when the two disagree by more than ``tol``.
+
+    The independent settlement-truth detector that ``prediction_correct`` used
+    to provide by accident, and no longer can (see
+    :func:`prediction_correct_for`). It answers a question neither the flag nor
+    the reconcile asks any more: *does the money on this row agree with the
+    bracket the row says settled it?*
+
+    The F3 NO-side bug was exactly this shape -- a BUY NO at 0.33 on a bracket
+    that settled ``no`` booked ``pnl=-16.50`` where its own inputs imply
+    ``+33.50``, a delta of -50.00. A sign-only check would also have caught it,
+    but this catches a wrong MAGNITUDE too (a bad fee, a mis-scaled quantity),
+    and it stays true for a correct call whose edge the exit fee ate -- the
+    case that makes a naive ``pnl > 0`` cross-check noisy.
+
+    ``None`` means "agrees" or "not derivable"; a float is the discrepancy.
+    ``tol`` absorbs cent-rounding, not a real error.
+    """
+    expected = expected_settlement_pnl(position)
+    if expected is None:
+        return None
+    recorded = _opt_float(position.get("pnl"))
+    if recorded is None:
+        return None
+    delta = recorded - expected
+    return delta if abs(delta) > tol else None
 
 
 def target_date_for_position(position: dict) -> Optional[str]:
