@@ -82,32 +82,40 @@ Assertions in the report (`assertions.<name>.ok`):
 - `settlement_pnl_matches_contract_side` — see §1.1.
 - `at_least_one_position_opened` only with `--require-position`.
 
-### 1.1 Finding: NO-side settlements are booked with the wrong sign (protected file)
+### 1.1 Finding: NO-side settlements were booked with the wrong sign (FIXED in 724d93c)
 
-The first dry run (NY 2026-07-20) opened **BUY NO** on `KXHIGHNY-26JUL20-B79.5` at 0.33 ×
-50; the bracket settled `"no"` (high 81 vs 79–80), i.e. the NO contract **won**, and the
+The first dry run (NY 2026-07-20) opened **BUY NO** on `KXHIGHNY-26JUL20-B79.5` at 0.33 x
+50; the bracket settled `"no"` (high 81 vs 79-80), i.e. the NO contract **won**, and the
 engine booked `exit_price = 0.00`, `pnl = -16.50` instead of `+33.50`. Every executed V2
-signal across eleven scanned city-days was a NO position and every one was sign-flipped
-(`NO/"no"` booked negative, `NO/"yes"` booked positive).
+signal across eleven scanned city-days was a NO position and every one was sign-flipped.
 
-Cause: `SimulatedExchange._close_position` (matching_engine.py, "CALCULATE PNL") sets
-`exit_price = 1.00 if outcome_is_yes else 0.00` — a **YES-side** price — and books
-`(exit_price - entry_price) * qty` for every `side == "buy"` without consulting
-`contract_side`, while the mark-to-market sweep in `update_market` does invert
-(`display_price = 1.0 - estimated_price` for NO). The backtest engine
-(`src/backtest/engine.py`) inverts correctly; the sandbox does not.
+Cause: `SimulatedExchange._close_position` set `exit_price = 1.00 if outcome_is_yes else
+0.00` -- a **YES-side** price -- and booked `(exit_price - entry_price) * qty` without
+consulting `contract_side`, while the mark-to-market sweep does invert for NO.
 
-Consequences: every NO-side position the sandbox has paper-traded since 2026-09-01 is
-sign-flipped in `closed_trades`, `exchange_state.json`, `data/trade_journal.jsonl` and
-the equity curve; `scripts/gate.py` and `scripts/factory_paper_reconcile.py` read those
-fields. A genome whose direction is `buy_no` cannot accumulate an admissible paper
-record until this is fixed. `matching_engine.py` is protected in F3, so the dry run
-**reports** it (`settlement_pnl_matches_contract_side: false`, exit 1) and
-`tests/test_genome_dry_run.py::test_settlement_pnl_matches_contract_side` is an xfail that
-turns into a hard assertion the day the engine is fixed. Owner decision: fix in the
-engine (one `if contract_side == "NO": exit_price = 1.0 - exit_price` at settlement, with
-a lifecycle test for a NO position) before F4's first paper trade; the reconcile script
-must also re-price historical NO closes.
+**Fix (commit 724d93c, the one allowed hunk in `matching_engine.py`):** at binary
+settlement a NO position's exit price is `1 - <YES payoff>`; the `SETTLEMENT_UNRESOLVED`
+flat close is excluded. `tests/test_weather_settlement_semantics.py` covers a winning and a
+losing NO; `tests/test_genome_dry_run.py::test_settlement_pnl_matches_contract_side` is a
+hard assertion.
+
+**What the owner must do on maia, in this order, before any gate or reconcile run:**
+
+1. Confirm the running sandbox image includes 724d93c (`git log --oneline -1` in the
+   checkout the image was built from; rebuild + `docker compose up -d --build` if not).
+2. Dry run the repair on BOTH files:
+   `python scripts/repair_no_settlement_pnl.py --state data/exchange_state.json --journal data/trade_journal.jsonl`
+   (lists every stale NO-side settlement in `closed_trades` and in the journal; exit 1 while
+   repairs are pending; nothing is written).
+3. Apply it: the same command with `--apply` (writes `exchange_state.json.bak-N` and
+   `trade_journal.jsonl.bak-N`, rewrites only the stale rows, marks them
+   `repaired_no_side_settlement: true`, rebuilds the cumulative ledger).
+4. Only then run `scripts/gate.py` / `scripts/factory_paper_reconcile.py`. The gate
+   REFUSES (exit 3) while any unrepaired stale row remains, whether it sits in
+   `closed_trades` or in a journal row whose state entry was cleared by a cycle reset.
+
+The engine fix is a deliberate, owner-ratified deviation from the F3 "engine diff empty"
+rule (`tests/test_protected_files.py` allow-lists exactly that hunk).
 
 ## 2. alcyone: build the arm64 sandbox image and run the in-image import checks
 
@@ -239,8 +247,14 @@ curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=
 In shadow mode the reconcile has no fills to re-price; run it anyway once a week so the
 "sandbox ⊆ lab" report exists with an empty sandbox set and the lab set from the promoted
 genome — that is the parity evidence for the F3 exit. All of these read `closed_trades`
-and the journal, never equity, and all of them inherit the §1.1 sign defect for NO-side
-positions until the engine is fixed.
+and the journal, never equity. Any state/journal written by an image older than 724d93c
+must go through `scripts/repair_no_settlement_pnl.py --apply` first (§1.1); the gate
+refuses otherwise. Before the first paper trade, copy
+`configs/factory/gate_registration.template.json` to `gate_registration.json`, commit it,
+then fill `registration_commit_utc` from
+`git log --diff-filter=A --format=%cI -- configs/factory/gate_registration.json` and
+commit again -- the gate fails while it is null. Pass `--realistic-fills true|false` to
+`gate.py` (the exchange state does not record the flag).
 
 ## 6. F3 exit checklist (INFRA items)
 
@@ -250,3 +264,40 @@ positions until the engine is fixed.
 - [ ] maia §3 deployed with `GENOME_STRATEGY_ID=<seed>`; `docker exec mp-sandbox env` shows `GENOME_STRATEGY_MODE=shadow`.
 - [ ] `scripts/check_maia_emit_cadence.py` → `PASS` with `outcome_codes == {"GENOME_SHADOW": n_emit}` and `verified_ok ≥ 1`.
 - [ ] `git diff 38d5fdd -- src/core/risk_manager.py src/bots/mixins.py src/core/matching_engine.py` empty on the merge commit.
+
+## 7. Live-conditions parity: missed hours, restarts, authorization (F3 red team, 2026-09-05)
+
+The replay parity script visits every hourly candle, so it cannot see what a
+live process does when it misses an hour. `GenomeStrategy` now enforces:
+
+- **Missed-hour rule.** Per city it remembers the last evaluated hour. If the next
+  evaluated hour is more than one hour later (a tick that missed the 120-s
+  top-of-hour tolerance, or downtime), every city-day visible at that hour is
+  marked missed and rejects `GENOME_MISSED_HOUR` for the rest of the market-day.
+  The offline trade set is the FIRST masked executable snapshot per market; a
+  strategy that skipped an hour cannot claim it. A market evaluated at every
+  earlier hour (mask false / book empty / not executable) and masked-executable
+  now emits normally -- that is the offline rule. Newly tracked city-days that
+  first appear during a gap are marked missed too (conservative).
+- **Persisted state.** `<MP_FORECAST_CACHE_DIR>/genome_state_<genome_id>.json`
+  holds last hour per city, missed city-days and traded (target_date, symbol);
+  rewritten atomically on every change, loaded at construction. A restarted
+  process therefore never re-emits an already-traded market. Delete the file only
+  when you deliberately want a fresh start (the first city-days after a FRESH
+  deploy may emit later than the offline first hour; the weekly
+  `factory_paper_reconcile.py` flags them). A state file of another genome_id is
+  refused at construction.
+- **EMIT lines carry the quote.** The shadow EMIT and GENOME_SHADOW lines carry
+  `quote=` and `limit=`; in paper mode the strategy logs
+  `[Genome] DECIDE ... quote= limit=` in the same second as the mixin's EMIT.
+  `scripts/check_maia_emit_cadence.py` verifies `limit == quote + 0.01` from those
+  fields and now exits 3 (`UNVERIFIED`) when no EMIT has a verifiable quote;
+  `--allow-unverified` downgrades that for dry runs only. A `quote=` that
+  contradicts the EMIT price is a FAIL.
+- **Authorization.** `GENOME_STRATEGY_MODE=paper` on a shadow spec is REFUSED (an
+  ERROR line, the bot runs V2 only) instead of silently tightening. Paper mode
+  also requires the family's current status in the tracked
+  `reports/factory/registry.jsonl` to be PROPOSED or RATIFIED and equal to the
+  spec's `registry_status`; `spec_hash` is integrity, not authorization.
+- **Empty-ask sentinel.** A missing/zero ask from the poll is treated as no quote
+  (non-executable) instead of a 0.00 quote.

@@ -50,23 +50,31 @@ the journal is append-only) the taker fee is recomputed from
 ``(entry_price, quantity)`` with the same function and the row is marked
 ``fee_source = "recomputed_taker"``.
 
-A unit's breakeven is the contract-weighted mean of its fills' ``q*``; the
-pooled null win-rate is the plain mean of the unit breakevens:
+THE NULL -- exact, per unit (2026-09-05, red team B defect 1)
+-------------------------------------------------------------
+Under the null every fill ``i`` of a unit wins independently with its OWN
+breakeven probability ``q*_i = p_i + f_i``. The unit's win probability is then
 
-    q_bar = mean over units of q*_unit
+    w_u = P[ sum_i (won_i - p_i - f_i) * qty_i > 0 ]
 
-With one fill per unit this null is exact. With several fills per unit the
-event "unit net PnL > 0" is not exactly Bernoulli(q*_unit) -- it is the event
-that the fills' summed PnL is positive -- so ``q_bar`` is an approximation
-there, stated as such in the verdict, and the per-fill binomial is printed as a
-secondary, NON-gating line for comparison.
+computed EXACTLY by enumerating the 2^m fill outcomes of the unit (``m`` fills;
+the gate refuses a unit with more than ``MAX_FILLS_PER_UNIT`` fills rather than
+approximate). With one fill per unit ``w_u = q*_i`` and the test below reduces to
+the plain binomial. The earlier pooled ``q_bar`` (mean of contract-weighted unit
+breakevens) is kept as ``p_pooled_qbar_secondary`` -- labelled an approximation,
+NON-gating -- because with several fills per date it is neither exact nor
+reliably conservative (identical fills: a split date is a WIN, so the true
+``w_u = 1 - (1 - q*)^2`` is far above ``q*``; extreme price pairs: only both-win
+wins, so ``w_u = q*_1 q*_2`` is far below).
 
-THE TEST -- exact binomial upper tail
--------------------------------------
-    p = P[X >= k | n, q_bar] = sum_{i=k}^{n} C(n, i) q_bar^i (1 - q_bar)^(n - i)
+THE TEST -- exact Poisson-binomial upper tail
+---------------------------------------------
+    p = P[K >= k],  K = sum over units of Bernoulli(w_u)
 
-with ``math.comb`` and ``math.fsum``; no scipy, no normal approximation. ``k`` is
-the number of winning units, ``n`` the number of settled units.
+by dynamic programming over units in exact rational arithmetic
+(``fractions.Fraction``; the float is derived from it and ``p_exact_str`` is
+kept in the verdict). No scipy, no normal approximation. ``k`` is the number of
+winning units, ``n`` the number of settled units.
 
 REFUSAL
 -------
@@ -81,7 +89,29 @@ USAGE
         --registration configs/factory/gate_registration.json \
         --out reports/factory/gate_<genome_id>.json
 
-Exit codes: 0 PASS, 1 FAIL, 2 usage / input error, 3 refused (n_units < n_min).
+Exit codes: 0 PASS, 1 FAIL, 2 usage / input error, 3 refused (n_units < n_min,
+or stale NO-side settlement rows present -- see below).
+
+STALE NO-SIDE ROWS (engine fix 724d93c, 2026-09-04)
+---------------------------------------------------
+Before that commit the sandbox booked the YES-leg payoff against NO entries, so
+every settled NO paper trade carried a sign-flipped ``pnl``. The gate refuses
+(exit 3) when any admitted NO settlement -- from the journal or from
+``closed_trades`` -- still carries the buggy numbers (``exit_price`` equals the
+YES payoff of its recorded ``settlement_outcome`` and ``pnl`` equals the old
+formula) and does not carry the ``repaired_no_side_settlement`` marker written
+by ``scripts/repair_no_settlement_pnl.py``. A NO settlement without a recorded
+outcome cannot be verified either way and is excluded (``no_side_outcome_unverifiable``).
+
+FEE TRUST (red team B defect 4)
+-------------------------------
+Under a ``fee_type: taker`` registration the fee charged to a fill is
+``max(booked entry_fee / qty, taker fee recomputed at the fill's price and the
+JOURNAL quantity)``: a maker-booked or zero fee can never lower the breakeven.
+Quantity comes from the same row as the price; a journal/state quantity
+mismatch is reported under ``warnings``. A fill booked as a maker under a taker
+registration fails the gating condition ``fee_type_matches``.
+
 The verdict JSON is written with ``sort_keys=True, indent=2`` and carries no
 timestamps (the report is a function of its inputs; the commit dates it).
 """
@@ -95,6 +125,8 @@ import os
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from fractions import Fraction
+from itertools import product
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -119,6 +151,10 @@ EXIT_REFUSED = 3
 
 #: exit_price must sit on the settlement grid {0, 1} within this.
 _SETTLEMENT_TOL = 1e-9
+#: a unit with more fills than this is refused (2^m enumeration), never approximated.
+MAX_FILLS_PER_UNIT = 16
+#: the journal/state marker scripts/repair_no_settlement_pnl.py writes.
+REPAIRED_MARKER = "repaired_no_side_settlement"
 
 FORMULAS: Dict[str, str] = {
     "breakeven_per_fill": (
@@ -126,12 +162,20 @@ FORMULAS: Dict[str, str] = {
         "q*(1 - p - f) - (1 - q*)(p + f) = 0 for a binary bought at p with entry fee f "
         "per contract, held to settlement (payout 1, no settlement fee)"
     ),
-    "unit_breakeven": "contract-weighted mean of the unit's fills' q*",
-    "pooled_null": "q_bar = mean over settled units of the unit breakeven",
+    "unit_null_win_probability": (
+        "w_u = P[sum_i (won_i - p_i - f_i) qty_i > 0] with won_i ~ Bernoulli(q*_i) "
+        "independent, by exact enumeration of the unit's 2^m fill outcomes"
+    ),
+    "unit_breakeven": "contract-weighted mean of the unit's fills' q* (diagnostic only)",
+    "pooled_null_secondary": "q_bar = mean over settled units of the unit breakeven (approximation, non-gating)",
     "unit_win": "unit net PnL = sum(pnl - entry_fee) over the unit's fills; win iff > 0",
     "p_value": (
-        "exact binomial upper tail P[X >= k | n, q_bar] = "
-        "sum_{i=k}^{n} C(n, i) q_bar^i (1 - q_bar)^(n - i), math.comb + math.fsum"
+        "exact Poisson-binomial upper tail P[K >= k], K = sum over units of Bernoulli(w_u), "
+        "by dynamic programming in fractions.Fraction; float derived from the rational"
+    ),
+    "fee_trust": (
+        "taker registration: fee = max(booked entry_fee/qty, taker fee recomputed at the "
+        "fill's price and journal quantity)"
     ),
     "net_pnl": (
         "sum over settled fills of (pnl - entry_fee); pnl is closed_trades' pnl "
@@ -143,6 +187,10 @@ FORMULAS: Dict[str, str] = {
 
 class GateError(RuntimeError):
     """Malformed inputs. The gate exits 2 rather than guessing."""
+
+
+class GateRefusal(RuntimeError):
+    """The record cannot be gated as it stands (stale NO-side rows, oversized unit). Exit 3."""
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +217,72 @@ def binomial_upper_tail(n: int, k: int, q: float) -> float:
 def breakeven_win_rate(entry_price: float, fee_per_contract: float) -> float:
     """``q* = p + f`` (see the module docstring for the derivation)."""
     return float(entry_price) + float(fee_per_contract)
+
+
+def _clip01(q: Fraction) -> Fraction:
+    return Fraction(0) if q < 0 else (Fraction(1) if q > 1 else q)
+
+
+def unit_null_win_probability(fills: Sequence[Mapping[str, Any]]) -> Fraction:
+    """``w_u = P[unit net PnL > 0]`` under the null, by exact enumeration.
+
+    Each fill ``i`` (``entry_price`` p, ``fee_per_contract`` f, ``quantity`` q)
+    wins independently with ``q*_i = p + f``; its PnL is ``(1 - p - f) q`` on a
+    win and ``-(p + f) q`` on a loss (settlement fee 0). Exact rationals
+    throughout so a unit whose PnL is exactly 0 is a loss, never a rounding win.
+    """
+    m = len(fills)
+    if m == 0:
+        return Fraction(0)
+    if m > MAX_FILLS_PER_UNIT:
+        raise GateRefusal(
+            f"a unit holds {m} fills > MAX_FILLS_PER_UNIT={MAX_FILLS_PER_UNIT}; the exact "
+            "2^m enumeration is refused rather than approximated"
+        )
+    qs: List[Fraction] = []
+    win_pnl: List[Fraction] = []
+    loss_pnl: List[Fraction] = []
+    for f in fills:
+        p = Fraction(float(f["entry_price"]))
+        fee = Fraction(float(f["fee_per_contract"]))
+        qty = Fraction(float(f["quantity"]))
+        qs.append(_clip01(p + fee))
+        win_pnl.append((1 - p - fee) * qty)
+        loss_pnl.append(-(p + fee) * qty)
+    total = Fraction(0)
+    for outcome in product((False, True), repeat=m):
+        prob = Fraction(1)
+        pnl = Fraction(0)
+        for i, won in enumerate(outcome):
+            prob *= qs[i] if won else (1 - qs[i])
+            pnl += win_pnl[i] if won else loss_pnl[i]
+        if pnl > 0:
+            total += prob
+    return total
+
+
+def poisson_binomial_upper_tail(win_probs: Sequence[Fraction], k: int) -> Fraction:
+    """``P[K >= k]`` for ``K = sum_u Bernoulli(w_u)`` -- exact DP over units."""
+    n = len(win_probs)
+    if k <= 0:
+        return Fraction(1)
+    if k > n:
+        return Fraction(0)
+    dist: List[Fraction] = [Fraction(1)]
+    for w in win_probs:
+        w = Fraction(w)
+        nxt = [Fraction(0)] * (len(dist) + 1)
+        for j, pj in enumerate(dist):
+            if pj == 0:
+                continue
+            nxt[j] += pj * (1 - w)
+            nxt[j + 1] += pj * w
+        dist = nxt
+    return sum(dist[k:], Fraction(0))
+
+
+def _fraction_str(x: Optional[Fraction]) -> Optional[str]:
+    return None if x is None else f"{x.numerator}/{x.denominator}"
 
 
 def nearest_cent_taker_fee(symbol: str, entry_price: float, quantity: float) -> float:
@@ -329,6 +443,51 @@ def _is_settled(row: Mapping[str, Any]) -> Tuple[bool, str]:
     return True, ""
 
 
+_YES_PAYOFF = {"yes": 1.0, "no": 0.0}
+
+
+def stale_no_side_settlement(row: Mapping[str, Any]) -> Optional[str]:
+    """``None`` when the row's NO-side settlement numbers are trustworthy, else why not.
+
+    ``"stale"``: exit_price is the YES payoff of the recorded outcome and pnl is the
+    pre-724d93c formula -> the row needs scripts/repair_no_settlement_pnl.py.
+    ``"unverifiable"``: a NO settlement with no recorded outcome (the same numbers
+    read as a repaired winner or a buggy loser).
+    """
+    if str(row.get("contract_side") or "YES").upper() != "NO":
+        return None
+    if row.get(REPAIRED_MARKER):
+        return None
+    reason = str(row.get("close_reason") or row.get("reason") or "").upper()
+    if "EXPIRATION" not in reason and "SETTLEMENT" not in reason:
+        return None
+    if "UNRESOLVED" in reason:
+        return None
+    try:
+        exit_price = float(row.get("exit_price"))
+    except (TypeError, ValueError):
+        return None
+    on_grid = abs(exit_price) < _SETTLEMENT_TOL or abs(exit_price - 1.0) < _SETTLEMENT_TOL
+    if not on_grid:
+        return None
+    outcome = str(row.get("settlement_outcome") or "").lower()
+    if outcome not in _YES_PAYOFF:
+        return "unverifiable"
+    if abs(exit_price - _YES_PAYOFF[outcome]) > _SETTLEMENT_TOL:
+        return None  # already priced on the NO leg
+    try:
+        entry = float(row["entry_price"])
+        qty = float(row["quantity"])
+        pnl = float(row["pnl"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    exit_fee = float(row.get("exit_fee") or 0.0)
+    old = (exit_price - entry) * qty - exit_fee
+    if str(row.get("side") or "buy") == "sell":
+        old = (entry - exit_price) * qty - exit_fee
+    return "stale" if abs(pnl - old) < 1e-6 else None
+
+
 def _iso(value: Any) -> Optional[str]:
     if isinstance(value, datetime):
         return value.isoformat()
@@ -357,12 +516,19 @@ def _target_date(row: Mapping[str, Any]) -> Optional[str]:
     return day.isoformat() if day else None
 
 
+def _is_maker_booked(row: Mapping[str, Any]) -> bool:
+    if row.get("is_maker") is True:
+        return True
+    return str(row.get("fill_type") or "").lower() == "maker"
+
+
 def collect_settled_trades(
     journal_rows: Sequence[Mapping[str, Any]],
     closed_trades: Sequence[Mapping[str, Any]],
     *,
     strategy_name: str,
     market_family: str = "KXHIGH",
+    fee_type: str = "taker",
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Merge journal + closed_trades into one settled-fill list for ``strategy_name``.
 
@@ -370,13 +536,40 @@ def collect_settled_trades(
     ``entry_fee`` and is cleared on a cycle reset. Rows are joined on
     ``(symbol, entry_time, strategy_name)`` -- ``entry_time`` is the exact
     ``open_time.isoformat()`` string in both files.
+
+    Fee trust (taker registration): ``fee = max(booked entry_fee / qty,
+    recomputed taker fee at the row's price and the JOURNAL quantity)``.
+    ``counts["stale_no_side_rows"]`` lists rows still carrying the pre-724d93c
+    sign-flipped numbers; the caller refuses when it is non-empty.
     """
     excluded: Counter = Counter()
     by_key: Dict[Tuple[str, Optional[str], str], Dict[str, Any]] = {}
+    stale_rows: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+    taker_reg = str(fee_type).lower() == "taker"
 
     state_by_key: Dict[Tuple[str, Optional[str], str], Mapping[str, Any]] = {}
     for t in closed_trades:
         state_by_key.setdefault(_join_key(t), t)
+
+    def _fee_for(trade: Dict[str, Any], booked: Optional[float]) -> Tuple[float, str]:
+        recomputed = nearest_cent_taker_fee(trade["symbol"], trade["entry_price"], trade["quantity"])
+        if booked is None:
+            return recomputed, "recomputed_taker"
+        if taker_reg and recomputed > float(booked) + 1e-9:
+            return recomputed, "recomputed_taker (booked fee below taker; max rule)"
+        return float(booked), "closed_trades.entry_fee"
+
+    def _check_no_side(trade: Dict[str, Any], row: Mapping[str, Any], source: str) -> bool:
+        """False when the row must not be admitted (stale -> collected; unverifiable -> excluded)."""
+        why = stale_no_side_settlement(row)
+        if why == "stale":
+            stale_rows.append({"symbol": trade["symbol"], "entry_time": trade["entry_time"], "source": source})
+            return False
+        if why == "unverifiable":
+            excluded["no_side_outcome_unverifiable"] += 1
+            return False
+        return True
 
     def _admit(row: Mapping[str, Any], source: str) -> Optional[Dict[str, Any]]:
         symbol = str(row.get("symbol") or "")
@@ -419,6 +612,8 @@ def collect_settled_trades(
             "exit_price": float(row.get("exit_price")),
             "pnl": pnl,
             "source": source,
+            "maker_booked": _is_maker_booked(row),
+            "repaired": bool(row.get(REPAIRED_MARKER)),
         }
 
     for row in journal_rows:
@@ -430,19 +625,43 @@ def collect_settled_trades(
         if trade is None:
             continue
         st = state_by_key.get(key)
-        if st is not None and st.get("entry_fee") is not None:
-            trade["entry_fee"] = float(st["entry_fee"])
-            trade["fee_source"] = "closed_trades.entry_fee"
+        if st is not None:
+            # the state row is the fee/pnl source when present: it must be clean too
+            if not _check_no_side(trade, st, "closed_trades"):
+                continue
             trade["source"] = "journal+closed_trades"
+            trade["maker_booked"] = trade["maker_booked"] or _is_maker_booked(st)
+            trade["repaired"] = trade["repaired"] or bool(st.get(REPAIRED_MARKER))
+            try:
+                st_qty = float(st.get("quantity"))
+            except (TypeError, ValueError):
+                st_qty = None
+            if st_qty is not None and abs(st_qty - trade["quantity"]) > 1e-9:
+                warnings.append(
+                    {
+                        "warning": "quantity_mismatch_journal_vs_state",
+                        "symbol": trade["symbol"],
+                        "entry_time": trade["entry_time"],
+                        "journal_quantity": trade["quantity"],
+                        "state_quantity": st_qty,
+                        "used": "journal quantity (same row as the price)",
+                    }
+                )
+            booked = None
+            if st.get("entry_fee") is not None:
+                booked = float(st["entry_fee"])
+                if st_qty is not None and st_qty > 0 and abs(st_qty - trade["quantity"]) > 1e-9:
+                    # a fee booked at another size is rescaled per contract onto the journal qty
+                    booked = booked / st_qty * trade["quantity"]
+            trade["entry_fee"], trade["fee_source"] = _fee_for(trade, booked)
             if abs(float(st.get("pnl", trade["pnl"])) - trade["pnl"]) > 1e-6:
                 trade["pnl_journal"] = trade["pnl"]
                 trade["pnl"] = float(st["pnl"])
                 trade["pnl_source"] = "closed_trades (journal disagreed)"
         else:
-            trade["entry_fee"] = nearest_cent_taker_fee(
-                trade["symbol"], trade["entry_price"], trade["quantity"]
-            )
-            trade["fee_source"] = "recomputed_taker"
+            if not _check_no_side(trade, row, "journal"):
+                continue
+            trade["entry_fee"], trade["fee_source"] = _fee_for(trade, None)
         by_key[key] = trade
 
     for t in closed_trades:
@@ -452,14 +671,10 @@ def collect_settled_trades(
         trade = _admit(t, "closed_trades_only")
         if trade is None:
             continue
-        if t.get("entry_fee") is not None:
-            trade["entry_fee"] = float(t["entry_fee"])
-            trade["fee_source"] = "closed_trades.entry_fee"
-        else:
-            trade["entry_fee"] = nearest_cent_taker_fee(
-                trade["symbol"], trade["entry_price"], trade["quantity"]
-            )
-            trade["fee_source"] = "recomputed_taker"
+        if not _check_no_side(trade, t, "closed_trades"):
+            continue
+        booked = float(t["entry_fee"]) if t.get("entry_fee") is not None else None
+        trade["entry_fee"], trade["fee_source"] = _fee_for(trade, booked)
         by_key[key] = trade
 
     trades: List[Dict[str, Any]] = []
@@ -479,6 +694,11 @@ def collect_settled_trades(
         "fills_by_source": dict(Counter(t["source"] for t in trades)),
         "fills_by_fee_source": dict(Counter(t["fee_source"] for t in trades)),
         "excluded": dict(sorted(excluded.items())),
+        "stale_no_side_rows": stale_rows,
+        "warnings": warnings,
+        "maker_booked_fills": [
+            {"symbol": t["symbol"], "entry_time": t["entry_time"]} for t in trades if t["maker_booked"]
+        ],
     }
     return trades, counts
 
@@ -494,6 +714,7 @@ def group_units(trades: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         qty = sum(f["quantity"] for f in fills)
         net = math.fsum(f["net_pnl"] for f in fills)
         q_star = math.fsum(f["q_star"] * f["quantity"] for f in fills) / qty
+        w_u = unit_null_win_probability(fills)
         units.append(
             {
                 "target_date": td,
@@ -502,7 +723,10 @@ def group_units(trades: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
                 "quantity": qty,
                 "net_pnl": net,
                 "q_star": q_star,
+                "null_win_probability": float(w_u),
+                "null_win_probability_exact": _fraction_str(w_u),
                 "won": net > 0.0,
+                "_w_u": w_u,
             }
         )
     return units
@@ -512,11 +736,17 @@ def group_units(trades: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
 # Verdict
 # ---------------------------------------------------------------------------
 def _first_trade_after(trades: Sequence[Mapping[str, Any]], cutoff_iso: Optional[str]):
-    """``(ok, note)`` for the optional registration_commit_utc condition."""
+    """``(ok, note)`` for the registered_before_first_trade condition.
+
+    ``ok`` is ``False`` when ``registration_commit_utc`` is missing: the gate
+    cannot prove the registration preceded the first trade, so it fails by
+    default (``--allow-unverified-registration`` downgrades it to non-gating).
+    """
     if not cutoff_iso:
-        return None, (
-            "UNVERIFIED: registration_commit_utc is null; verify by hand that the "
-            "commit adding gate_registration.json predates the first journal row"
+        return False, (
+            "registration commit time not recorded (registration_commit_utc is null); "
+            "fill it from `git log --diff-filter=A --format=%cI -- "
+            "configs/factory/gate_registration.json`"
         )
     try:
         cutoff = datetime.fromisoformat(str(cutoff_iso).replace("Z", "+00:00"))
@@ -549,12 +779,16 @@ def evaluate(
     *,
     observed_spec_hash: Optional[str],
     spec_hash_source: str,
+    allow_unverified_registration: bool = False,
+    realistic_fills: Optional[bool] = None,
+    counts: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """The verdict dict (timestamp-free). Pure: no I/O."""
     thresholds = registration["thresholds"]
     n_min = int(thresholds["n_min"])
     alpha = float(thresholds["alpha"])
     net_gt = float(thresholds.get("net_pnl_gt", 0.0))
+    counts = counts or {}
 
     units = group_units(trades)
     n_units = len(units)
@@ -566,12 +800,18 @@ def evaluate(
     fees = math.fsum(t["entry_fee"] for t in trades)
 
     multi = sum(1 for u in units if u["n_fills"] > 1)
+    w_us = [u.pop("_w_u") for u in units]  # Fractions: not for the JSON
+    p_exact: Optional[Fraction] = None
     if n_units:
         q_bar_units = math.fsum(u["q_star"] for u in units) / n_units
-        p_units = None if refused else binomial_upper_tail(n_units, k_units, q_bar_units)
+        if not refused:
+            p_exact = poisson_binomial_upper_tail(w_us, k_units)
+        p_units = None if p_exact is None else float(p_exact)
+        p_pooled = None if refused else binomial_upper_tail(n_units, k_units, q_bar_units)
     else:
         q_bar_units = None
         p_units = None
+        p_pooled = None
 
     n_fills = len(trades)
     k_fills = sum(1 for t in trades if t["won"])
@@ -587,6 +827,23 @@ def evaluate(
     rbft_ok, rbft_note = _first_trade_after(
         trades, registration.get("registration_commit_utc")
     )
+    rbft_gating = True
+    if allow_unverified_registration and not registration.get("registration_commit_utc"):
+        rbft_gating = False
+        rbft_ok = None
+        rbft_note = "UNVERIFIED (--allow-unverified-registration): " + rbft_note
+
+    reg_fee_type = str(registration.get("fee_type") or "taker").lower()
+    maker_fills = list(counts.get("maker_booked_fills") or [])
+    fee_type_ok = not (reg_fee_type == "taker" and maker_fills)
+
+    requires_realistic = bool(registration.get("requires_realistic_fills", True))
+    if realistic_fills is None:
+        rf_ok: Optional[bool] = None
+        rf_note = "UNVERIFIED: the exchange state does not record realistic_fills; pass --realistic-fills"
+    else:
+        rf_ok = bool(realistic_fills) or not requires_realistic
+        rf_note = f"realistic_fills={realistic_fills}; required={requires_realistic}"
 
     conditions: Dict[str, Dict[str, Any]] = {
         "n_units_ge_n_min": {
@@ -598,8 +855,9 @@ def evaluate(
         "p_lt_alpha": {
             "ok": (p_units is not None and p_units < alpha),
             "observed": p_units,
+            "observed_exact": _fraction_str(p_exact),
             "required_lt": alpha,
-            "note": "not computed (refused)" if refused else "exact binomial upper tail",
+            "note": "not computed (refused)" if refused else "exact Poisson-binomial upper tail over units",
         },
         "net_pnl_gt_0": {
             "ok": net_pnl > net_gt,
@@ -608,7 +866,6 @@ def evaluate(
             "source": FORMULAS["net_pnl"],
         },
         "spec_hash_unchanged": {
-            "registered": registered_hash,
             "ok": hash_ok,
             "registered": registered_hash,
             "observed": observed_spec_hash,
@@ -616,8 +873,21 @@ def evaluate(
         },
         "registered_before_first_trade": {
             "ok": rbft_ok,
-            "gating": rbft_ok is not None,
+            "gating": rbft_gating,
             "note": rbft_note,
+        },
+        "fee_type_matches": {
+            "ok": fee_type_ok,
+            "registered_fee_type": reg_fee_type,
+            "maker_booked_fills": maker_fills,
+            "note": "a maker-booked fill under a taker registration is not the registered fee leg",
+        },
+        "realistic_fills_enabled": {
+            "ok": rf_ok,
+            "gating": rf_ok is not None,
+            "observed": realistic_fills,
+            "required": requires_realistic,
+            "note": rf_note,
         },
     }
     gating = [
@@ -625,9 +895,13 @@ def evaluate(
         conditions["p_lt_alpha"]["ok"],
         conditions["net_pnl_gt_0"]["ok"],
         conditions["spec_hash_unchanged"]["ok"],
+        conditions["fee_type_matches"]["ok"],
     ]
-    if rbft_ok is not None:
+    if rbft_gating:
         gating.append(bool(rbft_ok))
+    if rf_ok is not None:
+        gating.append(bool(rf_ok))
+    not_applicable = [name for name, c in conditions.items() if c.get("ok") is None]
     verdict = "PASS" if (not refused and all(gating)) else "FAIL"
 
     return {
@@ -640,21 +914,24 @@ def evaluate(
             else None
         ),
         "conditions": conditions,
+        "failing": [name for name, c in conditions.items() if c.get("ok") is False and c.get("gating", True)],
+        "not_applicable": not_applicable,
+        "allow_unverified_registration": bool(allow_unverified_registration),
         "units": {
             "n": n_units,
             "k_wins": k_units,
-            "null_win_rate_q_bar": q_bar_units,
             "p_upper_tail": p_units,
+            "p_exact_str": _fraction_str(p_exact),
+            "null": FORMULAS["unit_null_win_probability"],
+            "test": FORMULAS["p_value"],
             "rule": FORMULAS["unit_win"],
             "units_with_multiple_fills": multi,
-            "null_note": (
-                "exact: one fill per unit"
-                if multi == 0
-                else (
-                    f"{multi} unit(s) hold several fills; q_bar is the mean of the "
-                    "contract-weighted unit breakevens, an approximation of the null "
-                    "for 'unit net PnL > 0' -- see per_fill_secondary"
-                )
+            "max_fills_per_unit": max((u["n_fills"] for u in units), default=0),
+            "null_win_rate_q_bar": q_bar_units,
+            "p_pooled_qbar_secondary": p_pooled,
+            "pooled_note": (
+                "p_pooled_qbar_secondary = binomial with q_bar = mean unit breakeven; an "
+                "APPROXIMATION kept for comparison, non-gating (exact only with one fill per unit)"
             ),
         },
         "per_fill_secondary": {
@@ -671,6 +948,7 @@ def evaluate(
             "entry_fees": fees,
             "source": FORMULAS["net_pnl"],
         },
+        "warnings": list(counts.get("warnings") or []),
         "formulas": dict(FORMULAS),
         "unit_table": units,
         "fills": [dict(t) for t in trades],
@@ -680,6 +958,19 @@ def evaluate(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+def _state_realistic_fills(state_path: Optional[str]) -> Optional[bool]:
+    """``realistic_fills`` if the exchange state ever serialises it (it does not today)."""
+    if not state_path or not os.path.exists(state_path):
+        return None
+    try:
+        with open(state_path, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    v = state.get("realistic_fills") if isinstance(state, dict) else None
+    return bool(v) if isinstance(v, bool) else None
+
+
 def run_gate(
     *,
     journal_path: str,
@@ -688,6 +979,8 @@ def run_gate(
     out_path: Optional[str],
     strategy_override: Optional[str] = None,
     promoted_override: Optional[str] = None,
+    allow_unverified_registration: bool = False,
+    realistic_fills: Optional[bool] = None,
 ) -> Dict[str, Any]:
     registration = load_registration(registration_path)
     strategy_name = strategy_override or str(registration["strategy_name"])
@@ -698,14 +991,28 @@ def run_gate(
         closed,
         strategy_name=strategy_name,
         market_family=str(registration.get("market_family", "KXHIGH")),
+        fee_type=str(registration.get("fee_type") or "taker"),
     )
+    if counts["stale_no_side_rows"]:
+        rows = counts["stale_no_side_rows"]
+        raise GateRefusal(
+            f"stale NO-side settlement rows present ({len(rows)}: "
+            + ", ".join(f"{r['symbol']}@{r['entry_time']} [{r['source']}]" for r in rows[:5])
+            + ("..." if len(rows) > 5 else "")
+            + "); run scripts/repair_no_settlement_pnl.py --state ... --journal ... --apply first"
+        )
     spec_path = promoted_override or registration.get("promoted_spec_path")
     observed_hash, hash_source = resolve_spec_hash(spec_path)
+    if realistic_fills is None:
+        realistic_fills = _state_realistic_fills(state_path)
     verdict = evaluate(
         trades,
         registration,
         observed_spec_hash=observed_hash,
         spec_hash_source=hash_source,
+        allow_unverified_registration=allow_unverified_registration,
+        realistic_fills=realistic_fills,
+        counts=counts,
     )
     verdict["registration"] = {
         "path": _repo_relative(registration_path),
@@ -716,6 +1023,8 @@ def run_gate(
         "spec_hash": registration["spec_hash"],
         "adverse_fill": registration.get("adverse_fill"),
         "fee_type": registration.get("fee_type"),
+        "registration_commit_utc": registration.get("registration_commit_utc"),
+        "requires_realistic_fills": registration.get("requires_realistic_fills", True),
     }
     verdict["inputs"] = {
         "journal": journal_path,
@@ -723,6 +1032,7 @@ def run_gate(
         "state": state_path,
         "state_sha256": sha256_file(state_path) if state_path else None,
         "promoted_spec_path": spec_path,
+        "realistic_fills": realistic_fills,
     }
     verdict["counts"] = counts
     if out_path:
@@ -740,12 +1050,24 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--promoted", default=None, help="override registration.promoted_spec_path"
     )
+    ap.add_argument(
+        "--allow-unverified-registration",
+        action="store_true",
+        help="dry runs only: a null registration_commit_utc is reported, not gating",
+    )
+    ap.add_argument(
+        "--realistic-fills",
+        choices=("true", "false", "unknown"),
+        default="unknown",
+        help="whether the sandbox ran with realistic_fills (the state file does not record it)",
+    )
     ap.add_argument("--quiet", action="store_true", help="print only the verdict line")
     return ap
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
+    rf = {"true": True, "false": False, "unknown": None}[args.realistic_fills]
     try:
         verdict = run_gate(
             journal_path=args.journal,
@@ -754,15 +1076,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             out_path=args.out,
             strategy_override=args.strategy,
             promoted_override=args.promoted,
+            allow_unverified_registration=args.allow_unverified_registration,
+            realistic_fills=rf,
         )
     except GateError as exc:
         print(f"gate: {exc}", file=sys.stderr)
         return EXIT_USAGE
+    except GateRefusal as exc:
+        print(f"gate: REFUSED: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
     if args.quiet:
         u = verdict["units"]
         print(
             f"{verdict['verdict']} n_units={u['n']} k={u['k_wins']} "
-            f"q_bar={u['null_win_rate_q_bar']} p={u['p_upper_tail']} "
+            f"p={u['p_upper_tail']} (pooled q_bar={u['null_win_rate_q_bar']} "
+            f"p_secondary={u['p_pooled_qbar_secondary']}) "
             f"net_pnl={verdict['pnl']['net']:+.2f}"
         )
     else:

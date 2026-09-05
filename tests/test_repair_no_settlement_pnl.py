@@ -138,15 +138,59 @@ def test_unmatched_pnl_is_skipped_not_guessed(tmp_path):
     assert state["closed_trades"][0]["pnl"] == 12.34
 
 
-def test_journal_rows_listed(tmp_path):
-    path, doc = _state(tmp_path)
-    journal = tmp_path / "trade_journal.jsonl"
+def _journal(tmp_path):
     rows = [
-        {"symbol": "KXHIGHNY-26JUL20-B79.5", "contract_side": "NO", "entry_price": 0.33, "pnl": -16.5, "exit_price": 0.0},
-        {"symbol": "KXHIGHCHI-26JUL20-B84.5", "contract_side": "YES", "entry_price": 0.40, "pnl": 6.0, "exit_price": 1.0},
+        # stale NO win (journal carries close_reason, not reason)
+        {"symbol": "KXHIGHNY-26JUL20-B79.5", "strategy_name": "Meteorologist V2", "contract_side": "NO", "side": "buy",
+         "entry_price": 0.33, "quantity": 50.0, "pnl": -16.5, "exit_price": 0.0, "close_reason": "EXPIRATION",
+         "settlement_outcome": "no", "entry_time": "2026-07-19T15:00:00"},
+        # YES row: untouched
+        {"symbol": "KXHIGHCHI-26JUL20-B84.5", "strategy_name": "Meteorologist V2", "contract_side": "YES", "side": "buy",
+         "entry_price": 0.40, "quantity": 10.0, "pnl": 6.0, "exit_price": 1.0, "close_reason": "EXPIRATION",
+         "settlement_outcome": "yes"},
+        # stale NO loss booked as a fake profit
+        {"symbol": "KXHIGHNY-26JUL21-B86.5", "strategy_name": "Meteorologist V2", "contract_side": "NO", "side": "buy",
+         "entry_price": 0.60, "quantity": 10.0, "pnl": 4.0, "exit_price": 1.0, "close_reason": "EARLY_SETTLEMENT",
+         "settlement_outcome": "yes"},
+        # NO without an outcome: ambiguous, left alone
+        {"symbol": "KXHIGHMIA-26JUL21-B90.5", "strategy_name": "Meteorologist V2", "contract_side": "NO", "side": "buy",
+         "entry_price": 0.30, "quantity": 10.0, "pnl": -3.0, "exit_price": 0.0, "close_reason": "EXPIRATION"},
     ]
-    journal.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    state = json.loads(path.read_text(encoding="utf-8"))
-    result = rep.repair(state)
-    affected = rep.journal_rows_affected(str(journal), result["corrections"])
-    assert [a["symbol"] for a in affected] == ["KXHIGHNY-26JUL20-B79.5"]
+    journal = tmp_path / "trade_journal.jsonl"
+    # a blank line and a non-JSON line must be copied through byte-for-byte
+    body = json.dumps(rows[0]) + "\n" + json.dumps(rows[1]) + "\n\n" + json.dumps(rows[2]) + "\n# comment\n" + json.dumps(rows[3]) + "\n"
+    journal.write_bytes(body.encode("utf-8"))
+    return journal, body
+
+
+def test_journal_repair_dry_run_then_apply_then_idempotent(tmp_path, capsys):
+    path, doc = _state(tmp_path)
+    journal, before = _journal(tmp_path)
+    # dry run: both files listed, nothing written, exit 1 (repairs pending)
+    assert rep.main(["--state", str(path), "--journal", str(journal), "--json"]) == 1
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["journal"]["n_corrected"] == 2 and summary["journal"]["applied"] is False
+    assert [c["line"] for c in summary["journal"]["corrections"]] == [1, 4]
+    assert summary["journal"]["n_unmatched_skipped"] == 1  # the outcome-less NO
+    assert journal.read_bytes().decode("utf-8") == before
+
+    assert rep.main(["--state", str(path), "--journal", str(journal), "--apply", "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["applied"] is True and summary["journal"]["applied"] is True
+    backup = summary["journal"]["backup"]
+    assert os.path.exists(backup) and open(backup, encoding="utf-8", newline="").read() == before
+    lines = journal.read_bytes().decode("utf-8").split("\n")
+    r0, r2, r4 = json.loads(lines[0]), json.loads(lines[3]), json.loads(lines[5])
+    assert r0["exit_price"] == 1.0 and r0["pnl"] == pytest.approx(33.5) and r0["repaired_no_side_settlement"] is True
+    assert r2["exit_price"] == 0.0 and r2["pnl"] == pytest.approx(-6.0) and r2["repaired_no_side_settlement"] is True
+    assert "repaired_no_side_settlement" not in r4 and r4["pnl"] == -3.0
+    assert lines[1] == json.dumps({"symbol": "KXHIGHCHI-26JUL20-B84.5", "strategy_name": "Meteorologist V2",
+                                   "contract_side": "YES", "side": "buy", "entry_price": 0.40, "quantity": 10.0,
+                                   "pnl": 6.0, "exit_price": 1.0, "close_reason": "EXPIRATION", "settlement_outcome": "yes"})
+    assert lines[2] == "" and lines[4] == "# comment"
+
+    # idempotent: a second pass changes nothing and exits 0
+    after = journal.read_bytes().decode("utf-8")
+    assert rep.main(["--state", str(path), "--journal", str(journal), "--apply"]) == 0
+    assert journal.read_bytes().decode("utf-8") == after
+    assert not os.path.exists(str(journal) + ".bak-2")

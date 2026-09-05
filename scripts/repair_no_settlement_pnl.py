@@ -27,13 +27,18 @@ This script repairs a persisted ``SimulatedExchange`` state file
 
 Dry run by default (prints per-trade corrections and the total delta, exits 0
 when nothing needs repair, 1 when repairs are pending); ``--apply`` rewrites the
-file atomically after saving ``<state>.bak-<n>``.  Journal lines
-(``data/trade_journal.jsonl``) are NOT rewritten here -- the gate and the
-reconcile read ``closed_trades`` for booked PnL; pass ``--journal`` to get the
-list of journal rows that carry the stale numbers for the owner's review.
+file atomically after saving ``<state>.bak-<n>``.
 
-    python scripts/repair_no_settlement_pnl.py --state data/exchange_state.json
-    python scripts/repair_no_settlement_pnl.py --state data/exchange_state.json --apply
+``--journal data/trade_journal.jsonl`` repairs the append-only journal the same
+way (``closed_trades`` is cleared on a cycle reset, after which the gate reads
+the journal's numbers): every stale line is rewritten with the corrected
+``exit_price``/``pnl`` and the marker ``repaired_no_side_settlement: true``;
+untouched lines are copied byte-for-byte; ``<journal>.bak-<n>`` is written
+first. Without ``--apply`` the affected lines are only listed. ``scripts/gate.py``
+REFUSES a record that still carries an unrepaired stale row.
+
+    python scripts/repair_no_settlement_pnl.py --state data/exchange_state.json --journal data/trade_journal.jsonl
+    python scripts/repair_no_settlement_pnl.py --state data/exchange_state.json --journal data/trade_journal.jsonl --apply
 """
 from __future__ import annotations
 
@@ -61,10 +66,14 @@ def pnl_for(entry: float, exit_price: float, qty: float, side: str, exit_fee: fl
 
 
 def classify(trade: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
-    """``("skip"|"stale"|"ok", correction)`` for one closed trade."""
+    """``("skip"|"stale"|"ok", correction)`` for one closed trade or journal row.
+
+    Journal rows carry ``close_reason`` where the state carries ``reason``.
+    """
     if str(trade.get("contract_side", "YES")).upper() != "NO":
         return "skip", None
-    if str(trade.get("reason", "")) not in BINARY_SETTLEMENT_REASONS:
+    reason = str(trade.get("reason") or trade.get("close_reason") or "")
+    if reason not in BINARY_SETTLEMENT_REASONS:
         return "skip", None
     exit_price = _f(trade.get("exit_price"), float("nan"))
     if exit_price not in (0.0, 1.0):
@@ -94,7 +103,7 @@ def classify(trade: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
     return "stale", {
         "id": trade.get("id"),
         "symbol": trade.get("symbol"),
-        "reason": trade.get("reason"),
+        "reason": reason,
         "settlement_outcome": trade.get("settlement_outcome"),
         "entry_price": entry,
         "quantity": qty,
@@ -131,27 +140,69 @@ def repair(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"corrections": corrections, "skipped_unmatched": unmatched, "delta": delta, "state": state}
 
 
-def journal_rows_affected(journal_path: str, corrections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Journal lines whose (symbol, entry_price, contract_side NO) match a corrected trade."""
-    keys = {(str(c["symbol"]), round(c["entry_price"], 6)) for c in corrections}
-    out: List[Dict[str, Any]] = []
+def repair_journal(journal_path: str, apply: bool) -> Dict[str, Any]:
+    """Classify every journal line with ``classify``; rewrite the stale ones on ``apply``.
+
+    Untouched lines are copied byte-for-byte (the journal is append-only and
+    other readers hash it); stale lines are re-serialised with the corrected
+    ``exit_price``/``pnl`` and the ``repaired_no_side_settlement`` marker.
+    """
+    corrections: List[Dict[str, Any]] = []
+    unmatched: List[Dict[str, Any]] = []
+    out_lines: List[str] = []
     if not os.path.exists(journal_path):
-        return out
-    with open(journal_path, "r", encoding="utf-8") as fh:
-        for n, line in enumerate(fh, 1):
-            line = line.strip()
-            if not line:
-                continue
+        return {"corrections": [], "skipped_unmatched": [], "applied": False, "backup": None,
+                "note": f"journal not found: {journal_path}"}
+    with open(journal_path, "r", encoding="utf-8", newline="") as fh:
+        raw_lines = fh.readlines()
+    for n, raw in enumerate(raw_lines, 1):
+        stripped = raw.strip()
+        if not stripped:
+            out_lines.append(raw)
+            continue
+        try:
+            row = json.loads(stripped)
+        except ValueError:
+            out_lines.append(raw)
+            continue
+        if not isinstance(row, dict):
+            out_lines.append(raw)
+            continue
+        kind, info = classify(row)
+        if kind == "stale" and info is not None:
+            row["exit_price"] = info["exit_price_new"]
+            row["pnl"] = info["pnl_new"]
+            row["repaired_no_side_settlement"] = True
+            info = {**info, "line": n}
+            corrections.append(info)
+            eol = "\r\n" if raw.endswith("\r\n") else "\n"
+            out_lines.append(json.dumps(row) + eol)
+        else:
+            if kind == "skip" and info is not None:
+                unmatched.append({"line": n, "symbol": row.get("symbol"), **info})
+            out_lines.append(raw)
+    result: Dict[str, Any] = {"corrections": corrections, "skipped_unmatched": unmatched,
+                              "applied": False, "backup": None}
+    if corrections and apply:
+        n = 1
+        while os.path.exists(f"{journal_path}.bak-{n}"):
+            n += 1
+        backup = f"{journal_path}.bak-{n}"
+        with open(backup, "w", encoding="utf-8", newline="") as fh:
+            fh.writelines(raw_lines)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(journal_path)) or ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+                fh.writelines(out_lines)
+            os.replace(tmp, journal_path)
+        except Exception:
             try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            if str(row.get("contract_side", "YES")).upper() != "NO":
-                continue
-            k = (str(row.get("symbol")), round(_f(row.get("entry_price")), 6))
-            if k in keys:
-                out.append({"line": n, "symbol": row.get("symbol"), "pnl": row.get("pnl"), "exit_price": row.get("exit_price")})
-    return out
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        result.update({"applied": True, "backup": backup})
+    return result
 
 
 def write_state_atomic(path: str, state: Dict[str, Any]) -> str:
@@ -180,8 +231,8 @@ def write_state_atomic(path: str, state: Dict[str, Any]) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--state", required=True, help="SimulatedExchange state JSON (data/exchange_state.json)")
-    ap.add_argument("--journal", default=None, help="optional data/trade_journal.jsonl to list affected rows")
-    ap.add_argument("--apply", action="store_true", help="rewrite the state file (default: dry run)")
+    ap.add_argument("--journal", default=None, help="data/trade_journal.jsonl: repair its stale rows too (listed on a dry run)")
+    ap.add_argument("--apply", action="store_true", help="rewrite the state (and journal) file(s); default: dry run")
     ap.add_argument("--json", action="store_true", help="machine-readable summary on stdout")
     args = ap.parse_args(argv)
 
@@ -203,11 +254,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         "skipped_unmatched": result["skipped_unmatched"],
         "applied": False,
     }
+    journal_result = None
     if args.journal:
-        summary["journal_rows_affected"] = journal_rows_affected(args.journal, corrections)
+        journal_result = repair_journal(args.journal, apply=bool(args.apply))
+        summary["journal"] = {
+            "path": args.journal,
+            "n_corrected": len(journal_result["corrections"]),
+            "n_unmatched_skipped": len(journal_result["skipped_unmatched"]),
+            "corrections": journal_result["corrections"],
+            "skipped_unmatched": journal_result["skipped_unmatched"],
+            "applied": journal_result["applied"],
+            "backup": journal_result["backup"],
+        }
     if corrections and args.apply:
         summary["backup"] = write_state_atomic(args.state, state)
         summary["applied"] = True
+    pending = bool(corrections) or bool(journal_result and journal_result["corrections"])
+    applied_all = (not corrections or summary["applied"]) and (
+        journal_result is None or not journal_result["corrections"] or journal_result["applied"]
+    )
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True, default=str))
     else:
@@ -224,9 +289,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"realized_pnl {realized_before:+.2f} -> {_f(state.get('realized_pnl')):+.2f}; "
             + ("APPLIED (backup %s)" % summary.get("backup") if summary["applied"] else "dry run (pass --apply to rewrite)")
         )
-        if args.journal:
-            print(f"journal rows carrying stale NO-side numbers: {len(summary.get('journal_rows_affected', []))}")
-    return 0 if not corrections or summary["applied"] else 1
+        if journal_result is not None:
+            for c in journal_result["corrections"]:
+                print(
+                    f"journal line {c['line']} {c['symbol']} {c['reason']} settled={c['settlement_outcome']}: "
+                    f"exit {c['exit_price_old']:.2f}->{c['exit_price_new']:.2f} pnl {c['pnl_old']:+.2f}->{c['pnl_new']:+.2f}"
+                )
+            print(
+                f"journal: {len(journal_result['corrections'])} stale NO-side row(s); "
+                + ("APPLIED (backup %s)" % journal_result["backup"] if journal_result["applied"] else "dry run")
+            )
+    return 0 if (not pending or applied_all) else 1
 
 
 if __name__ == "__main__":

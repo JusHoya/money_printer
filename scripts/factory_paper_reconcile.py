@@ -347,6 +347,26 @@ def lab_trade_set(
 # ---------------------------------------------------------------------------
 # Reconcile
 # ---------------------------------------------------------------------------
+def _hour_key(iso: Optional[str]) -> Optional[str]:
+    """``YYYY-MM-DDTHH`` (UTC) of an ISO timestamp; naive = UTC (the sandbox clock)."""
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H")
+
+
+def _hour_key_epoch(ts: Any) -> Optional[str]:
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
 def _in_range(td: Optional[str], d0: date, d1: date) -> bool:
     if not td:
         return False
@@ -422,23 +442,46 @@ def reconcile(
         else {"coverage": "none", "reason": "no --frames given", "trades": []}
     )
 
-    sandbox_markets = {f["symbol"] for f in fills} | {p["symbol"] for p in pending}
-    lab_markets = {t["market_ticker"] for t in lab["trades"]}
+    # Trade-set matching is keyed on (ticker, decision hour UTC, direction) --
+    # a REJECT at another hour, or a fill on the other side of the same
+    # bracket, never "explains" or "matches" a lab trade (red team B, F3).
+    def _side_dir(contract_side: Any) -> Optional[str]:
+        cs = str(contract_side or "").upper()
+        return {"YES": "buy_yes", "NO": "buy_no"}.get(cs)
+
+    sandbox_keys = {
+        (f["symbol"], _hour_key(f["entry_time"]), _side_dir(f.get("contract_side")))
+        for f in fills
+    }
+    sandbox_hours = {(k[0], k[1]) for k in sandbox_keys}
+    for p in pending:
+        hk = _hour_key(p.get("entry_time"))
+        sandbox_hours.add((p["symbol"], hk))
+        d = _side_dir(p.get("contract_side"))
+        if d is not None:
+            sandbox_keys.add((p["symbol"], hk, d))
+    lab_keys = {(t["market_ticker"], _hour_key_epoch(t.get("ts_utc")), t["direction"]) for t in lab["trades"]}
+    lab_hours = {(k[0], k[1]) for k in lab_keys}
 
     strat_rejects = [
         r for r in rejects if r["strategy"] == strategy and _in_range(
             _GATE._target_date({"symbol": r["symbol"]}), date_from, date_to
         )
     ]
-    rejects_by_symbol: Dict[str, List[str]] = defaultdict(list)
+    rejects_by_symbol_hour: Dict[Tuple[str, Optional[str]], List[str]] = defaultdict(list)
     for r in strat_rejects:
-        rejects_by_symbol[r["symbol"]].append(r["reason"])
+        rejects_by_symbol_hour[(r["symbol"], _hour_key(r.get("ts")))].append(r["reason"])
 
     lab_only = []
+    direction_mismatch = []
     for t in lab["trades"]:
-        if t["market_ticker"] in sandbox_markets:
+        key = (t["market_ticker"], _hour_key_epoch(t.get("ts_utc")), t["direction"])
+        if key in sandbox_keys:
             continue
-        codes = rejects_by_symbol.get(t["market_ticker"], [])
+        if (key[0], key[1]) in sandbox_hours:
+            direction_mismatch.append({**t, "flag": "DIRECTION_MISMATCH (sandbox traded the other side at this hour)"})
+            continue
+        codes = rejects_by_symbol_hour.get((key[0], key[1]), [])
         lab_only.append(
             {
                 **t,
@@ -449,16 +492,24 @@ def reconcile(
     sandbox_only = []
     if lab["coverage"] != "none":
         for f in fills:
-            if f["symbol"] not in lab_markets:
-                sandbox_only.append(
-                    {
-                        "symbol": f["symbol"],
-                        "target_date": f["target_date"],
-                        "entry_time": f["entry_time"],
-                        "price_booked": f["entry_price"],
-                        "flag": "NOT_IN_LAB_TRADE_SET (live-path/offline discrepancy)",
-                    }
-                )
+            key = (f["symbol"], _hour_key(f["entry_time"]), _side_dir(f.get("contract_side")))
+            if key in lab_keys:
+                continue
+            flag = (
+                "DIRECTION_MISMATCH (lab traded the other side at this hour)"
+                if (key[0], key[1]) in lab_hours
+                else "NOT_IN_LAB_TRADE_SET (live-path/offline discrepancy)"
+            )
+            sandbox_only.append(
+                {
+                    "symbol": f["symbol"],
+                    "target_date": f["target_date"],
+                    "entry_time": f["entry_time"],
+                    "contract_side": f.get("contract_side"),
+                    "price_booked": f["entry_price"],
+                    "flag": flag,
+                }
+            )
 
     settled_lab = [r for r in repriced if r["realized_lab_per_contract"] is not None]
     summary = {
@@ -479,6 +530,8 @@ def reconcile(
         "n_lab_only": len(lab_only),
         "n_lab_only_explained_by_reject": sum(1 for x in lab_only if x["explained"]),
         "n_sandbox_only": len(sandbox_only),
+        "n_direction_mismatch": len(direction_mismatch),
+        "match_key": "(market_ticker, decision hour UTC, direction)",
         "sandbox_subset_of_lab": (
             None if lab["coverage"] == "none" else len(sandbox_only) == 0
         ),
@@ -516,6 +569,7 @@ def reconcile(
         "lab_trade_set": {k: v for k, v in lab.items() if k != "trades"},
         "lab_only": lab_only,
         "sandbox_only": sandbox_only,
+        "direction_mismatch": direction_mismatch,
     }
 
 
@@ -555,7 +609,8 @@ def render_markdown(rep: Mapping[str, Any]) -> str:
             f"coverage {lab['coverage']} (frame {lab['frame_dates'][0]}..{lab['frame_dates'][1]}); "
             f"lab trades {s['n_lab_trades']}; lab-only {s['n_lab_only']} "
             f"({s['n_lab_only_explained_by_reject']} explained by a REJECT line); "
-            f"sandbox-only {s['n_sandbox_only']}; sandbox subset of lab: {s['sandbox_subset_of_lab']}"
+            f"sandbox-only {s['n_sandbox_only']}; direction mismatches {s.get('n_direction_mismatch', 0)}; "
+            f"sandbox subset of lab: {s['sandbox_subset_of_lab']} (match key {s.get('match_key')})"
         )
         if rep["lab_only"]:
             lines += ["", "| lab market | target_date | direction | price_paid | REJECT codes |", "|---|---|---|---|---|"]

@@ -157,37 +157,70 @@ def test_frame_absent_says_so_and_falls_back_to_repricing(record):
     assert "Frame does not cover" in md and "KELLY_ZERO: 1" in md
 
 
+def _ts(iso: str) -> int:
+    from datetime import datetime, timezone
+
+    return int(datetime.fromisoformat(iso).replace(tzinfo=timezone.utc).timestamp())
+
+
 def test_lab_only_markets_get_reject_codes(record, monkeypatch):
-    """A fake lab set: two markets the sandbox skipped, one it took, one it took that the lab did not."""
+    """A fake lab set keyed on (ticker, decision hour UTC, direction).
+
+    NY 09-09 15Z buy_yes  -> matches fill A (YES at 15:00:03)
+    CHI 09-09 15Z buy_yes -> lab-only, explained by the KELLY_ZERO reject at 15:00:03
+    LAX 09-10 16Z buy_no  -> lab-only, explained by WEATHER_SLOT_FULL at 16:00:02
+    MIA 09-11 16Z buy_no  -> lab-only, unexplained
+    MIA 09-10 16Z buy_yes -> DIRECTION_MISMATCH: fill B is a NO at that hour
+    NY  09-09 18Z buy_yes -> lab-only (a REJECT three hours earlier does not explain it)
+    """
     fake = {
         "coverage": "full", "reason": None, "frame_dates": ["2026-09-08", "2026-09-14"],
         "trades": [
-            {"market_ticker": "KXHIGHNY-26SEP09-B84.5", "target_date": "2026-09-09", "ts_utc": 0,
+            {"market_ticker": "KXHIGHNY-26SEP09-B84.5", "target_date": "2026-09-09", "ts_utc": _ts("2026-09-09T15:00:00"),
              "direction": "buy_yes", "quote": 0.40, "price_paid": 0.41, "fee_per_contract": 0.017,
              "realized_per_contract": 0.573},
-            {"market_ticker": "KXHIGHCHI-26SEP09-B84.5", "target_date": "2026-09-09", "ts_utc": 0,
+            {"market_ticker": "KXHIGHCHI-26SEP09-B84.5", "target_date": "2026-09-09", "ts_utc": _ts("2026-09-09T15:00:00"),
              "direction": "buy_yes", "quote": 0.40, "price_paid": 0.41, "fee_per_contract": 0.017,
              "realized_per_contract": -0.427},
-            {"market_ticker": "KXHIGHLAX-26SEP10-B92.5", "target_date": "2026-09-10", "ts_utc": 0,
+            {"market_ticker": "KXHIGHLAX-26SEP10-B92.5", "target_date": "2026-09-10", "ts_utc": _ts("2026-09-10T16:00:00"),
              "direction": "buy_no", "quote": 0.30, "price_paid": 0.31, "fee_per_contract": 0.015,
              "realized_per_contract": 0.675},
-            {"market_ticker": "KXHIGHMIA-26SEP11-B90.5", "target_date": "2026-09-11", "ts_utc": 0,
+            {"market_ticker": "KXHIGHMIA-26SEP11-B90.5", "target_date": "2026-09-11", "ts_utc": _ts("2026-09-11T16:00:00"),
              "direction": "buy_no", "quote": 0.30, "price_paid": 0.31, "fee_per_contract": 0.015,
              "realized_per_contract": 0.675},
+            {"market_ticker": "KXHIGHMIA-26SEP10-B90.5", "target_date": "2026-09-10", "ts_utc": _ts("2026-09-10T16:00:00"),
+             "direction": "buy_yes", "quote": 0.68, "price_paid": 0.69, "fee_per_contract": 0.015,
+             "realized_per_contract": 0.295},
+            {"market_ticker": "KXHIGHNY-26SEP09-B84.5", "target_date": "2026-09-09", "ts_utc": _ts("2026-09-09T18:00:00"),
+             "direction": "buy_yes", "quote": 0.45, "price_paid": 0.46, "fee_per_contract": 0.017,
+             "realized_per_contract": 0.523},
         ],
     }
     monkeypatch.setattr(pr, "lab_trade_set", lambda *a, **k: fake)
     rep = _run(record, frames_dir="whatever")
-    lab_only = {t["market_ticker"]: t for t in rep["lab_only"]}
-    assert set(lab_only) == {"KXHIGHCHI-26SEP09-B84.5", "KXHIGHLAX-26SEP10-B92.5", "KXHIGHMIA-26SEP11-B90.5"}
-    assert lab_only["KXHIGHCHI-26SEP09-B84.5"]["reject_codes"] == [("KELLY_ZERO", 1)]
-    assert lab_only["KXHIGHLAX-26SEP10-B92.5"]["reject_codes"] == [("WEATHER_SLOT_FULL", 1)]
-    assert lab_only["KXHIGHMIA-26SEP11-B90.5"]["reject_codes"] == [] and not lab_only["KXHIGHMIA-26SEP11-B90.5"]["explained"]
-    assert [x["symbol"] for x in rep["sandbox_only"]] == ["KXHIGHMIA-26SEP10-B90.5", "KXHIGHCHI-26SEP12-B80.5"]
+    lab_only = {(t["market_ticker"], t["ts_utc"]): t for t in rep["lab_only"]}
+    assert set(lab_only) == {
+        ("KXHIGHCHI-26SEP09-B84.5", _ts("2026-09-09T15:00:00")),
+        ("KXHIGHLAX-26SEP10-B92.5", _ts("2026-09-10T16:00:00")),
+        ("KXHIGHMIA-26SEP11-B90.5", _ts("2026-09-11T16:00:00")),
+        ("KXHIGHNY-26SEP09-B84.5", _ts("2026-09-09T18:00:00")),
+    }
+    assert lab_only[("KXHIGHCHI-26SEP09-B84.5", _ts("2026-09-09T15:00:00"))]["reject_codes"] == [("KELLY_ZERO", 1)]
+    assert lab_only[("KXHIGHLAX-26SEP10-B92.5", _ts("2026-09-10T16:00:00"))]["reject_codes"] == [("WEATHER_SLOT_FULL", 1)]
+    unexplained = lab_only[("KXHIGHMIA-26SEP11-B90.5", _ts("2026-09-11T16:00:00"))]
+    assert unexplained["reject_codes"] == [] and not unexplained["explained"]
+    assert not lab_only[("KXHIGHNY-26SEP09-B84.5", _ts("2026-09-09T18:00:00"))]["explained"]
+    assert [t["market_ticker"] for t in rep["direction_mismatch"]] == ["KXHIGHMIA-26SEP10-B90.5"]
+    sandbox_only = {x["symbol"]: x for x in rep["sandbox_only"]}
+    assert set(sandbox_only) == {"KXHIGHMIA-26SEP10-B90.5", "KXHIGHCHI-26SEP12-B80.5"}
+    assert sandbox_only["KXHIGHMIA-26SEP10-B90.5"]["flag"].startswith("DIRECTION_MISMATCH")
+    assert sandbox_only["KXHIGHCHI-26SEP12-B80.5"]["flag"].startswith("NOT_IN_LAB_TRADE_SET")
     assert rep["summary"]["sandbox_subset_of_lab"] is False
     assert rep["summary"]["n_lab_only_explained_by_reject"] == 2
+    assert rep["summary"]["n_direction_mismatch"] == 1
+    assert rep["summary"]["match_key"] == "(market_ticker, decision hour UTC, direction)"
     md = pr.render_markdown(rep)
-    assert "sandbox \\ lab (must be empty)" in md and "KELLY_ZEROx1" in md
+    assert "sandbox \\ lab (must be empty)" in md and "KELLY_ZEROx1" in md and "direction mismatches 1" in md
 
 
 def test_cli_writes_json_and_md(record):
