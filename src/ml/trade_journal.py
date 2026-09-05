@@ -33,6 +33,56 @@ def _opt_float(value: Any) -> Optional[float]:
         return None
 
 
+def target_date_for_position(position: dict) -> Optional[str]:
+    """ISO ``target_date`` for a weather position, or ``None``.
+
+    The settlement day is a LOCAL calendar day at the settlement station
+    (``weather_settlement.settlement_date_for``), and the exchange stamps its
+    end -- local midnight of the following day -- onto the position as a
+    tz-aware ``expiration_time`` (``settlement_close_for``). So:
+
+    1. when the position carries a tz-aware ``expiration_time`` (datetime or
+       ISO string), convert it to the station's timezone and take the local
+       day that instant *ends* (one second earlier), which is the target date
+       regardless of the DST offset in force;
+    2. otherwise fall back to the ticker's event-date label via
+       ``settlement_date_for`` -- the same source the stamp was built from;
+    3. non-weather symbols (no settlement timezone registered) return ``None``.
+
+    Anything that cannot be interpreted returns ``None`` rather than a guess:
+    the gate refuses ungrouped rows, it never invents a date for them.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    from src.core.weather_settlement import (
+        settlement_date_for,
+        settlement_timezone_for,
+    )
+
+    symbol = str(position.get("symbol") or "")
+    tz_name = settlement_timezone_for(symbol)
+    if tz_name is None:
+        return None
+
+    exp = position.get("expiration_time")
+    if isinstance(exp, str):
+        try:
+            exp = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+        except ValueError:
+            exp = None
+    if isinstance(exp, datetime) and exp.tzinfo is not None:
+        try:
+            local_close = exp.astimezone(ZoneInfo(tz_name))
+        except Exception:  # tzdata missing -> fall through to the label
+            local_close = None
+        if local_close is not None:
+            return (local_close - timedelta(seconds=1)).date().isoformat()
+
+    day = settlement_date_for(symbol)
+    return day.isoformat() if day is not None else None
+
+
 @dataclass
 class TradeOutcome:
     symbol: str
@@ -92,6 +142,22 @@ class TradeOutcome:
     strike_type: Optional[str] = None
     floor_strike: Optional[float] = None
     cap_strike: Optional[float] = None
+    # ------------------------------------------------------------------
+    # Grouping unit for the FR-5.2 gate (PRD_STRATEGY_FACTORY FR-F3.4)
+    # ------------------------------------------------------------------
+    # ISO date (``YYYY-MM-DD``) of the settlement day the contract was a bet
+    # on, in the settlement station's LOCAL calendar. ``scripts/gate.py``
+    # groups settled trades by this field: every fill on the same city-day
+    # ladder settles against the same CLI daily high, so trades sharing a
+    # target_date are not independent trials. Derived at journal time from
+    # the position's tz-aware ``expiration_time`` (the settlement-day close
+    # stamped by ``weather_settlement.settlement_close_for``: local midnight
+    # AFTER the target date, so target_date = the local day that instant
+    # ends), falling back to ``weather_settlement.settlement_date_for`` when a
+    # position carries no usable expiration. ``None`` for non-weather rows and
+    # for every row written before this field existed; readers must fall back
+    # to ``settlement_date_for(symbol)`` for those rather than dropping them.
+    target_date: Optional[str] = None
 
     @classmethod
     def from_position(cls, position: dict) -> "TradeOutcome":
@@ -183,6 +249,7 @@ class TradeOutcome:
             strike_type=spec_or_pos.get("strike_type"),
             floor_strike=_opt_float(spec_or_pos.get("floor_strike")),
             cap_strike=_opt_float(spec_or_pos.get("cap_strike")),
+            target_date=target_date_for_position(position),
         )
 
     # ------------------------------------------------------------------
