@@ -59,14 +59,38 @@ LOG_LINES = [
 ]
 
 
+def _settlement_provenance(symbol, outcome):
+    """The FR-1.2 settlement fields ``SimulatedExchange`` stamps on every settled position.
+
+    ``scripts/gate.py`` reconciles each fill's booked money against these rather than
+    trusting ``pnl``, so a fixture without them is excluded before it is ever scored.
+    Verified against the live maia journal (2026-09-05): every one of its six closed
+    trades carries ``settlement_spec``, the three flat strike fields and
+    ``settlement_high``, written by matching_engine.py and persisted by trade_journal.py.
+    """
+    bracket = symbol.rsplit("-", 1)[1]
+    if bracket.startswith("B"):            # "B84.5" -> between 84 and 85
+        floor_strike = float(int(float(bracket[1:])))
+        cap_strike = floor_strike + 1.0
+        spec = {"strike_type": "between", "floor_strike": floor_strike, "cap_strike": cap_strike}
+        high = floor_strike if outcome == "yes" else floor_strike + 5.0
+    else:                                  # "T83" -> less than 83, i.e. "82 or below"
+        cap_strike = float(int(float(bracket[1:])))
+        spec = {"strike_type": "less", "floor_strike": None, "cap_strike": cap_strike}
+        high = cap_strike - 1.0 if outcome == "yes" else cap_strike
+    return {**spec, "settlement_spec": spec, "settlement_high": high}
+
+
 def _fill(symbol, side, price, qty, won, entry_time, strategy=STRATEGY):
     exit_price = 1.0 if won else 0.0
     pnl = (exit_price - price) * qty
+    outcome = "yes" if (won == (side == "YES")) else "no"
     j = {
         "symbol": symbol, "strategy_name": strategy, "entry_time": entry_time,
         "exit_time": entry_time[:10] + "T23:59:59", "entry_price": price, "exit_price": exit_price,
         "quantity": float(qty), "side": "buy", "contract_side": side, "pnl": pnl,
-        "close_reason": "EXPIRATION", "settlement_outcome": "yes" if (won == (side == "YES")) else "no",
+        "close_reason": "EXPIRATION", "settlement_outcome": outcome,
+        **_settlement_provenance(symbol, outcome),
     }
     from src.core.fee_calculator import taker_fee
 

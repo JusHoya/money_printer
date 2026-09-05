@@ -845,8 +845,16 @@ def reconcile(
     regime = regime or fees_mod.load_regime()
     inputs = dict(inputs or {"mode": "in-process", "obtained": [], "not_obtained": [], "complete": True})
 
+    # ``reconcile_settlement=False`` on purpose: the gate drops a fill whose booked
+    # money it cannot reproduce from the row's own settlement fields, because it is
+    # deciding a promotion. This tool is doing the opposite job -- it exists to SURFACE
+    # those rows, and it runs its own, deeper cross-check below (the strike spec beats
+    # a recorded ``settlement_outcome``). Collecting strictly here would delegate the
+    # verdict to the gate and report zero fills where the answer is "here is what is
+    # wrong with them". Stale NO-side rows still refuse the run; they are counted, not
+    # hidden.
     fills, counts = _GATE.collect_settled_trades(
-        journal_rows, closed_trades, strategy_name=strategy
+        journal_rows, closed_trades, strategy_name=strategy, reconcile_settlement=False
     )
     fills = [f for f in fills if _in_range(f["target_date"], date_from, date_to)]
     counts["settled_fills_all_dates"] = counts.pop("settled_fills")

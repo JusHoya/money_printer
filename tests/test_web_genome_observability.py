@@ -508,7 +508,12 @@ def test_bounding_matches_the_real_state_dict_shape():
     strategy = object.__new__(gs.GenomeStrategy)
     strategy.spec = FakeSpec()
     strategy._last_hour = {"NY": 1757088000, "MIA": 1757084400}
-    strategy._missed_days = {("NY", f"2026-09-0{d}") for d in (2, 3, 4, 5)}
+    # ``_missed_days`` is a MAPPING of (city, target_date) -> (lost_hour, cause), not a
+    # set: the STRATEGY workstream added the cause so a closed city-day says WHY it
+    # closed. This test is the tripwire that caught that change, which is its job.
+    strategy._missed_days = {
+        ("NY", f"2026-09-0{d}"): (1757088000, "poll_failure") for d in (2, 3, 4, 5)
+    }
     strategy._traded = {(f"2026-09-0{d}", f"KXHIGHNY-26SEP0{d}-B85") for d in (2, 3, 4, 5)}
 
     doc = gs.GenomeStrategy.state_dict(strategy)
