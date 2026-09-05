@@ -34,47 +34,56 @@
     },
     "60s": {
       "both_sides": {
-        "max": null,
-        "mean": null,
-        "n": 0,
-        "p50": null,
-        "p90": null,
-        "p95": null,
-        "share_gt_0": null,
-        "share_gt_1c": null
+        "max": 0.010000000000000009,
+        "mean": 0.00013888888888888902,
+        "n": 72,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "share_gt_0": 0.013888888888888888,
+        "share_gt_1c": 0.0
       },
       "no_ask": {
-        "max": null,
-        "mean": null,
-        "n": 0,
-        "p50": null,
-        "p90": null,
-        "p95": null,
-        "share_gt_0": null,
-        "share_gt_1c": null
+        "max": 0.010000000000000009,
+        "mean": 0.00027777777777777805,
+        "n": 36,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "share_gt_0": 0.027777777777777776,
+        "share_gt_1c": 0.0
       },
       "yes_ask": {
-        "max": null,
-        "mean": null,
-        "n": 0,
-        "p50": null,
-        "p90": null,
-        "p95": null,
-        "share_gt_0": null,
-        "share_gt_1c": null
+        "max": 0.0,
+        "mean": 0.0,
+        "n": 36,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "share_gt_0": 0.0,
+        "share_gt_1c": 0.0
       }
     }
   },
-  "counts": {},
+  "counts": {
+    "decision_polls": 48,
+    "gap_no_followup_20s_no": 48,
+    "gap_no_followup_20s_yes": 48,
+    "gap_no_followup_60s_no": 12,
+    "gap_no_followup_60s_yes": 12,
+    "gap_no_next_poll_60s_no": 12,
+    "gap_no_next_poll_60s_yes": 12,
+    "market_hours": 48
+  },
   "decision_lag_s": {
-    "max": null,
-    "mean": null,
-    "n": 0,
-    "p50": null,
-    "p90": null,
-    "p95": null,
-    "share_gt_0": null,
-    "share_gt_1c": null
+    "max": 49.026278,
+    "mean": 23.18466325,
+    "n": 48,
+    "p50": 5.244867,
+    "p90": 49.025829,
+    "p95": 49.026053,
+    "share_gt_0": 1.0,
+    "share_gt_1c": 1.0
   },
   "definitions": {
     "adverse_drift": "max(0, max_t(ask_t - ask_0)) over follow-up polls with ts_dec < ts <= ts_dec + W",
@@ -90,92 +99,119 @@
     "csv": [
       "reports/factory/fill_realism_2026-09-05_tape.csv"
     ],
-    "note": "Tape collected 2026-09-05 01:21:10Z..01:43:13Z by polling http://maia.local:8050/api/logs/data every 3 s (the route returns only the LAST 100 rows, ~15 s of tape, with no history parameters -- src/web/server.py get_data_log -- so no earlier polls were fetchable). The collected span contains NO :00 UTC boundary with a poll on both sides, so there are zero decision points and no p90; the study must be re-run on a tape spanning at least one :00 UTC boundary (collector: --url ... --collect-seconds 7200 --cache ...). Per-market poll gap on this tape: p50 37 s, p90 68 s, max 210 s (the bot rotates cities; the 14-s figure is the whole-tape cadence, not the per-market one).",
+    "note": "Tape collected live from http://maia.local:8050/api/logs/data (last-100-rows route, no history parameters -- src/web/server.py get_data_log) by polling every 3 s from 2026-09-05 01:21:10Z; this run covers the 02:00Z decision boundary. Per-market poll gap p50 ~37 s / p90 ~68 s (the bot rotates cities), so the 20 s window is sparse and the next-poll drift is the conservative upper bound the recommendation uses.",
     "url": null
   },
   "max_decision_lag_s": 60.0,
   "next_poll_adverse_drift": {
     "both_sides": {
-      "max": null,
-      "mean": null,
-      "n": 0,
-      "p50": null,
-      "p90": null,
-      "p95": null,
-      "share_gt_0": null,
-      "share_gt_1c": null
+      "max": 0.0,
+      "mean": 0.0,
+      "n": 72,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
     },
-    "gap_s": null,
-    "no_ask": {
-      "max": null,
-      "mean": null,
-      "n": 0,
-      "p50": null,
-      "p90": null,
-      "p95": null,
-      "share_gt_0": null,
-      "share_gt_1c": null
-    },
-    "yes_ask": {
-      "max": null,
-      "mean": null,
-      "n": 0,
-      "p50": null,
-      "p90": null,
-      "p95": null,
-      "share_gt_0": null,
-      "share_gt_1c": null
-    }
-  },
-  "p90_basis": null,
-  "p90_exceeds_1c": null,
-  "p90_next_poll": null,
-  "p90_primary": null,
-  "p90_primary_window": null,
-  "per_city": {},
-  "primary_window_s": 20.0,
-  "recommended_adverse_fill": null,
-  "series_prefix": "KXHIGH",
-  "signed_next_poll": {
-    "no_ask": {
-      "max": null,
-      "mean": null,
-      "n": 0,
-      "p50": null,
-      "p90": null,
-      "p95": null,
-      "share_gt_0": null,
-      "share_gt_1c": null
-    },
-    "yes_ask": {
-      "max": null,
-      "mean": null,
-      "n": 0,
-      "p50": null,
-      "p90": null,
-      "p95": null,
-      "share_gt_0": null,
-      "share_gt_1c": null
-    }
-  },
-  "statement": "no drift samples (no covered :00 boundary with a follow-up poll); no recommendation can be made",
-  "tape": {
-    "first_ts": "2026-09-05T01:21:10.557105+00:00",
-    "hours_utc": [],
-    "last_ts": "2026-09-05T01:43:13.502683+00:00",
-    "market_rows_in_series": 1436,
-    "markets": 48,
-    "poll_gap_s": {
-      "max": 209.972212,
-      "mean": 42.3597533832853,
-      "n": 1388,
-      "p50": 37.323907,
-      "p90": 67.874991,
-      "p95": 98.241991,
+    "gap_s": {
+      "max": 30.453462,
+      "mean": 27.22696708333333,
+      "n": 72,
+      "p50": 29.255956,
+      "p90": 30.453351,
+      "p95": 30.453458,
       "share_gt_0": 1.0,
       "share_gt_1c": 1.0
     },
-    "rows": 7810
+    "no_ask": {
+      "max": 0.0,
+      "mean": 0.0,
+      "n": 36,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
+    },
+    "yes_ask": {
+      "max": 0.0,
+      "mean": 0.0,
+      "n": 36,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
+    }
+  },
+  "p90_basis": "next poll",
+  "p90_exceeds_1c": false,
+  "p90_next_poll": 0.0,
+  "p90_primary": 0.0,
+  "p90_primary_window": null,
+  "per_city": {
+    "KXHIGHCHI": {
+      "decision_polls": 12,
+      "samples_60s": 24
+    },
+    "KXHIGHLAX": {
+      "decision_polls": 12,
+      "samples_60s": 24
+    },
+    "KXHIGHMIA": {
+      "decision_polls": 12
+    },
+    "KXHIGHNY": {
+      "decision_polls": 12,
+      "samples_60s": 24
+    }
+  },
+  "primary_window_s": 20.0,
+  "recommended_adverse_fill": 0.01,
+  "series_prefix": "KXHIGH",
+  "signed_next_poll": {
+    "no_ask": {
+      "max": 0.0,
+      "mean": 0.0,
+      "n": 36,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
+    },
+    "yes_ask": {
+      "max": 0.0,
+      "mean": 0.0,
+      "n": 36,
+      "p50": 0.0,
+      "p90": 0.0,
+      "p95": 0.0,
+      "share_gt_0": 0.0,
+      "share_gt_1c": 0.0
+    }
+  },
+  "statement": "p90 adverse drift = 0.0000 (basis: next poll; 20 s window p90=None n=0, next-poll p90=0.0 n=72) does not exceed 1c: adverse_fill=0.01 stands",
+  "tape": {
+    "first_ts": "2026-09-05T01:21:10.557105+00:00",
+    "hours_utc": [
+      "2026-09-05T02:00:00+00:00"
+    ],
+    "last_ts": "2026-09-05T02:02:26.041362+00:00",
+    "market_rows_in_series": 2690,
+    "markets": 48,
+    "poll_gap_s": {
+      "max": 227.020522,
+      "mean": 43.385372440575324,
+      "n": 2642,
+      "p50": 34.9862,
+      "p90": 74.262644,
+      "p95": 90.86059,
+      "share_gt_0": 1.0,
+      "share_gt_1c": 1.0
+    },
+    "rows": 14088
   },
   "windows_s": [
     20.0,
