@@ -33,7 +33,7 @@ SPEC="$ROOT/configs/factory/promoted/$GENOME_ID.json"
 log() { printf '[deploy_f3_shadow %s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 die() { log "ERROR: $*"; restore; exit 1; }
 STOPPED=0   # set to 1 while the sandbox is stopped for the repair
-restore() { if [[ "$STOPPED" == 1 ]]; then log "restoring the sandbox after a failure"; "${COMPOSE[@]}" up -d || true; fi; }
+restore() { if [[ "$STOPPED" == 1 ]]; then STOPPED=0; log "restoring the sandbox after a failure"; "${COMPOSE[@]}" up -d || true; fi; }
 trap restore ERR
 
 cd "$ROOT"
@@ -63,6 +63,9 @@ sudo grep -E '^GENOME_' "$ENV_FILE"
 SERVICE=sandbox   # the runtime service (container mp-sandbox); NOT config --services|head, which lists autoheal first
 if [[ "$DO_REPAIR" == 1 ]]; then
   log "4/6 NO-side settlement repair (sandbox stopped while the state file is rewritten)"
+  # `compose run` uses the image as built; the repair script lives INSIDE the image
+  # (the Dockerfile copies the checkout), so build from the freshly pulled tree first.
+  "${COMPOSE[@]}" build "$SERVICE"
   "${COMPOSE[@]}" stop
   STOPPED=1
   REPAIR=(python scripts/repair_no_settlement_pnl.py --state /app/data/exchange_state.json --journal /app/data/trade_journal.jsonl)
