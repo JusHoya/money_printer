@@ -685,10 +685,16 @@ def cmd_promote(args: argparse.Namespace) -> int:
     family's registry status is PROPOSED or RATIFIED (family #1 is CLOSED,
     so only shadow specs can exist today); a maker genome (its offline
     executability folds forward-looking fill flags, so it never reaches 0
-    discrepancies honestly).
+    discrepancies honestly); and -- since the F3 review -- a genome whose
+    offline trade set is mostly **unsizable** by the runtime that would
+    execute it (``src.factory.sizing``; see
+    ``reports/factory/sizing_cold_start_2026-09-05.md``).  The sizing guard
+    runs before replay parity, so the refusal is immediate.
     """
+    from src.factory import frame as FRAME
     from src.factory import genome as G
     from src.factory import promoted as P
+    from src.factory import sizing as S
     from src.factory.registry import Registry
     from src.factory.report import write_json
 
@@ -744,6 +750,28 @@ def cmd_promote(args: argparse.Namespace) -> int:
     frames_dir = Path(args.frames) if args.frames else _latest_frames_dir(str(config.get("lane", "weather")))
     if frames_dir is None or not frames_dir.exists():
         _die("no frozen frames found; pass --frames DIR")
+
+    # --- cold-start sizing guard (reports/factory/sizing_cold_start_2026-09-05.md) ---
+    # Runs BEFORE replay parity: a shape the runtime cannot size is not worth a
+    # full replay, and the operator gets the number immediately.
+    min_frac = S.MIN_SIZABLE_TRADE_FRACTION
+    if getattr(args, "min_sizable_fraction", None) is not None:
+        min_frac = float(args.min_sizable_fraction)
+        if min_frac < S.MIN_SIZABLE_TRADE_FRACTION:
+            _die(f"--min-sizable-fraction may only be raised above the "
+                 f"{S.MIN_SIZABLE_TRADE_FRACTION:.2f} default, not lowered to {min_frac:.2f}; "
+                 f"loosening this bar is how {S.FINDING_REPORT} happened")
+    sizing_frame_dir = frames_dir / ("gefs_twin" if str(getattr(genome, "source", "gfs_mex")) == "gefs" else "search")
+    if not sizing_frame_dir.exists():
+        _die(f"cold-start sizing guard needs {sizing_frame_dir}, which does not exist")
+    try:
+        sizing_audit = S.assert_promotable(
+            FRAME.load(str(sizing_frame_dir)), genome, label=f"{name} ({gid})", min_fraction=min_frac
+        )
+    except S.UnsizableGenomeError as exc:
+        _die(str(exc))
+    print(f"promote: cold-start sizing OK -- {sizing_audit.summary()}")
+
     print(f"promote {gid} ({name}, {source_label}): replay parity on {frames_dir.name} ...")
     try:
         doc = rp.run_parity(
@@ -891,6 +919,10 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--run-id", default=None, help="F2 run id for the parity report's pick set (seeds only)")
     pm.add_argument("--config", default=None, help=f"family YAML (default {DEFAULT_FAMILY_CONFIG.name})")
     pm.add_argument("--out-dir", default=None, help=f"default {PROMOTED_DIR}")
+    pm.add_argument("--min-sizable-fraction", type=float, default=None,
+                    help="TIGHTEN the cold-start sizing guard: minimum fraction of the genome's "
+                         "offline trades RiskManager.calculate_kelly_size would give a non-zero "
+                         "size at cold start (default 0.75; values below it are refused)")
     pm.set_defaults(func=cmd_promote)
     # ---- end F3 STRATEGY block ---------------------------------------------
 

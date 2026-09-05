@@ -45,6 +45,11 @@ RUNTIME_FACTORY_ALLOWED = {
 LAB_ONLY = (
     "evolve", "procedure", "fitness", "frame", "ledger", "multiplicity", "null",
     "controls", "report", "gen0", "lanes", "folds", "guards", "registry", "coverage", "bench",
+    # `sizing` mirrors RiskManager's cold-start Kelly law for the promotion
+    # guard and the v2 diagnostic. It imports src.core and is lab-only by
+    # construction: the sandbox must keep executing the real risk manager, not
+    # an offline model of it.
+    "sizing",
 )
 BLOCKED_LIBS = ("lightgbm", "scipy", "pyarrow", "torch", "xgboost")
 WALL_CLOCK_FILES = (
