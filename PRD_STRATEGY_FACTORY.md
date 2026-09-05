@@ -428,6 +428,33 @@ accumulate an admissible paper record toward FR-5.2.
 - After ≥50 settled `target_date`s, `gate_<id>.json` reports grouped count, exact binomial
   p, net PnL and spec-hash check; if HALT, the board shows the family KILLED and no file
   under `src/factory/` references a live-capital flag.
+  - **Registered deviation (2026-09-05, HANDOFF section 3 rule 9) — the current maia
+    shadow run accrues ZERO units toward this criterion, and is not a gate run.** The
+    deployed genome `0c4b20502f2daf65` buys NO at a median price paid of 0.84, while
+    `RiskManager.calculate_kelly_size` pins `historical_wr = 0.50` until `MIN_WIN_SAMPLES`
+    = 20 closed trades, so the blended sizing probability is `p = 0.6*0.50 + 0.4*p_win
+    ≤ 0.70`. At the KXHIGH zero maker fee `f > 0` iff `p > price`, so the ceiling is a
+    price cut at ~0.70: **117 of the genome's 130 offline trades size to 0 contracts**,
+    identically at every bankroll stage from $100 to $60,000 (it is not a small-bankroll
+    artifact and cannot be funded away), and all four live 2026-09-05T15:00:23Z EMITs
+    sized to 0. The shadow run is a **runtime instrumentation record** whose finding —
+    the `KELLY_ZERO` evidence that the sandbox will not size the promoted shape — is
+    already complete; it books nothing, so it produces no settled `target_date` units.
+    At the measured rate of 12 sizable units per 69 frame-days, `n_min = 50` is **287
+    days** away (95 % band 208–367), i.e. mid-2027.
+  - **This is a promotion defect, not a risk-manager defect, and the sizing gauntlet is
+    not to be loosened.** `columns.py` folds the mixin EV gate into the frame as
+    `sandbox_admissible` (passes 130/130, never binds) and does not model the gate that
+    does bind. Owner decision 2026-09-05: every option that edits `src/core/risk_manager.py`
+    is **REJECTED**; sizing from `p_win` is held as a general sizing-policy question,
+    decided on its own merits and never used to unblock a specific genome. Full option
+    analysis and arithmetic: `reports/factory/sizing_cold_start_2026-09-05.md`.
+  - **Gate margin, for the record.** The genome's realized edge on the search frame is
+    **+0.0750/contract** per-trade and **+0.0723** date-clustered (an earlier draft's
+    +0.0705 was the *rejected* subset, not the full set). Under the corrected gate null
+    the full genome clears `n = 50` in-sample at **p = 0.047** against alpha 0.05, with a
+    unit-win-rate CI of **[0.667, 0.875]** against a null of **0.683** — essentially no
+    margin, on the data it was selected on, for a family already CLOSED.
 
 ### Phase F5 — Second lanes and GENE_SPEC v2 (data-gated)
 **Objective:** extend the same frame/kernel/registry to lanes and genes that lack
@@ -465,6 +492,24 @@ is set by dates of tape, not by compute.
 4. **Lab ≠ sandbox.** Kelly sizing, cooldowns and allocation differ from the 20-contract
    frame; mitigated by `sandbox_admissible` in the search frame, replay parity, and the
    weekly reconciliation with REJECT codes.
+   - **REALISED 2026-09-05, and the stated mitigation was insufficient.**
+     `sandbox_admissible` encodes the mixin's EV gate (it passed 130/130 on the deployed
+     genome and never binds) but **not** `calculate_kelly_size > 0`, which is the gate that
+     actually binds — it zeroes 117 of those 130. Replay parity cannot catch this: parity
+     compares emitted signal *sets*, and sizing happens after the emit. The identified fix
+     is **Option 5**: fold the runtime's cold-start sizing law — the closed-form, state-free
+     predicate `0.6*0.50 + 0.4*p_win > price_paid + fee(price_paid)` — into
+     `sandbox_admissible` and register `weather/gfs_mex/taker/v2` (the registry refuses to
+     re-register a CLOSED family name; a rerun is a new family, by design). Then everything
+     promoted is executable from trade 1 and the pre-registration is true rather than worked
+     around. **Honest cost:** it removes ~86 % of the executable NO-taker rows, and the
+     surviving universe realizes about **−0.048/contract** unfiltered on this frame — so
+     budget for v2 returning CLOSED, which a documented "no" satisfies (HANDOFF section 3
+     rule 6). It is a **separate phase**: new frame freeze (new frame sha), fresh search,
+     new parity run, new gate registration. The v1 frame schema and the
+     `executable`/`sandbox_admissible` semantics stay exactly as they are — the existing
+     frames, the promoted specs' `frame_search_sha256` and FR-F3.4's `n_discrepancies: 0`
+     all depend on them.
 5. **Expressivity ceiling.** A 13-gene conjunction may only rediscover fr31a variants; on
    69 dates that is the point (un-memorisable). Accepted for v1.
 6. **Forecast lag on maia.** The live `gfs_mex` vintage must come from the IEM MOS product
@@ -485,3 +530,15 @@ is set by dates of tape, not by compute.
    maia's tape back until RATIFIED).
 8. Unchanged from HANDOFF: prod KXBTCY fee receipt, Weather Company vs IEM reconcile
    policy, $3000→$350 sizing.
+9. **Whether to spend a holdout-B unseal on a CLOSED family's seed genome — the one
+   decision here with a hard external clock.** `data/ladders_holdout/` (2026-07-26..08-31)
+   expires ~**2026-10-03** and is the only virgin root the factory will ever have; the seal
+   allows ≤3 unseals/quarter and ≤3 finalists/family (`src/factory/holdout.py`,
+   `--unseal RATIFIED-<date>`). Against it: family #1 is CLOSED with pooled OOS +0.0308,
+   boot [−0.0900, +0.1417], `p_RC` 0.886, Holm `p_adj` 0.2895 — the prior is "no edge" —
+   and the paper route that would otherwise produce evidence needs 287 days (95 % band
+   208–367), which outlives the data. **No default is encoded; this needs an explicit call
+   before ~2026-10-03.**
+10. **Taken 2026-09-05 — do not reopen without new evidence:** options that edit
+    `src/core/risk_manager.py` to relieve the cold-start sizing ceiling are REJECTED
+    (see Phase F4 above and `reports/factory/sizing_cold_start_2026-09-05.md`).
