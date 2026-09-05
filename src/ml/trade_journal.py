@@ -33,6 +33,41 @@ def _opt_float(value: Any) -> Optional[float]:
         return None
 
 
+def prediction_correct_for(position: Dict[str, Any], pnl: float) -> Optional[bool]:
+    """Was this trade's *directional call* right? Settlement truth first.
+
+    On a settled binary the holder's side either won or it did not, and that is
+    decided by ``settlement_outcome`` against ``contract_side`` -- never by the
+    money. Until 2026-09-05 this was ``pnl > 0``, which made the flag a second,
+    weaker copy of the PnL and inherited every PnL defect:
+
+    * the F3 NO-side settlement bug (repaired by
+      ``scripts/repair_no_settlement_pnl.py``) inverted the PnL sign on every
+      settled NO trade, so it inverted this flag with it -- and repairing the
+      PnL alone left four maia rows asserting the opposite of their own
+      corrected PnL;
+    * a correct call whose edge was eaten by the exit fee books a small loss
+      and read as a wrong prediction;
+    * an exactly-flat settlement recorded ``None`` -- "unknown" -- when the
+      outcome was in fact known.
+
+    ``scripts/settlement_reconcile.py`` derives the sim's recorded outcome from
+    this field IN PREFERENCE to ``pnl``, so a wrong flag is a daily false
+    settlement-truth breach. Keeping the rule here, as one function, is what
+    lets the writer and the repair script agree by construction.
+
+    Falls back to the PnL sign only when no outcome was recorded -- a price
+    based exit (stop-loss, time limit), a ``SETTLEMENT_UNRESOLVED`` close, or a
+    row predating FR-1.2. ``None`` still means "not knowable from this row".
+    """
+    outcome = str(position.get("settlement_outcome") or "").strip().lower()
+    if outcome in ("yes", "no"):
+        side = str(position.get("contract_side") or "YES").strip().upper()
+        # A NO holder wins exactly when the contract settled NO.
+        return (side == "NO") == (outcome == "no")
+    return pnl > 0 if pnl != 0.0 else None
+
+
 def target_date_for_position(position: dict) -> Optional[str]:
     """ISO ``target_date`` for a weather position, or ``None``.
 
@@ -189,8 +224,9 @@ class TradeOutcome:
 
         pnl = float(position.get("pnl", 0.0))
 
-        # Determine if prediction was correct based on PnL
-        prediction_correct = pnl > 0 if pnl != 0.0 else None
+        # Was the directional call right? Settlement truth first, PnL sign only
+        # as the fallback for a non-settlement exit -- see prediction_correct_for.
+        prediction_correct = prediction_correct_for(position, pnl)
 
         # Edge at entry: model_probability minus entry_price (how much edge
         # the model thought it had when the trade was opened)
