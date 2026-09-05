@@ -280,3 +280,23 @@ schedule is positional; `add` aliases `create`; `--monitor-script` is the
 agent-gating byte-hash mode and is incompatible with `--no-agent`, hence the
 in-script hash). The state file is
 `${MP_FACTORY_STATE:-~/.hermes/state/mp_factory_board.sha}`.
+
+## Factory (F3) — promoted-genome slot, shadow deploy on maia
+
+**Runbook: `docs/factory/F3_RUNBOOK.md`.** F3 adds the promoted-genome slot to
+the sandbox image without touching a gate: `GENOME_STRATEGY_ID` (in
+`/srv/money_printer/.env`, via `env_file`) names a `configs/factory/promoted/<id>.json`
+spec and inserts `GenomeStrategy` ahead of V2 in the weather waterfall;
+`GENOME_STRATEGY_MODE` is pinned to **shadow** by `deploy/pi/docker-compose.yml`
+(`${GENOME_STRATEGY_MODE:-shadow}`, overriding `.env` — flip it only from the
+compose shell, and only in F4 after ratification); `MP_FORECAST_CACHE_DIR`
+points at the new `/srv/money_printer/data/forecast_cache` bind (create it and
+`chown 1000:1000` before `up`). The runbook has the alcyone arm64 image build
+plus in-image import checks, the maia `git pull --ff-only` / `.env` /
+`compose up -d --build` sequence, `scripts/check_maia_emit_cadence.py` (verifies
+the EMIT-at-:00 / one-REJECT-per-EMIT / `limit_price = quote + 0.01` criterion
+over `GET /api/logs/tail` — no ssh), the dev-box dry run
+`scripts/genome_dry_run.py`, and the weekly reconcile / gate cadence. It also
+records the NO-side settlement sign defect the dry run found in
+`matching_engine._close_position` (protected in F3; must be fixed before F4's
+first paper trade).
