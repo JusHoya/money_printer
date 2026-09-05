@@ -51,6 +51,16 @@ SYMBOL_IN_LINE_RE = re.compile(r"symbol=(?P<symbol>\S+)")
 
 EXIT_PASS, EXIT_FAIL, EXIT_NO_EMIT = 0, 1, 3
 
+# Strategy-internal skip diagnostics (``[] + log_rejection(CODE)`` on every skip,
+# FACTORY_ARCHITECTURE section 1.2). They are NOT FR-0.4 outcomes of an EMIT --
+# a market the genome already traded logs GENOME_ALREADY_TRADED every later hour
+# -- so they never pair with an EMIT. GENOME_SHADOW (bot-side, one per EMIT) and
+# every risk-manager reason are outcomes.
+STRATEGY_SKIP_CODES = {
+    "GENOME_NO_VINTAGE", "GENOME_MASK_FALSE", "GENOME_ALREADY_TRADED", "GENOME_FEE_MISMATCH",
+    "GENOME_NOT_TOP_OF_HOUR", "GENOME_NOT_EXECUTABLE", "GENOME_SIGMA_CAP",
+}
+
 
 def _get(url: str, timeout: float) -> bytes:
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (LAN GET)
@@ -124,6 +134,7 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
              data_rows: Optional[List[Dict[str, Any]]] = None, tolerance: float = 0.0051) -> Dict[str, Any]:
     emits: List[Dict[str, Any]] = []
     outcomes: Dict[str, int] = {}
+    skips: Dict[str, int] = {}
     for i, e in enumerate(entries):
         m = EMIT_RE.search(e["msg"])
         if m and strategy_substr.lower() in m.group("strategy").lower():
@@ -132,6 +143,9 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
         m = EXEC_RE.search(e["msg"]) or REJECT_RE.search(e["msg"])
         if m and strategy_substr.lower() in m.group("strategy").lower():
             code = m.groupdict().get("reason", "EXECUTED")
+            if code in STRATEGY_SKIP_CODES:
+                skips[code] = skips.get(code, 0) + 1
+                continue
             outcomes[code] = outcomes.get(code, 0) + 1
             # Resolve against the most recent unresolved EMIT for this symbol.
             for em in reversed(emits):
@@ -197,6 +211,7 @@ def evaluate(entries: List[Dict[str, Any]], *, strategy_substr: str, adverse_fil
         "emit_multiple_outcomes": multi_outcome,
         "emit_executed": executed,
         "outcome_codes": dict(sorted(outcomes.items())),
+        "strategy_skip_codes": dict(sorted(skips.items())),
         "limit_price": {"verified_ok": price_ok, "verified_bad": price_bad,
                         "unverified": unverified, "bad_examples": bad_examples},
         "verdict": verdict,

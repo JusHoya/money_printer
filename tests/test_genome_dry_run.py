@@ -42,14 +42,11 @@ LIFECYCLE_ASSERTIONS = (
     "fr04_every_emit_has_one_outcome",
 )
 
-# Known engine defect surfaced by this dry run (protected file, F3 may not
-# patch it): ``_close_position`` books a YES-side exit price against a NO-side
-# entry price at settlement. Tracked as an xfail so the day the engine is
-# fixed this test starts asserting it for real.
-KNOWN_PNL_SIGN_DEFECT = (
-    "matching_engine._close_position prices NO-side settlements with the YES "
-    "exit price (BUY NO that settles 'no' is booked as a loss); protected file"
-)
+# Engine defect surfaced by this dry run on 2026-09-04 and FIXED in commit
+# 724d93c: ``_close_position`` booked the YES-leg payoff against a NO-side entry
+# at settlement. ``test_settlement_pnl_matches_contract_side`` now asserts the
+# corrected sign for real (the former xfail).
+FIXED_PNL_SIGN_DEFECT_COMMIT = "724d93c"
 
 
 def _has_archive() -> bool:
@@ -127,11 +124,15 @@ def test_truth_was_published_offline_and_after_the_close(dry_run):
 
 
 def test_settlement_pnl_matches_contract_side(dry_run):
+    """Hard assertion since commit 724d93c: a NO position that settles 'no' books +(1-entry)*qty."""
     report, _code, _path = dry_run
     a = report["assertions"]["settlement_pnl_matches_contract_side"]
-    if not a["ok"]:
-        pytest.xfail(KNOWN_PNL_SIGN_DEFECT + f" -- {json.dumps(a['detail'])[:400]}")
-    assert a["ok"]
+    assert a["ok"], json.dumps(a["detail"])[:600]
+    for pos in a["detail"]:
+        if pos["contract_side"] == "NO":
+            won = pos["settlement_outcome"] == "no"
+            assert pos["booked_exit_price"] == (1.0 if won else 0.0)
+            assert (pos["booked_pnl"] > 0) == won
 
 
 def test_exit_code_reflects_assertions(dry_run):
@@ -215,3 +216,148 @@ def test_genome_spec_flag_reports_unavailable_when_module_missing(tmp_path):
     # Module present (STRATEGY landed): an empty spec must be refused loudly, never run silently.
     with pytest.raises(Exception):
         gdr.run_dry_run(args)
+
+
+# ---------------------------------------------------------------------------
+# GenomeStrategy through the same harness (FR-F3.3 / F3 exit criteria)
+# ---------------------------------------------------------------------------
+GENOME_SPEC = os.path.join(ROOT, "configs", "factory", "promoted", "0c4b20502f2daf65.json")  # fr31a_taker, shadow
+
+
+def _has_genome_spec() -> bool:
+    return os.path.exists(GENOME_SPEC) and os.path.isdir(os.path.join(ROOT, "data", "calibration"))
+
+
+def _run_genome(tmp_dir, mode: str):
+    args = gdr.build_parser().parse_args(
+        ["--city", "NY", "--date", "2026-07-20", "--quiet", "--genome-spec", GENOME_SPEC,
+         "--genome-mode", mode, "--out", str(tmp_dir / f"genome_{mode}.json"),
+         "--log-out", str(tmp_dir / f"genome_{mode}.log")]
+    )
+    t0 = time.monotonic()
+    report, code = gdr.run_dry_run(args)
+    assert time.monotonic() - t0 < 60.0
+    gdr.write_report(tmp_dir / f"genome_{mode}.json", report)
+    return report, code, tmp_dir / f"genome_{mode}.log"
+
+
+@pytest.fixture(scope="module")
+def genome_shadow(tmp_path_factory):
+    if not _has_genome_spec():
+        pytest.skip("promoted spec / calibration dir not on disk")
+    return _run_genome(tmp_path_factory.mktemp("genome_shadow"), "shadow")
+
+
+@pytest.fixture(scope="module")
+def genome_paper(tmp_path_factory):
+    if not _has_genome_spec():
+        pytest.skip("promoted spec / calibration dir not on disk")
+    return _run_genome(tmp_path_factory.mktemp("genome_paper"), "paper")
+
+
+def _genome_lines(log_path):
+    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if "strategy=Genome " in l]
+    emits = [l for l in lines if "[Signal] EMIT" in l]
+    shadow = [l for l in lines if "reason=GENOME_SHADOW" in l]
+    return lines, emits, shadow
+
+
+def _symbol(line: str) -> str:
+    return line.split("symbol=")[1].split()[0]
+
+
+def test_genome_is_constructed_the_way_the_bot_does(genome_shadow):
+    report, code, _ = genome_shadow
+    g = report["genome"]
+    assert g["requested"] and g["genome_id"] == "0c4b20502f2daf65"
+    assert g["constructed_via"].startswith("GenomeStrategy(")
+    assert g["strategy_name"] == "Genome 0c4b2050"
+    assert g["bot_genome_shadow"] is True and g["paper_override_for_dry_run"] is False
+    assert report["signals"]["by_strategy"].get("genome", 0) >= 1
+    assert code == 0, json.dumps(report["assertions"])[:800]
+
+
+def test_genome_shadow_emits_at_top_of_hour_with_one_reject_each(genome_shadow):
+    report, _code, log_path = genome_shadow
+    lines, emits, shadow = _genome_lines(log_path)
+    assert emits, "the genome never emitted on NY 2026-07-20"
+    assert len(shadow) == len(emits) == report["signals"]["by_strategy"]["genome"]
+    for l in emits:
+        ts = l.split(" | ")[0]
+        assert ts.endswith(":00:00"), f"EMIT off the :00 UTC grid: {l}"
+        assert " qty=20 " in l and " contract=NO " in l and " side=buy " in l
+    assert sorted(_symbol(l) for l in emits) == sorted(_symbol(l) for l in shadow)
+    assert not any("[Signal] EXECUTED strategy=Genome" in l for l in lines)
+    assert report["signals"]["rejected_by_code"]["GENOME_SHADOW"] == len(emits)
+
+
+def test_genome_shadow_never_reaches_process_signals(tmp_path, monkeypatch):
+    if not _has_genome_spec():
+        pytest.skip("promoted spec not on disk")
+    from src.bots import weather_bot as wb
+
+    original = wb.WeatherBot._process_signals
+
+    def guarded(self, signals, strategy_name, risk_manager, dashboard):
+        assert not str(strategy_name).startswith("Genome"), f"shadow signal reached _process_signals: {strategy_name}"
+        return original(self, signals, strategy_name, risk_manager, dashboard)
+
+    monkeypatch.setattr(wb.WeatherBot, "_process_signals", guarded)
+    report, code, _ = _run_genome(tmp_path, "shadow")
+    assert code == 0 and report["signals"]["by_strategy"].get("genome", 0) >= 1
+
+
+def test_genome_limit_price_is_quote_plus_one_cent(genome_shadow):
+    """EMIT price == ladder NO ask at that candle + adverse_fill (0.01), read from the archive, not the log."""
+    report, _code, log_path = genome_shadow
+    _lines, emits, _ = _genome_lines(log_path)
+    ladders, _vintages = gdr.load_city_day(
+        "NY", "2026-07-20", os.path.join(ROOT, "data", "ladders"), "gfs_mex", 240
+    )
+    from src.factory import features as feat
+
+    checked = 0
+    import pandas as pd
+
+    ts_col = pd.to_datetime(ladders["ts_utc"], utc=True)
+    for l in emits:
+        symbol = _symbol(l)
+        ts = pd.Timestamp(l.split(" | ")[0], tz="UTC")
+        price = float(l.split("price=")[1].split()[0])
+        rows = ladders[(ladders["market_ticker"] == symbol) & (ts_col == ts)]
+        assert len(rows) == 1, (symbol, str(ts), len(rows))
+        r = rows.iloc[0]
+        quote = float(feat.quote(r["yes_bid"], r["yes_ask"], 1, 0))  # direction NO, taker
+        assert price == pytest.approx(quote + 0.01, abs=1e-9), (symbol, ts, price, quote)
+        checked += 1
+    assert checked == len(emits) >= 1
+
+
+def test_genome_paper_mode_flows_through_the_gauntlet(genome_paper):
+    report, code, log_path = genome_paper
+    assert report["genome"]["paper_override_for_dry_run"] is True
+    assert report["genome"]["bot_genome_shadow"] is False
+    lines, emits, shadow = _genome_lines(log_path)
+    assert emits and not shadow
+    outcomes = [
+        l for l in lines
+        if "[Signal] EXECUTED" in l or ("[Risk] REJECT" in l and "reason=GENOME_" not in l)
+    ]
+    assert sorted(_symbol(l) for l in emits) == sorted(_symbol(l) for l in outcomes)
+    assert report["assertions"]["fr04_every_emit_has_one_outcome"]["ok"]
+    assert report["assertions"]["settlement_pnl_matches_contract_side"]["ok"]
+    assert code == 0
+
+
+def test_cadence_checker_passes_on_the_shadow_log(genome_shadow):
+    _report, _code, log_path = genome_shadow
+    proc = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "check_maia_emit_cadence.py"),
+         "--file", str(log_path), "--no-data-log", "--strategy", "Genome", "--json"],
+        capture_output=True, text=True, cwd=ROOT, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stdout[-1500:] + proc.stderr[-800:]
+    verdict = json.loads(proc.stdout)
+    assert verdict["verdict"] == "PASS"
+    assert verdict["emit_multiple_outcomes"] == [] and verdict["emit_without_outcome"] == []
+    assert verdict["strategy_skip_codes"].get("GENOME_ALREADY_TRADED", 0) > 0

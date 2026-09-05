@@ -272,26 +272,42 @@ def resolve_spec_hash(spec_path: Optional[str]) -> Tuple[Optional[str], str]:
     if not os.path.exists(path):
         return None, f"promoted spec not found: {spec_path}"
     try:
-        from src.factory.promoted import load_promoted  # type: ignore
-
-        spec = load_promoted(path)
-        observed = getattr(spec, "spec_hash", None)
-        if observed is None and isinstance(spec, Mapping):
-            observed = spec.get("spec_hash")
-        if observed:
-            return str(observed), "src.factory.promoted.load_promoted"
+        from src.factory.promoted import PromotedSpecError, load_promoted  # type: ignore
     except ImportError:
-        pass
-    except Exception as exc:  # PromotedSpecError or a corrupt file
-        return None, f"load_promoted rejected the spec: {exc}"
+        PromotedSpecError = None  # type: ignore[assignment]
+        load_promoted = None  # type: ignore[assignment]
+    if load_promoted is not None:
+        try:
+            spec = load_promoted(path)
+            observed = getattr(spec, "spec_hash", None)
+            if observed is None and isinstance(spec, Mapping):
+                observed = spec.get("spec_hash")
+            if observed:
+                return str(observed), "src.factory.promoted.load_promoted (content hash verified)"
+        except PromotedSpecError as exc:  # type: ignore[misc]
+            msg = str(exc)
+            # A spec whose content no longer hashes to its own spec_hash (or a
+            # genome_id that does not match its genome) is a CHANGED spec: the
+            # condition fails outright, never falls back to the raw file.
+            if "does not verify" in msg or "genome_id" in msg:
+                return None, f"load_promoted rejected the spec: {msg}"
+            # Otherwise the file is not a full promoted spec (missing/unknown
+            # keys) -- fall through to the raw-file fallback and say so.
+            fallback_note = f"not a full promoted spec ({msg}); "
+        except Exception as exc:  # a corrupt file
+            return None, f"load_promoted rejected the spec: {exc}"
+        else:
+            fallback_note = ""
+    else:
+        fallback_note = "src.factory.promoted unavailable; "
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
         if isinstance(raw, dict) and raw.get("spec_hash"):
-            return str(raw["spec_hash"]), "spec_hash field of the promoted spec file"
+            return str(raw["spec_hash"]), fallback_note + "spec_hash field of the promoted spec file (unverified)"
     except (OSError, json.JSONDecodeError) as exc:
         return None, f"promoted spec unreadable: {exc}"
-    return sha256_file(path), "sha256 of the promoted spec file (CRLF-normalised)"
+    return sha256_file(path), fallback_note + "sha256 of the promoted spec file (CRLF-normalised)"
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +608,7 @@ def evaluate(
             "source": FORMULAS["net_pnl"],
         },
         "spec_hash_unchanged": {
+            "registered": registered_hash,
             "ok": hash_ok,
             "registered": registered_hash,
             "observed": observed_spec_hash,

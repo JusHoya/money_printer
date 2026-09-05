@@ -58,8 +58,26 @@ _spec.loader.exec_module(gate)
 from src.core.weather_settlement import settlement_close_for  # noqa: E402
 from src.ml.trade_journal import TradeJournal, TradeOutcome  # noqa: E402
 
-STRATEGY = "Genome 7d857b00"
-SPEC_HASH = "a" * 64
+from src.factory import genome as G  # noqa: E402
+from src.factory.promoted import build_spec, write_promoted  # noqa: E402
+
+# A REAL promoted spec (built from a gen-0 seed, dummy provenance hashes) so the
+# gate's spec-hash condition goes through ``load_promoted``'s content-hash check.
+SPEC = build_spec(
+    G.SEEDS["fr31a_taker"],
+    family="weather/gfs_mex/taker/v1",
+    config_sha256="c" * 64,
+    frame_search_sha256="f" * 64,
+    calibration_dir="data/calibration",
+    calibration_sha256="d" * 64,
+    fee_type="quadratic",
+    fee_regime_sha256="e" * 64,
+    mode="shadow",
+    registry_status="CLOSED",
+    source="seed",
+)
+STRATEGY = f"Genome {SPEC.id8}"
+SPEC_HASH = SPEC.spec_hash
 CITIES = ("NY", "CHI", "MIA", "LAX")
 P_ENTRY = 0.40
 QTY = 20
@@ -188,18 +206,16 @@ def _write_record(tmp_path: Path, layout, *, drop_from_state: int = 0, spec_hash
         encoding="utf-8",
     )
     promoted = tmp_path / "promoted.json"
-    promoted.write_text(
-        json.dumps({"genome_id": "7d857b00d373260c", "spec_hash": spec_hash}), encoding="utf-8"
-    )
+    write_promoted(SPEC, promoted)  # the spec on disk always carries its real hash
     registration = tmp_path / "gate_registration.json"
     registration.write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "genome_id": "7d857b00d373260c",
+                "genome_id": SPEC.genome_id,
                 "strategy_name": STRATEGY,
                 "promoted_spec_path": str(promoted),
-                "spec_hash": SPEC_HASH,
+                "spec_hash": spec_hash,  # the REGISTERED hash (differs from the spec in the change test)
                 "market_family": "KXHIGH",
                 "grouping_unit": "target_date",
                 "unit_win_rule": "date_pnl_gt_0",
@@ -299,7 +315,25 @@ def test_spec_hash_change_fails_an_otherwise_passing_record(tmp_path):
     v = _run(tmp_path, journal, state, registration)
     assert abs(v["units"]["p_upper_tail"] - P_PASS_UNITS) < 1e-12
     assert v["conditions"]["spec_hash_unchanged"]["ok"] is False
-    assert v["conditions"]["spec_hash_unchanged"]["observed"] == "b" * 64
+    # observed = the spec's verified content hash; registered = the stale "b"*64
+    assert v["conditions"]["spec_hash_unchanged"]["observed"] == SPEC_HASH
+    assert v["conditions"]["spec_hash_unchanged"]["registered"] == "b" * 64
+    assert "content hash verified" in v["conditions"]["spec_hash_unchanged"]["source"]
+    assert v["verdict"] == "FAIL"
+
+
+def test_tampered_spec_file_fails_even_when_registration_matches(tmp_path):
+    """Editing the promoted JSON after registration breaks its own hash -> FAIL, no fallback."""
+    layout = _layout(both_win=6, split=2, both_lose=2, single_wins=21)
+    journal, state, registration = _write_record(tmp_path, layout)
+    promoted = tmp_path / "promoted.json"
+    doc = json.loads(promoted.read_text(encoding="utf-8"))
+    doc["adverse_fill"] = 0.02
+    promoted.write_text(json.dumps(doc), encoding="utf-8")
+    v = _run(tmp_path, journal, state, registration)
+    cond = v["conditions"]["spec_hash_unchanged"]
+    assert cond["ok"] is False and cond["observed"] is None
+    assert "does not verify" in cond["source"]
     assert v["verdict"] == "FAIL"
 
 

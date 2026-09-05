@@ -627,112 +627,107 @@ class _OfflineTruthProvider:
 
 
 class _LogCapture(logging.Handler):
-    def __init__(self):
+    """Collect the bot's log messages; ``lines`` are stamped with the HARNESS
+    clock (the candle being replayed) in the maia log format
+    ``YYYY-MM-DD HH:MM:SS | LEVEL   | msg`` so ``scripts/check_maia_emit_cadence.py
+    --file`` can verify the :00-UTC cadence on a dry-run log."""
+
+    def __init__(self, clock: Optional["DryRunClock"] = None):
         super().__init__(level=logging.DEBUG)
         self.messages: List[str] = []
+        self.lines: List[str] = []
+        self.clock = clock
 
     def emit(self, record):
         try:
-            self.messages.append(record.getMessage())
+            msg = record.getMessage()
+            self.messages.append(msg)
+            if self.clock is not None:
+                stamp = self.clock.now_utc.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                stamp = "0000-00-00 00:00:00"
+            self.lines.append(f"{stamp} | {record.levelname:<7} | {msg}")
         except Exception:
             pass
 
 
 # ---------------------------------------------------------------------------
-# Genome strategy (STRATEGY workstream) -- best-effort adapter
+# Genome strategy (FR-F3.3) -- the same construction the bot performs, with the
+# replay ForecastVintageProvider (archive CSV) in place of the live MOS wrapper.
 # ---------------------------------------------------------------------------
-def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min: int):
-    """Construct ``GenomeStrategy`` from a promoted spec for archive replay.
+def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min: int,
+                          *, mode: str = "shadow"):
+    """Construct the REAL ``GenomeStrategy`` from a promoted spec for archive replay.
 
-    Returns ``(strategy, info)``; raises :class:`DryRunError` when the module
-    or a constructor input is unavailable in this checkout.  The construction
-    order mirrors the F3 contract (``GenomeStrategy(spec, clock=, forecast_provider=,
-    fee_regime=, calibration_provider=)``), trying a replay helper from
-    ``scripts/factory_replay_parity.py`` first if STRATEGY ships one.
+    Returns ``(strategy, spec, info)``; raises :class:`DryRunError` when the
+    modules are unavailable or the spec is refused.  Mirrors
+    ``WeatherBot._build_genome_strategy`` (same ``FrozenCalibrationProvider``,
+    same fee regime, same spec checks) except for the forecast provider, which
+    is ``ForecastVintageProvider.from_archive_csv`` over the pinned
+    ``forecast_series_<source>.csv`` so no network is touched.
+
+    ``mode="paper"`` on a *shadow* spec is a DRY-RUN-ONLY override: the spec is
+    re-hashed in memory with ``mode="paper"`` / ``registry_status="PROPOSED"``
+    so the accelerated run can exercise the fill/settlement path; nothing is
+    written under ``configs/factory/promoted`` and the report records the
+    override.  The maia sandbox never sees such a spec.
     """
     info: Dict[str, Any] = {"spec_path": _rel(spec_path)}
     try:
-        from src.factory.promoted import load_promoted
+        from src.factory import promoted as P
     except ImportError as exc:
         raise DryRunError(f"src.factory.promoted not importable: {exc}")
     try:
         from src.strategies import genome_strategy as gs_mod
     except ImportError as exc:
         raise DryRunError(f"src.strategies.genome_strategy not importable: {exc}")
-
-    spec = load_promoted(spec_path)
-    info["genome_id"] = getattr(spec, "genome_id", None)
-    info["spec_mode"] = getattr(spec, "mode", None)
-
-    # 1. A replay factory shipped by the parity script, if any.
-    try:
-        from scripts import factory_replay_parity as parity  # type: ignore
-
-        for helper in ("build_replay_strategy", "replay_strategy", "strategy_for_replay"):
-            fn = getattr(parity, helper, None)
-            if callable(fn):
-                strategy = fn(spec, clock=clock.now_et, vintage_table=vintages)
-                info["constructed_via"] = f"factory_replay_parity.{helper}"
-                return strategy, info
-    except ImportError:
-        pass
-    except TypeError:
-        pass
-
-    # 2. The contract constructor with replay inputs.
-    errors: List[str] = []
-    provider = None
-    try:
-        from src.data import forecast_vintage_provider as fvp
-
-        attempts = (
-            lambda: fvp.ForecastVintageProvider.from_table(vintages, lag_min=lag_min),
-            lambda: fvp.ForecastVintageProvider(vintages, source="replay", lag_min=lag_min),
-            lambda: fvp.ForecastVintageProvider(table=vintages, source="replay", lag_min=lag_min),
-        )
-        for attempt in attempts:
-            try:
-                provider = attempt()
-                break
-            except (TypeError, AttributeError) as exc:
-                errors.append(f"provider: {exc}")
-    except ImportError as exc:
-        errors.append(f"forecast_vintage_provider: {exc}")
-    if provider is None:
-        raise DryRunError("could not build a replay ForecastVintageProvider: " + "; ".join(errors))
-
+    from src.data.forecast_vintage_provider import ForecastVintageProvider
     from src.factory.fees import load_regime
 
-    regime = load_regime()
-    calibration = None
-    for name in ("CalibrationProvider", "calibration_provider_for", "load_calibration_provider"):
-        ctor = getattr(gs_mod, name, None)
-        if ctor is None:
-            continue
-        try:
-            calibration = ctor(spec)
-            break
-        except TypeError:
-            try:
-                calibration = ctor(getattr(spec.calibration, "dir", None))
-                break
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"calibration via {name}: {exc}")
-    if calibration is None:
-        raise DryRunError(
-            "no calibration provider constructor found on genome_strategy "
-            "(tried CalibrationProvider / calibration_provider_for / load_calibration_provider): "
-            + "; ".join(errors)
-        )
-    strategy = gs_mod.GenomeStrategy(
-        spec,
-        clock=clock.now_et,
-        forecast_provider=provider,
-        fee_regime=regime,
-        calibration_provider=calibration,
+    try:
+        spec = P.load_promoted(spec_path)
+    except P.PromotedSpecError as exc:
+        raise DryRunError(f"promoted spec refused: {exc}")
+    info["genome_id"] = spec.genome_id
+    info["spec_mode"] = spec.mode
+    info["paper_override_for_dry_run"] = False
+    if mode == "paper" and spec.mode != "paper":
+        doc = spec.to_doc(with_hash=False)
+        doc["mode"] = "paper"
+        doc["registry_status"] = "PROPOSED"
+        doc["spec_hash"] = P.spec_hash_of(doc)
+        spec = P.from_doc(doc)
+        info["paper_override_for_dry_run"] = True
+
+    import src.backtest.ev_analysis as ev
+
+    src_obj = {c.name: c for c in ev.CANDIDATE_SOURCES}.get(spec.forecast_source)
+    if src_obj is None:
+        raise DryRunError(f"forecast source {spec.forecast_source!r} unknown to ev_analysis")
+    fcsv = src_obj.resolved_forecast_csv()
+    if not os.path.exists(fcsv):
+        raise DryRunError(f"forecast archive missing: {fcsv}")
+    provider = ForecastVintageProvider.from_archive_csv(
+        fcsv, lag_min=int(spec.availability_lag_min), forecast_source=spec.forecast_source
     )
-    info["constructed_via"] = "GenomeStrategy(contract constructor)"
-    return strategy, info
+    cal_dir = spec.calibration.dir
+    if not os.path.isabs(cal_dir):
+        cal_dir = os.path.join(P.REPO_ROOT, cal_dir)
+    calibration = gs_mod.FrozenCalibrationProvider(cal_dir, source=spec.forecast_source)
+    try:
+        strategy = gs_mod.GenomeStrategy(
+            spec,
+            clock=clock.now_et,
+            forecast_provider=provider,
+            fee_regime=load_regime(),
+            calibration_provider=calibration,
+        )
+    except gs_mod.GenomeSpecMismatch as exc:
+        raise DryRunError(f"GenomeStrategy refused the spec: {exc}")
+    info["constructed_via"] = "GenomeStrategy(replay ForecastVintageProvider, FrozenCalibrationProvider)"
+    info["forecast_csv"] = _rel(fcsv)
+    info["strategy_name"] = strategy.name
+    return strategy, spec, info
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +803,7 @@ def run_dry_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], int]:
     candles: List[_real_datetime] = []
     clock = DryRunClock(ladders["ts_utc"].min().to_pydatetime())
 
-    log_capture = _LogCapture()
+    log_capture = _LogCapture(clock)
     mp_logger = logging.getLogger("MoneyPrinter")
     mp_logger.addHandler(log_capture)
 
@@ -874,13 +869,18 @@ def run_dry_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], int]:
 
         genome_info: Dict[str, Any] = {"requested": bool(args.genome_spec)}
         if args.genome_spec:
-            strategy, info = build_genome_strategy(
-                os.path.abspath(args.genome_spec), clock, vintages, args.availability_lag_min
+            strategy, spec, info = build_genome_strategy(
+                os.path.abspath(args.genome_spec), clock, vintages, args.availability_lag_min,
+                mode=args.genome_mode,
             )
             genome_info.update(info)
             genome_info["mode"] = args.genome_mode
-            # FR-F3.3 insertion: first in declared order, before V2.
-            bot.strategies = {"genome": strategy, **bot.strategies}
+            # FR-F3.3 insertion: first in declared order, before V2 -- the same
+            # slot and the same shadow flag the bot sets from GENOME_STRATEGY_ID.
+            bot.strategies = {getattr(wb, "GENOME_STRATEGY_KEY", "genome"): strategy, **bot.strategies}
+            bot.genome_spec = spec
+            bot.genome_shadow = (args.genome_mode == "shadow") or (spec.mode == "shadow")
+            genome_info["bot_genome_shadow"] = bool(bot.genome_shadow)
         report["genome"] = genome_info
 
         emitted: List[Tuple[str, Any]] = []
@@ -1123,6 +1123,16 @@ def run_dry_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], int]:
         else:
             os.environ["GENOME_STRATEGY_MODE"] = saved_mode
         mp_logger.removeHandler(log_capture)
+        log_out = getattr(args, "log_out", None)
+        if log_out:
+            try:
+                Path(log_out).parent.mkdir(parents=True, exist_ok=True)
+                with open(log_out, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write("\n".join(log_capture.lines) + "\n")
+                report["log_out"] = str(log_out)
+                report["log_lines"] = len(log_capture.lines)
+            except OSError as exc:  # never fail the run over the side file
+                report["log_out_error"] = str(exc)
 
 
 def default_report_path(city: str, date: str) -> Path:
@@ -1147,6 +1157,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="fail (exit 1) unless at least one position was opened")
     p.add_argument("--out", default=None, help="report path (default reports/factory/dry_run_<city>_<date>.json)")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--log-out", default=None,
+                   help="write the captured bot log (harness-clock timestamps, maia format) to this file")
     return p
 
 

@@ -33,15 +33,28 @@ pr = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None
 _spec.loader.exec_module(pr)
 
-STRATEGY = "Genome 7d857b00"
-GENOME_ID = "7d857b00d373260c"
+from src.factory import genome as G  # noqa: E402
+from src.factory.promoted import build_spec, write_promoted  # noqa: E402
+
+SPEC = build_spec(
+    G.SEEDS["fr31a_taker"],
+    family="weather/gfs_mex/taker/v1",
+    config_sha256="c" * 64,
+    frame_search_sha256="f" * 64,
+    calibration_dir="data/calibration",
+    calibration_sha256="d" * 64,
+    fee_type="quadratic",
+    fee_regime_sha256="e" * 64,
+)
+GENOME_ID = SPEC.genome_id
+STRATEGY = f"Genome {SPEC.id8}"
 
 LOG_LINES = [
-    "2026-09-09 15:00:03 | INFO    | [Signal] EMIT strategy=Genome 7d857b00 symbol=KXHIGHCHI-26SEP09-B84.5 side=buy contract=YES price=0.41 qty=20 confidence=0.610",
-    "2026-09-09 15:00:03 | INFO    | [Risk] REJECT strategy=Genome 7d857b00 symbol=KXHIGHCHI-26SEP09-B84.5 reason=KELLY_ZERO kelly=0 p=0.61 price=0.41",
-    "2026-09-10 16:00:02 | INFO    | [Risk] REJECT strategy=Genome 7d857b00 symbol=KXHIGHLAX-26SEP10-B92.5 reason=WEATHER_SLOT_FULL city=LAX",
+    f"2026-09-09 15:00:03 | INFO    | [Signal] EMIT strategy={STRATEGY} symbol=KXHIGHCHI-26SEP09-B84.5 side=buy contract=YES price=0.41 qty=20 confidence=0.610",
+    f"2026-09-09 15:00:03 | INFO    | [Risk] REJECT strategy={STRATEGY} symbol=KXHIGHCHI-26SEP09-B84.5 reason=KELLY_ZERO kelly=0 p=0.61 price=0.41",
+    f"2026-09-10 16:00:02 | INFO    | [Risk] REJECT strategy={STRATEGY} symbol=KXHIGHLAX-26SEP10-B92.5 reason=WEATHER_SLOT_FULL city=LAX",
     "2026-09-10 16:00:02 | INFO    | [Risk] REJECT strategy=Meteorologist V2 symbol=KXHIGHLAX-26SEP10-B92.5 reason=EV_NEGATIVE ev=-0.01",
-    "2026-09-21 16:00:02 | INFO    | [Risk] REJECT strategy=Genome 7d857b00 symbol=KXHIGHLAX-26SEP21-B92.5 reason=GENOME_SHADOW",
+    f"2026-09-21 16:00:02 | INFO    | [Risk] REJECT strategy={STRATEGY} symbol=KXHIGHLAX-26SEP21-B92.5 reason=GENOME_SHADOW",
     "2026-09-10 16:00:05 | INFO    | [Tweets] KXELONTWEETS: no active markets returned",
 ]
 
@@ -81,9 +94,7 @@ def record(tmp_path):
     log = tmp_path / "money_printer_20260908.log"
     log.write_text("\n".join(LOG_LINES) + "\n", encoding="utf-8")
     spec = tmp_path / "promoted.json"
-    spec.write_text(json.dumps({"genome_id": GENOME_ID, "genome_json": {"gene_spec_version": 1, "genes": {}},
-                                "adverse_fill": 0.01, "contracts_frame": 20,
-                                "fee": {"type": "taker"}, "mode": "shadow"}), encoding="utf-8")
+    write_promoted(SPEC, spec)
     return {"journal": journal, "state": state, "log": log, "spec": spec, "tmp": tmp_path}
 
 

@@ -118,26 +118,36 @@ def load_spec(path: str) -> Dict[str, Any]:
     if not os.path.exists(full):
         raise ReconcileError(f"promoted spec not found: {path}")
     try:
-        from src.factory.promoted import load_promoted  # type: ignore
-
-        spec = load_promoted(full)
-        if isinstance(spec, Mapping):
-            return dict(spec)
-        out = {}
-        for key in (
-            "genome_id", "genome_json", "family", "adverse_fill", "contracts_frame",
-            "fee", "mode", "spec_hash", "frame_search_sha256",
-        ):
-            if hasattr(spec, key):
-                out[key] = getattr(spec, key)
-        if out.get("genome_json") is not None:
-            return out
+        from src.factory.promoted import PromotedSpecError, load_promoted  # type: ignore
     except ImportError:
-        pass
+        PromotedSpecError = None  # type: ignore[assignment]
+        load_promoted = None  # type: ignore[assignment]
+    if load_promoted is not None:
+        try:
+            spec = load_promoted(full)
+            if isinstance(spec, Mapping):
+                return dict(spec)
+            out = {}
+            for key in (
+                "genome_id", "genome_json", "family", "adverse_fill", "contracts_frame",
+                "fee", "mode", "spec_hash", "frame_search_sha256",
+            ):
+                if hasattr(spec, key):
+                    val = getattr(spec, key)
+                    out[key] = dict(val.__dict__) if hasattr(val, "__dict__") else val
+            if out.get("genome_json") is not None:
+                out["spec_source"] = "src.factory.promoted.load_promoted (content hash verified)"
+                return out
+        except PromotedSpecError as exc:  # type: ignore[misc]
+            msg = str(exc)
+            if "does not verify" in msg or "genome_id" in msg:
+                raise ReconcileError(f"{path}: promoted spec changed since it was written: {msg}")
+            # not a full promoted spec: fall back to the raw document below
     with open(full, "r", encoding="utf-8") as fh:
         raw = json.load(fh)
     if not isinstance(raw, dict) or "genome_json" not in raw:
         raise ReconcileError(f"{path}: not a promoted spec (no genome_json)")
+    raw["spec_source"] = "raw promoted spec file (not a full spec; hash unverified)"
     return raw
 
 
