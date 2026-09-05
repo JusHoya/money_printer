@@ -371,3 +371,35 @@ Read next: `PRD_STRATEGY_FACTORY.md` §8 (F3 starts on the six seeds plus these 
 picks for replay parity); `docs/factory/F2_RUNBOOK.md` for re-summarising a run
 without re-searching; a second family needs new data (sealed holdout-B, the Sept–Oct
 R3 reserve), never a new seed on the same 69 dates.
+
+### 2026-09-05 — Phase F3 shipped; the NO-side settlement sign bug (ratified engine change)
+
+`GenomeStrategy` (`src/strategies/genome_strategy.py`) now exists and reproduces the
+factory's offline trade set exactly: replay parity over the 1,656 archived ladder markets
+is 0 discrepancies for the six gen-0 seeds and the four family-#1 picks, with `p_yes`
+bit-identical. Because family #1 is CLOSED, only **shadow** specs exist
+(`configs/factory/promoted/*.json`): the bot logs the EMIT line, then rejects
+`GENOME_SHADOW`; nothing reaches the exchange. `scripts/gate.py` (FR-5.2, exact
+Poisson-binomial over `target_date` units), `scripts/factory_paper_reconcile.py`,
+`scripts/measure_fill_realism.py` (two maia :00 boundaries: next-poll p90 drift 0.00,
+`adverse_fill` stays 0.01) and the accelerated dry run `scripts/genome_dry_run.py` are in.
+Runbook: `docs/factory/F3_RUNBOOK.md`; one-command maia deploy: `deploy/pi/deploy_f3_shadow.sh`.
+
+**The bug.** The dry run found that `SimulatedExchange._close_position` booked the YES-leg
+payoff (1.00/0.00) against NO entries at binary settlement, so **every settled NO paper
+trade since 2026-09-01 had its sign flipped** (a winning BUY NO at 0.33 closed at 0.00 and
+booked −0.33/contract; a losing NO at 0.60 booked +0.40). Mark-to-market already inverted
+correctly, which is why the equity curve and the closed-trade ledger disagreed. Commit
+724d93c inverts the payoff for NO positions at binary settlement (unresolved flat closes
+excluded); it is the one change to a protected file, ratified by the owner on 2026-09-05,
+and `tests/test_protected_files.py` allow-lists exactly that hunk. The fix only corrects
+future settlements: maia's `exchange_state.json` and `trade_journal.jsonl` must be repaired
+with `scripts/repair_no_settlement_pnl.py --apply` (the deploy script does it with the
+sandbox stopped and `.bak-n` backups), and `gate.py` refuses to run over unrepaired rows.
+Read the F0 paper record accordingly: positions did settle, but their booked NO-side PnL
+was wrong until the repair.
+
+Still open for F4: a daytime fill-realism collector (maia polls each market every ~35 s,
+so the 20-s window is empty), the registration commit time must be filled before the
+first paper trade, and a fresh deploy's first hour is the one missed-hour case the
+strategy cannot prove (the weekly reconcile flags it).

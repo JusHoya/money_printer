@@ -161,6 +161,9 @@ check 1 fails on a *missing* module; the design intent is numpy-only.
 
 ## 3. maia: shadow deploy of a promoted genome
 
+**One command (2026-09-05):** `bash deploy/pi/deploy_f3_shadow.sh <genome_id>` on maia does every step below
+plus the NO-side settlement repair of §1.1 with the sandbox stopped (`--no-repair` to skip). The manual steps stay as the reference.
+
 Prerequisite: a promoted spec committed under `configs/factory/promoted/<id>.json`
 (STRATEGY: `scripts/factory.py promote <id> --from-seed <name> --mode shadow`, which
 refuses on any replay-parity discrepancy). In F3 that is a gen-0 seed or an F2 pick —
