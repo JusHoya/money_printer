@@ -16,46 +16,64 @@ Hand computation (written out so the test does not trust the script):
         two-fill date split      ->  +3.32 (win: 11.66 - 8.34 > 0)
         two-fill date both lose  -> -16.68 (loss)
 
-    EXACT NULL (red team B, 2026-09-05): each fill wins independently with its
-    own q*; a unit wins when its summed PnL is positive.
-        single-fill unit:  w = q* = 0.417
-        two-fill unit:     both-win or split both win -> w = 1 - (1 - 0.417)^2
-                           = 1 - 0.583^2 = 1 - 0.339889 = 0.660111
-    p = P[K >= k], K = 10 x Bernoulli(0.660111) + 40 x Bernoulli(0.417)
+    THE NULL (F3 review defect 1, 2026-09-05). The marginals are fixed -- fill
+    i wins with q*_i -- but the JOINT law is not, and the fills inside one unit
+    are brackets on a city-day ladder: disjoint brackets are mutually EXCLUSIVE,
+    not independent. The gate takes the LEAST FAVOURABLE joint law, i.e. the
+    largest w_u any dependence structure could produce:
+
+        w_u = min(1, sum over MINIMAL winning fill sets A of min_{i in A} q*_i)
+
+        single-fill unit:  the one minimal set {i}   -> w = q* = 0.417
+        two-fill unit:     one win pays for one loss, so the minimal sets are
+                           {1} and {2}               -> w = 2 * 0.417 = 0.834
+                           (mutual exclusivity ATTAINS this: exactly one wins)
+    p = P[K >= k], K = 10 x Bernoulli(0.834) + 40 x Bernoulli(0.417)
     (Poisson-binomial, exact rationals; _pb_tail below is the test's own DP).
+
+    The superseded independent model said 1 - (1 - 0.417)^2 = 0.660111 for a
+    two-fill unit -- BELOW the truth, which makes P[K >= k] too small and the
+    test anti-conservative. ``test_true_null_pass_rate_is_at_or_below_nominal``
+    measures both: on 50 mutually exclusive pairs the old model passed a TRUE
+    null 88.5% of the time against a nominal 5%; the corrected null passes 2.4%.
 
     PASS scenario  (8 both-win, 1 split, 1 both-lose; 23 of 40 singles win)
         unit wins k = 8 + 1 + 23 = 32 of n = 50
         fill wins    = 16 + 1 + 23 = 40 of 60
         net PnL      = 40 * 11.66 - 20 * 8.34 = 466.40 - 166.80 = +299.60
-        p = P[K >= 32] = 0.008728294823503926   -> < 0.05, net > 0, hash ok => PASS
-        (the old pooled q_bar binomial would say P[X >= 32 | 50, 0.417] = 0.00122 --
-         7x too small, because it models a split two-fill date at 0.417 not 0.660)
+        p = P[K >= 32] = 0.025896938572745172  -> < 0.05, net > 0, hash ok => PASS
+        (k = 32 is the smallest winning count that clears alpha here: P[K >= 31]
+         is 0.05008, just the wrong side of 0.05)
+        (the pooled q_bar binomial would say P[X >= 32 | 50, 0.417] = 0.00122 --
+         21x too small, because it models a split two-fill date at 0.417 not 0.834)
 
     FAIL scenario  (4 both-win, 2 split, 4 both-lose; 16 of 40 singles win)
         unit wins k = 4 + 2 + 16 = 22 of 50
         fill wins    = 8 + 2 + 16 = 26 of 60
         net PnL      = 26 * 11.66 - 34 * 8.34 = 303.16 - 283.56 = +19.60  (> 0!)
-        p = P[K >= 22] = 0.6955838881502316   -> p >= 0.05 is the ONLY failing condition
+        p = P[K >= 22] = 0.8548809806476853   -> p >= 0.05 is the ONLY failing condition
         (pooled q_bar secondary: P[X >= 22 | 50, 0.417] = 0.4231476244946547)
 
-    EXTREME-PRICE scenario (red team B): the 10 two-fill dates pair a 0.08 fill
-    with a 0.92 fill (20 contracts each; taker fee 0.07*20*0.08*0.92 = 0.10304 ->
-    0.11 -> f = 0.0055 for both):
+    EXTREME-PRICE scenario: the 10 two-fill dates pair a 0.08 fill with a 0.92
+    fill (20 contracts each; taker fee 0.07*20*0.08*0.92 = 0.10304 -> 0.11 ->
+    f = 0.0055 for both):
         q*_a = 0.0855, q*_b = 0.9255
         win@0.08 = (1-0.08)*20-0.11 = +18.29; loss@0.08 = -1.60-0.11 = -1.71
         win@0.92 = +1.60-0.11 = +1.49;        loss@0.92 = -18.40-0.11 = -18.51
         a split date is a LOSS either way (18.29-18.51 < 0; 1.49-1.71 < 0), so
-        w_pair = q*_a * q*_b = 0.07913025  (vs the pooled q_bar reading 0.5055)
+        the ONLY minimal winning set is {a, b} and w_pair = min(q*_a, q*_b)
+        = 0.0855  (the independent model said q*_a q*_b = 0.0791; the pooled
+        q_bar read 0.5055)
         5 both-win, 3 split, 2 both-lose; 24 of 40 singles win -> k = 29
-        p exact = 0.00039157949076542084; pooled q_bar = (10*0.5055+40*0.417)/50
-        = 0.4347, P[X >= 29 | 50, 0.4347] = 0.027310211981160168 (70x too large)
+        p exact = 0.0004348703636931676; pooled q_bar = (10*0.5055+40*0.417)/50
+        = 0.4347, P[X >= 29 | 50, 0.4347] = 0.02731021198116019 (63x too large)
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
+import random
 from datetime import date, timedelta
 from fractions import Fraction
 from math import comb
@@ -98,17 +116,20 @@ P_ENTRY = 0.40
 QTY = 20
 ENTRY_FEE = 0.34  # 0.07 * 20 * 0.4 * 0.6 = 0.336 -> ceil -> 0.34
 Q_STAR = Fraction(417, 1000)
-W_TWO = 1 - (1 - Q_STAR) ** 2  # 660111/1000000
+W_TWO = min(Fraction(1), 2 * Q_STAR)  # least-favourable pair null: 417/500
 REG_COMMIT = "2026-05-01T00:00:00+00:00"  # before every synthetic entry_time
+ALPHA = 0.05
+WIN_PNL = 11.66  # (1 - 0.40) * 20 - 0.34
+LOSS_PNL = -8.34  # (0 - 0.40) * 20 - 0.34
 
-P_PASS_UNITS = 0.008728294823503926  # P[K >= 32], exact Poisson-binomial
-P_FAIL_UNITS = 0.6955838881502316  # P[K >= 22]
+P_PASS_UNITS = 0.025896938572745172  # P[K >= 32], exact Poisson-binomial
+P_FAIL_UNITS = 0.8548809806476853  # P[K >= 22]
 P_PASS_POOLED = 0.0012171990345424294  # P[X >= 32 | 50, 0.417] (secondary)
 P_FAIL_POOLED = 0.4231476244946547  # P[X >= 22 | 50, 0.417] (secondary)
 P_PASS_FILLS = 8.310514656378994e-05  # P[X >= 40 | 60, 0.417]
 P_FAIL_FILLS = 0.4472224935802638  # P[X >= 26 | 60, 0.417]
-P_EXTREME_UNITS = 0.00039157949076542084
-P_EXTREME_POOLED = 0.027310211981160168
+P_EXTREME_UNITS = 0.0004348703636931676
+P_EXTREME_POOLED = 0.02731021198116019
 
 
 def _exact_tail(n: int, k: int, q: Fraction) -> Fraction:
@@ -128,6 +149,17 @@ def _pb_tail(ws, k: int) -> Fraction:
     return sum(dist[k:], Fraction(0))
 
 
+def _fake_git(iso):
+    """Stand in for ``git log --diff-filter=A`` (tmp_path is not a checkout)."""
+
+    def _lookup(_path):
+        if iso is None:
+            return None, "test double: git records no ADD of this path"
+        return iso, "test double: git log --diff-filter=A"
+
+    return _lookup
+
+
 def test_hand_constants_are_the_exact_rational_tails():
     layout_ws = [W_TWO] * 10 + [Q_STAR] * 40
     assert abs(float(_pb_tail(layout_ws, 32)) - P_PASS_UNITS) < 1e-15
@@ -136,7 +168,9 @@ def test_hand_constants_are_the_exact_rational_tails():
     assert abs(float(_exact_tail(50, 22, Q_STAR)) - P_FAIL_POOLED) < 1e-15
     assert abs(float(_exact_tail(60, 40, Q_STAR)) - P_PASS_FILLS) < 1e-15
     assert abs(float(_exact_tail(60, 26, Q_STAR)) - P_FAIL_FILLS) < 1e-15
-    assert float(W_TWO) == pytest.approx(0.660111, abs=1e-15)
+    assert W_TWO == Fraction(417, 500) and float(W_TWO) == 0.834
+    # 32 really is the smallest winning count that clears alpha on this layout
+    assert float(_pb_tail(layout_ws, 31)) >= ALPHA > float(_pb_tail(layout_ws, 32))
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +264,8 @@ def _fill(day: date, city: str, won: bool, idx: int, price: float = P_ENTRY, *,
 
 
 def _write_record(tmp_path: Path, layout, *, drop_from_state: int = 0, spec_hash=SPEC_HASH,
-                  commit_utc=REG_COMMIT, fills=None, state_rows_override=None):
+                  commit_utc=REG_COMMIT, fills=None, state_rows_override=None,
+                  journal_rows_override=None, thresholds=None):
     journal_rows, state_rows = [], []
     if fills is None:
         for idx, (day, city, won, price) in enumerate(layout):
@@ -243,6 +278,8 @@ def _write_record(tmp_path: Path, layout, *, drop_from_state: int = 0, spec_hash
             state_rows.append(s)
     if state_rows_override is not None:
         state_rows = state_rows_override(state_rows)
+    if journal_rows_override is not None:
+        journal_rows = journal_rows_override(journal_rows)
     # a stray V2 row and an unresolved row must be ignored, never counted
     journal_rows.append({**journal_rows[0], "strategy_name": "Meteorologist V2"})
     journal_rows.append(
@@ -276,7 +313,7 @@ def _write_record(tmp_path: Path, layout, *, drop_from_state: int = 0, spec_hash
                 "market_family": "KXHIGH",
                 "grouping_unit": "target_date",
                 "unit_win_rule": "date_pnl_gt_0",
-                "thresholds": {"n_min": 50, "alpha": 0.05, "net_pnl_gt": 0.0},
+                "thresholds": thresholds or {"n_min": 50, "alpha": 0.05, "net_pnl_gt": 0.0},
                 "fee_type": "taker",
                 "adverse_fill": 0.01,
                 "requires_realistic_fills": True,
@@ -288,13 +325,22 @@ def _write_record(tmp_path: Path, layout, *, drop_from_state: int = 0, spec_hash
     return journal, state, registration
 
 
-def _run(tmp_path: Path, journal, state, registration, **kw):
+def _run(tmp_path: Path, journal, state, registration, *, git=REG_COMMIT, **kw):
+    """Run the gate with the two operator assertions supplied by default.
+
+    ``realistic_fills=True`` and a git double that CONFIRMS the registration
+    time: without them every record now refuses (F3 review defects 5 and 6), so
+    the scenario tests below would all read the same and prove nothing. The
+    tests that own those two conditions override them.
+    """
+    kw.setdefault("realistic_fills", True)
     out = tmp_path / "verdict.json"
     verdict = gate.run_gate(
         journal_path=str(journal),
         state_path=str(state),
         registration_path=str(registration),
         out_path=str(out),
+        commit_time_lookup=_fake_git(git),
         **kw,
     )
     on_disk = json.loads(out.read_text(encoding="utf-8"))
@@ -326,18 +372,206 @@ def test_poisson_binomial_reduces_to_the_binomial_with_one_fill_per_unit():
         assert abs(float(gate.poisson_binomial_upper_tail([w] * 50, k)) - gate.binomial_upper_tail(50, k, 0.417)) < 1e-12
 
 
-def test_unit_null_win_probability_enumerates_fill_outcomes():
+def test_minimal_winning_sets_generate_the_unit_win_event():
+    """The win event is ``sum_{i in A} qty_i > sum_i (p_i + f_i) qty_i``, upward closed."""
     one = {"entry_price": P_ENTRY, "fee_per_contract": 0.017, "quantity": float(QTY)}
-    assert abs(float(gate.unit_null_win_probability([one, one])) - float(W_TWO)) < 1e-15
+    # one win pays for one loss -> either fill alone is a minimal winning set
+    assert gate.unit_minimal_winning_sets([one, one]) == [(0,), (1,)]
+    # one win does NOT pay for two losses -> any two of the three
+    assert gate.unit_minimal_winning_sets([one] * 3) == [(0, 1), (0, 2), (1, 2)]
+    # extreme pair: only both-win is profitable
     a = {"entry_price": 0.08, "fee_per_contract": 0.0055, "quantity": 20.0}
     b = {"entry_price": 0.92, "fee_per_contract": 0.0055, "quantity": 20.0}
-    # only both-win wins: w = q*_a * q*_b
-    assert abs(float(gate.unit_null_win_probability([a, b])) - 0.0855 * 0.9255) < 1e-15
+    assert gate.unit_minimal_winning_sets([a, b]) == [(0, 1)]
+    # brute-force cross-check of the generated up-set against direct enumeration
+    fills = [
+        {"entry_price": 0.30, "fee_per_contract": 0.01, "quantity": 5.0},
+        {"entry_price": 0.55, "fee_per_contract": 0.02, "quantity": 11.0},
+        {"entry_price": 0.61, "fee_per_contract": 0.02, "quantity": 3.0},
+    ]
+    minimal = gate.unit_minimal_winning_sets(fills)
+    for mask in range(8):
+        members = {i for i in range(3) if mask & (1 << i)}
+        pnl = sum(
+            (1 - f["entry_price"] - f["fee_per_contract"]) * f["quantity"]
+            if i in members
+            else -(f["entry_price"] + f["fee_per_contract"]) * f["quantity"]
+            for i, f in enumerate(fills)
+        )
+        assert (pnl > 1e-12) == any(set(A) <= members for A in minimal), members
+
+
+def test_unit_null_is_the_least_favourable_dependence_not_independence():
+    """F3 review defect 1: fills in a unit are ladder brackets, not independent draws."""
+    one = {"entry_price": P_ENTRY, "fee_per_contract": 0.017, "quantity": float(QTY)}
+    # TWO mutually exclusive brackets: exactly one wins with probability q1 + q2,
+    # and one win pays for one loss, so the unit wins with 0.834 -- NOT the
+    # 0.660111 the independent model reported.
+    w2 = gate.unit_null_win_probability([one, one])
+    assert abs(float(w2) - 0.834) < 1e-15
+    assert float(gate.unit_null_win_probability_independent([one, one])) == pytest.approx(0.660111)
+    assert w2 > gate.unit_null_win_probability_independent([one, one])
+    # one fill per unit is untouched: exactly q*
+    assert abs(float(gate.unit_null_win_probability([one])) - 0.417) < 1e-15
+    # extreme pair: only both-win wins -> min(q*) by Frechet, just above the product
+    a = {"entry_price": 0.08, "fee_per_contract": 0.0055, "quantity": 20.0}
+    b = {"entry_price": 0.92, "fee_per_contract": 0.0055, "quantity": 20.0}
+    assert float(gate.unit_null_win_probability([a, b])) == pytest.approx(0.0855, abs=1e-15)
+    assert float(gate.unit_null_win_probability_independent([a, b])) == pytest.approx(0.0855 * 0.9255)
     # a unit whose PnL can only be exactly 0 is a loss (exact rationals, no rounding win)
     zero = {"entry_price": 0.5, "fee_per_contract": 0.0, "quantity": 2.0}
-    assert gate.unit_null_win_probability([zero, zero]) == Fraction(1, 4)  # both win only
+    assert gate.unit_null_win_probability([zero, zero]) == Fraction(1, 2)  # both-win, Frechet
+    assert gate.unit_null_win_probability_independent([zero, zero]) == Fraction(1, 4)
+    # THREE brackets at 0.417: 3 q* > 1, so no dependence structure is excluded
+    # and the unit carries no evidence at all. The gate says so rather than
+    # inventing a copula.
+    assert gate.unit_null_win_probability([one] * 3) == Fraction(1)
     with pytest.raises(gate.GateRefusal):
         gate.unit_null_win_probability([one] * (gate.MAX_FILLS_PER_UNIT + 1))
+
+
+def test_the_null_upper_bounds_the_independent_model_on_random_units():
+    """The independent law is ONE admissible coupling, so the bound must dominate it."""
+    rng = random.Random(20260905)
+    for _ in range(200):
+        fills = [
+            {
+                "entry_price": round(rng.uniform(0.02, 0.95), 2),
+                "fee_per_contract": round(rng.uniform(0.0, 0.03), 4),
+                "quantity": float(rng.randint(1, 30)),
+            }
+            for _ in range(rng.choice([1, 2, 3, 4]))
+        ]
+        bound = gate.unit_null_win_probability(fills)
+        assert bound >= gate.unit_null_win_probability_independent(fills)
+        assert Fraction(0) <= bound <= Fraction(1)
+
+
+def test_true_null_pass_rate_is_at_or_below_nominal():
+    """The gate must not pass a zero-EV strategy more often than alpha.
+
+    The DGP is the dependence the independence unit exists to absorb: every
+    settlement day carries TWO disjoint brackets on ONE city-day ladder, so
+    under a zero-EV null exactly one of them settles YES with probability
+    q*_1 + q*_2 = 0.834 and neither does with 0.166. One win pays for one loss,
+    so the unit is profitable exactly when one of them lands.
+
+    Both the exact PASS probability (the whole sampling distribution, not a
+    sample of it) and a Monte-Carlo run must sit at or below alpha. With the
+    superseded independent null the same DGP passed 88.5% of the time.
+    """
+    trades = _sim_trades([True] * 50)
+    modelled = [u["_w_u"] for u in gate.group_units(trades)]
+    assert len(modelled) == 50
+
+    # The gate's own p, tabulated over every attainable winning count. p depends
+    # on the outcomes only through k, so this IS the gate's decision rule.
+    p_of_k = {k: float(gate.poisson_binomial_upper_tail(modelled, k)) for k in range(51)}
+    k_crit = min(k for k in range(51) if p_of_k[k] < ALPHA)
+
+    # EXACT true-null PASS probability: K ~ 50 x Bernoulli(0.834) under the DGP.
+    # This is the whole sampling distribution, not a sample of it.
+    truth = [Fraction(834, 1000)] * 50
+    exact_rate = float(gate.poisson_binomial_upper_tail(truth, k_crit))
+    assert exact_rate <= ALPHA, (
+        f"true-null PASS rate {exact_rate:.4f} exceeds alpha {ALPHA} "
+        f"(the gate passes at k >= {k_crit}, and a zero-EV strategy reaches that "
+        f"{exact_rate:.1%} of the time)"
+    )
+
+    # ... and measured, so the claim is not only algebraic
+    rng = random.Random(20260905)
+    reps, passes = 4000, 0
+    for _ in range(reps):
+        k = sum(1 for _ in range(50) if rng.random() < 0.834)
+        net = WIN_PNL * k + 2 * LOSS_PNL * (50 - k) + LOSS_PNL * k
+        if p_of_k[k] < ALPHA and net > 0.0:
+            passes += 1
+    measured = passes / reps
+    assert measured <= ALPHA, f"measured true-null PASS rate {measured} exceeds alpha {ALPHA}"
+
+    # the hand numbers behind those rates
+    assert k_crit == 47
+    assert all(float(w) == pytest.approx(0.834, abs=1e-15) for w in modelled)
+    assert exact_rate == pytest.approx(0.02448, abs=1e-4)
+
+    # the gate's own end-to-end verdict agrees with the p(k) memo at the boundary
+    for k in (k_crit - 1, k_crit):
+        v = _evaluate_sim(k)
+        assert abs(v["units"]["p_upper_tail"] - p_of_k[k]) < 1e-15
+        assert (v["verdict"] == "PASS") == (k >= k_crit), k
+    assert _evaluate_sim(50)["verdict"] == "PASS"  # the test is not vacuous
+
+    # the model this replaced, scored on the same true null, on the same layout
+    one = {"entry_price": P_ENTRY, "fee_per_contract": ENTRY_FEE / QTY, "quantity": float(QTY)}
+    superseded = [gate.unit_null_win_probability_independent([one, one])] * 50
+    k_crit_old = min(
+        k for k in range(51) if float(gate.poisson_binomial_upper_tail(superseded, k)) < ALPHA
+    )
+    old_rate = float(gate.poisson_binomial_upper_tail(truth, k_crit_old))
+    assert k_crit_old == 39 and old_rate > 0.85  # 0.8853: an 18x over-run of alpha
+
+
+def _sim_trades(unit_wins, *, price: float = P_ENTRY):
+    """One settled unit per entry: two mutually exclusive brackets on one ladder.
+
+    Built in the shape ``collect_settled_trades`` emits, so ``group_units`` and
+    ``evaluate`` see exactly what a real record would give them.
+    """
+    d0 = date(2026, 6, 1)
+    fee_pc = ENTRY_FEE / QTY
+    out = []
+    for i, won in enumerate(unit_wins):
+        day = d0 + timedelta(days=i)
+        for leg, fill_won in enumerate((bool(won), False)):  # one win pays for one loss
+            symbol = f"KXHIGH{CITIES[0]}-{day:%y%b%d}-B{84.5 + leg}".upper()
+            pnl = (1.0 - price) * QTY if fill_won else (0.0 - price) * QTY
+            out.append(
+                {
+                    "symbol": symbol,
+                    "strategy_name": STRATEGY,
+                    "target_date": day.isoformat(),
+                    "entry_time": f"{day - timedelta(days=1)}T15:00:0{leg}",
+                    "exit_time": f"{day + timedelta(days=1)}T04:00:00+00:00",
+                    "contract_side": "YES",
+                    "entry_price": price,
+                    "quantity": float(QTY),
+                    "exit_price": 1.0 if fill_won else 0.0,
+                    "pnl": pnl,
+                    "source": "simulation",
+                    "maker_booked": False,
+                    "repaired": False,
+                    "entry_fee": ENTRY_FEE,
+                    "fee_source": "closed_trades.entry_fee",
+                    "fee_per_contract": fee_pc,
+                    "net_pnl": pnl - ENTRY_FEE,
+                    "won": (pnl - ENTRY_FEE) > 0.0,
+                    "q_star": price + fee_pc,
+                }
+            )
+    return out
+
+
+def _evaluate_sim(k_wins: int):
+    """``evaluate`` on a simulated record with exactly ``k_wins`` winning units."""
+    trades = _sim_trades([True] * k_wins + [False] * (50 - k_wins))
+    return gate.evaluate(
+        trades,
+        {
+            "spec_hash": SPEC_HASH,
+            "strategy_name": STRATEGY,
+            "grouping_unit": "target_date",
+            "thresholds": {"n_min": 50, "alpha": ALPHA, "net_pnl_gt": 0.0},
+            "fee_type": "taker",
+            "requires_realistic_fills": True,
+            "registration_commit_utc": REG_COMMIT,
+        },
+        observed_spec_hash=SPEC_HASH,
+        spec_hash_source="test",
+        realistic_fills=True,
+        counts={},
+        registration_commit_git=(REG_COMMIT, "test double"),
+    )
 
 
 def test_breakeven_is_price_plus_fee_per_contract():
@@ -355,7 +589,7 @@ def test_pass_scenario_reproduces_hand_computed_p(tmp_path):
     journal, state, registration = _write_record(tmp_path, layout)
     v = _run(tmp_path, journal, state, registration)
 
-    assert v["refused"] is False
+    assert v["refused"] is False and v["refusals"] == []
     assert v["units"]["n"] == 50
     assert v["units"]["k_wins"] == 32
     assert abs(v["units"]["p_upper_tail"] - P_PASS_UNITS) < 1e-12
@@ -372,21 +606,32 @@ def test_pass_scenario_reproduces_hand_computed_p(tmp_path):
     assert c["n_units_ge_n_min"]["ok"] and c["p_lt_alpha"]["ok"]
     assert c["net_pnl_gt_0"]["ok"] and c["spec_hash_unchanged"]["ok"]
     assert c["registered_before_first_trade"]["ok"] is True and c["registered_before_first_trade"]["gating"] is True
+    assert c["registered_before_first_trade"]["verified"] is True
     assert c["fee_type_matches"]["ok"] is True
-    assert c["realistic_fills_enabled"]["ok"] is None  # unknown -> UNVERIFIED, non-gating
-    assert v["not_applicable"] == ["realistic_fills_enabled"]
+    assert c["realistic_fills_enabled"]["ok"] is True
+    assert c["excluded_rate_within_bound"]["ok"] is True
+    assert c["excluded_rate_within_bound"]["observed"] == 0.0
+    assert v["not_applicable"] == []
     assert v["verdict"] == "PASS"
     assert v["units"]["units_with_multiple_fills"] == 10
+    assert v["units"]["units_with_saturated_null"] == 0
     assert v["counts"]["excluded"] == {"other_strategy": 1, "settlement_unresolved": 1}
+    assert v["counts"]["excluded_rows"] == []  # scope filters are not "dropped rows"
+    assert v["counts"]["quality_excluded"] == 0
+    assert v["counts"]["corrupt_rows"] == []
     assert v["counts"]["fills_by_fee_source"] == {"closed_trades.entry_fee": 60}
     assert v["warnings"] == []
-    # unit-level null: two-fill dates at 0.660111, singles at 0.417
+    # unit-level null: two-fill dates at 0.834 (least favourable), singles at 0.417
     two = [u for u in v["unit_table"] if u["n_fills"] == 2]
     one = [u for u in v["unit_table"] if u["n_fills"] == 1]
     assert len(two) == 10 and len(one) == 40
-    assert all(abs(u["null_win_probability"] - float(W_TWO)) < 1e-12 for u in two)
+    assert all(abs(u["null_win_probability"] - 0.834) < 1e-12 for u in two)
+    assert all(u["n_minimal_winning_sets"] == 2 and u["min_fills_to_win"] == 1 for u in two)
     assert all(abs(u["null_win_probability"] - 0.417) < 1e-12 for u in one)
     assert all(abs(u["q_star"] - 0.417) < 1e-12 for u in v["unit_table"])
+    # the superseded independent model is reported beside it, non-gating
+    assert all(u["null_win_probability_independent"] == pytest.approx(0.660111) for u in two)
+    assert all(u["null_saturated"] is False for u in v["unit_table"])
 
 
 def test_fail_scenario_p_is_the_only_failing_condition(tmp_path):
@@ -406,21 +651,22 @@ def test_fail_scenario_p_is_the_only_failing_condition(tmp_path):
     assert v["verdict"] == "FAIL"
 
 
-def test_extreme_price_pairs_use_the_exact_unit_null(tmp_path):
-    """0.08/0.92 pairs: a split date loses, so w_pair = q*_a q*_b, far below the pooled q_bar."""
+def test_extreme_price_pairs_use_the_least_favourable_unit_null(tmp_path):
+    """0.08/0.92 pairs: only a both-win date is profitable, so w_pair = min(q*)."""
     layout = _layout(both_win=5, split=3, both_lose=2, single_wins=24, pair_prices=(0.08, 0.92))
     journal, state, registration = _write_record(tmp_path, layout)
     v = _run(tmp_path, journal, state, registration)
     assert v["units"]["n"] == 50 and v["units"]["k_wins"] == 29
     f = Fraction(11, 2000)  # 0.11 / 20
-    w_pair = (Fraction(8, 100) + f) * (Fraction(92, 100) + f)
+    w_pair = min(Fraction(8, 100) + f, Fraction(92, 100) + f)
     hand = _pb_tail([w_pair] * 10 + [Q_STAR] * 40, 29)
     assert abs(float(hand) - P_EXTREME_UNITS) < 1e-15
     assert abs(v["units"]["p_upper_tail"] - float(hand)) < 1e-12
     assert abs(v["units"]["p_pooled_qbar_secondary"] - P_EXTREME_POOLED) < 1e-9
     two = [u for u in v["unit_table"] if u["n_fills"] == 2]
     assert all(abs(u["null_win_probability"] - float(w_pair)) < 1e-12 for u in two)
-    assert v["verdict"] == "PASS"  # exact p 0.00039 < 0.05
+    assert all(u["n_minimal_winning_sets"] == 1 and u["min_fills_to_win"] == 2 for u in two)
+    assert v["verdict"] == "PASS"  # exact p 0.00043 < 0.05
 
 
 def test_spec_hash_change_fails_an_otherwise_passing_record(tmp_path):
@@ -451,28 +697,82 @@ def test_tampered_spec_file_fails_even_when_registration_matches(tmp_path):
     assert v["verdict"] == "FAIL"
 
 
+# ---------------------------------------------------------------------------
+# Registration time (F3 review defect 6)
+# ---------------------------------------------------------------------------
 def test_registration_commit_time_is_gating_by_default(tmp_path):
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
     journal, state, registration = _write_record(tmp_path, layout, commit_utc=None)
-    v = _run(tmp_path, journal, state, registration)
+    v = _run(tmp_path, journal, state, registration, git=None)
     c = v["conditions"]["registered_before_first_trade"]
-    assert c["ok"] is False and c["gating"] is True
+    assert c["ok"] is False and c["gating"] is True and c["verified"] is False
     assert "not recorded" in c["note"]
     assert v["verdict"] == "FAIL" and v["failing"] == ["registered_before_first_trade"]
     # dry-run downgrade: reported, not gating, recorded in the verdict
-    v2 = _run(tmp_path, journal, state, registration, allow_unverified_registration=True)
+    v2 = _run(tmp_path, journal, state, registration, git=None, allow_unverified_registration=True)
     c2 = v2["conditions"]["registered_before_first_trade"]
     assert c2["ok"] is None and c2["gating"] is False and "UNVERIFIED" in c2["note"]
     assert v2["allow_unverified_registration"] is True
     assert "registered_before_first_trade" in v2["not_applicable"]
     assert v2["verdict"] == "PASS"
     # a registration dated AFTER the first fill fails even when filled in
-    journal, state, registration = _write_record(tmp_path, layout, commit_utc="2026-06-15T00:00:00+00:00")
-    v3 = _run(tmp_path, journal, state, registration)
+    late = "2026-06-15T00:00:00+00:00"
+    journal, state, registration = _write_record(tmp_path, layout, commit_utc=late)
+    v3 = _run(tmp_path, journal, state, registration, git=late)
     assert v3["conditions"]["registered_before_first_trade"]["ok"] is False
+    assert v3["conditions"]["registered_before_first_trade"]["verified"] is True
     assert v3["verdict"] == "FAIL"
 
 
+def test_registration_commit_utc_is_reconciled_against_git(tmp_path):
+    """A hand-typed timestamp does not establish when the file was committed."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    # git says the registration was added AFTER the run started; the typed value
+    # claims it predates it. The gate refuses rather than picking a side.
+    v = _run(tmp_path, journal, state, registration, git="2026-06-20T09:00:00+00:00")
+    c = v["conditions"]["registered_before_first_trade"]
+    assert c["ok"] is False and c["verified"] is False
+    assert "2026-06-20" in c["disagreement"] and "ADDED" in c["disagreement"]
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+    assert any("does not reconcile with git" in r for r in v["refusals"])
+    # --allow-unverified-registration does NOT paper over a contradiction
+    v2 = _run(
+        tmp_path, journal, state, registration,
+        git="2026-06-20T09:00:00+00:00", allow_unverified_registration=True,
+    )
+    assert v2["refused"] is True and v2["verdict"] == "FAIL"
+    # git cannot answer -> UNVERIFIED, and the condition still GATES by default:
+    # the typed value alone was the whole defect.
+    v3 = _run(tmp_path, journal, state, registration, git=None)
+    c3 = v3["conditions"]["registered_before_first_trade"]
+    assert c3["ok"] is False and c3["verified"] is False and c3["gating"] is True
+    assert c3["note"].startswith("UNVERIFIED") and "git records no ADD" in c3["git_source"]
+    assert v3["verdict"] == "FAIL" and v3["failing"] == ["registered_before_first_trade"]
+    assert v3["refused"] is False  # unverifiable is a FAIL, a contradiction is a refusal
+    # the same instant expressed in another offset still reconciles
+    v4 = _run(tmp_path, journal, state, registration, git="2026-04-30T20:00:00-04:00")
+    assert v4["conditions"]["registered_before_first_trade"]["verified"] is True
+    assert v4["verdict"] == "PASS"
+    assert v4["registration"]["registration_commit_utc_from_git"] == "2026-04-30T20:00:00-04:00"
+
+
+def test_git_added_commit_utc_reads_this_repository():
+    """The real lookup, against a file that is genuinely tracked here."""
+    tracked = REPO_ROOT / "configs" / "factory" / "gate_registration.template.json"
+    iso, source = gate.git_added_commit_utc(str(tracked))
+    if iso is None:  # shallow clone / exported tarball / no git
+        pytest.skip(f"git could not answer for a tracked file: {source}")
+    assert "git log" in source
+    assert gate._as_utc(iso) is not None
+    # a path git has never seen returns None with a reason, never a guess
+    missing, why = gate.git_added_commit_utc(str(REPO_ROOT / "configs" / "factory" / "no_such_file.json"))
+    assert missing is None and "unverified" in why
+
+
+# ---------------------------------------------------------------------------
+# Realistic fills (F3 review defect 5)
+# ---------------------------------------------------------------------------
 def test_realistic_fills_condition(tmp_path):
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
     journal, state, registration = _write_record(tmp_path, layout)
@@ -484,11 +784,33 @@ def test_realistic_fills_condition(tmp_path):
     assert v["not_applicable"] == [] and v["verdict"] == "PASS"
     rc = gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
-         "--realistic-fills", "false", "--quiet"]
+         "--realistic-fills", "false", "--allow-unverified-registration", "--quiet"]
     )
     assert rc == gate.EXIT_FAIL
 
 
+def test_unknown_realistic_fills_is_refused_not_downgraded(tmp_path):
+    """``requires_realistic_fills`` was a no-op: the state never records the flag."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    # the exchange state genuinely carries no realistic_fills key
+    assert gate._state_realistic_fills(str(state)) is None
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None)
+    c = v["conditions"]["realistic_fills_enabled"]
+    assert c["ok"] is False and c["gating"] is True and "REFUSED" in c["note"]
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+    assert any("requires_realistic_fills" in r for r in v["refusals"])
+    assert "realistic_fills_enabled" not in v["not_applicable"]
+    rc = gate.main(
+        ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
+         "--allow-unverified-registration", "--quiet"]
+    )
+    assert rc == gate.EXIT_REFUSED
+
+
+# ---------------------------------------------------------------------------
+# Fees
+# ---------------------------------------------------------------------------
 def test_maker_booked_fill_under_taker_registration_fails(tmp_path):
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
 
@@ -546,6 +868,9 @@ def test_quantity_mismatch_uses_the_journal_row_and_warns(tmp_path):
     assert v["verdict"] == "PASS"
 
 
+# ---------------------------------------------------------------------------
+# NO-side settlement
+# ---------------------------------------------------------------------------
 def test_no_side_fills_repaired_state_and_cleared_closed_trades_still_pass(tmp_path):
     """NO fills post-724d93c (or repaired) count normally, even after a cycle reset clears the state."""
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
@@ -558,6 +883,7 @@ def test_no_side_fills_repaired_state_and_cleared_closed_trades_still_pass(tmp_p
     v = _run(tmp_path, journal, state, registration)
     assert v["verdict"] == "PASS" and v["units"]["k_wins"] == 32
     assert v["counts"]["stale_no_side_rows"] == []
+    assert v["counts"]["corrupt_rows"] == []
     # cycle reset: closed_trades cleared, journal rows carry the repaired marker
     (tmp_path / "exchange_state.json").write_text(json.dumps({"closed_trades": [], "positions": []}), "utf-8")
     v2 = _run(tmp_path, journal, state, registration)
@@ -590,15 +916,249 @@ def test_unrepaired_stale_no_rows_are_refused(tmp_path):
             r["repaired_no_side_settlement"] = True
             r["exit_price"] = 1.0 - r["exit_price"]
             r["pnl"] = (r["exit_price"] - r["entry_price"]) * r["quantity"]
-    rows[1].pop("settlement_outcome", None)  # a YES row: unaffected
     rows[0].pop("settlement_outcome", None)
     rows[0].pop("repaired_no_side_settlement", None)
     journal.write_text("".join(json.dumps(r) + "\n" for r in rows), "utf-8")
     v = _run(tmp_path, journal, state, registration)
     assert v["counts"]["excluded"].get("no_side_outcome_unverifiable") == 1
     assert v["counts"]["stale_no_side_rows"] == []
+    assert v["counts"]["quality_excluded"] == 1
+    assert v["counts"]["excluded_rate"] == pytest.approx(1 / 60)
 
 
+# ---------------------------------------------------------------------------
+# Settlement reconciliation (F3 review defect 2)
+# ---------------------------------------------------------------------------
+def test_booked_pnl_that_does_not_reconcile_is_refused(tmp_path):
+    """Nothing checked that pnl followed from exit_price, entry_price and quantity."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _flatter(rows):
+        rows[20] = {**rows[20], "pnl": rows[20]["pnl"] + 50.0}  # a loser booked as a winner
+        return rows
+
+    journal, state, registration = _write_record(tmp_path, layout, state_rows_override=_flatter)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "pnl_not_reconcilable" in str(exc.value)
+    assert "contradict their own settlement fields" in str(exc.value)
+    rc = gate.main(
+        ["--journal", str(journal), "--state", str(state), "--registration", str(registration), "--quiet"]
+    )
+    assert rc == gate.EXIT_REFUSED
+
+
+def test_a_journal_of_losses_booked_as_wins_cannot_reach_a_verdict(tmp_path):
+    """The reviewer's scenario: 50 fills that all lost, booked at a PASS-worthy pnl."""
+    d0 = date(2026, 6, 1)
+    fills = []
+    for i in range(50):
+        j, s = _fill(d0 + timedelta(days=i), CITIES[i % 4], False, i)
+        j = {**j, "pnl": 11.66}  # settled to 0 but booked as if it had paid out
+        s = {**s, "pnl": 11.66}
+        fills.append((j, s))
+    journal, state, registration = _write_record(tmp_path, [], fills=fills)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "pnl_not_reconcilable" in str(exc.value)
+
+
+def test_mis_repaired_no_side_row_is_refused_despite_the_marker(tmp_path):
+    """``repaired_no_side_settlement`` is written by a script that can mis-repair."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    fills = []
+    for idx, (day, city, won, price) in enumerate(layout):
+        j, s = _fill(day, city, won, idx, price,
+                     contract_side="NO" if idx == 12 else "YES",
+                     repaired=idx == 12)
+        if idx == 12:  # "repaired" onto the wrong leg: the marker says trust me
+            j = {**j, "exit_price": 1.0 - j["exit_price"]}
+            s = {**s, "exit_price": 1.0 - s["exit_price"]}
+        fills.append((j, s))
+    journal, state, registration = _write_record(tmp_path, layout, fills=fills)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "exit_price_contradicts_settlement" in str(exc.value)
+    assert gate.stale_no_side_settlement(fills[12][0]) is None  # the old check waves it through
+
+
+def test_settlement_outcome_contradicting_the_strike_spec_is_refused(tmp_path):
+    """The direction is re-derived from the settled high, not read back off the row."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _bad_high(rows):
+        rows[8] = {**rows[8], "settlement_high": 70.0}  # 70F cannot settle an 84-85 bracket YES
+        return rows
+
+    journal, state, registration = _write_record(tmp_path, layout, journal_rows_override=_bad_high)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "settlement_outcome_contradicts_strike_spec" in str(exc.value)
+
+
+def test_rows_that_cannot_be_reconciled_are_excluded_not_trusted(tmp_path):
+    """No outcome / no strike spec: unreadable, so dropped and charged to the budget."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _strip(rows):
+        rows[14] = {k: v for k, v in rows[14].items() if k != "settlement_outcome"}
+        return rows
+
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_strip,
+        state_rows_override=lambda rows: [
+            {k: v for k, v in r.items() if k != "settlement_outcome"} if i == 14 else r
+            for i, r in enumerate(rows)
+        ],
+    )
+    v = _run(tmp_path, journal, state, registration)
+    assert v["counts"]["excluded"]["settlement_outcome_missing"] == 1
+    dropped = [r for r in v["counts"]["excluded_rows"] if r["reason"] == "settlement_outcome_missing"]
+    assert len(dropped) == 1 and dropped[0]["symbol"] and dropped[0]["entry_time"]
+    assert v["counts"]["settled_fills"] == 59
+    assert v["counts"]["excluded_rate"] == pytest.approx(1 / 60)
+    assert v["conditions"]["excluded_rate_within_bound"]["ok"] is True
+
+
+def test_state_only_rows_without_bracket_semantics_are_excluded(tmp_path):
+    """closed_trades carries no strike spec, so a state-only fill cannot be re-derived."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(
+        tmp_path, layout,
+        journal_rows_override=lambda rows: rows[1:],  # row 0 survives only in closed_trades
+    )
+    v = _run(tmp_path, journal, state, registration)
+    assert v["counts"]["excluded"]["strike_spec_unverifiable"] == 1
+    assert [r["reason"] for r in v["counts"]["excluded_rows"]] == ["strike_spec_unverifiable"]
+    assert "spec" in v["counts"]["excluded_rows"][0]["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Exclusion budget (F3 review defect 3)
+# ---------------------------------------------------------------------------
+def test_degrading_losing_fills_cannot_buy_a_pass(tmp_path):
+    """The gate used to improve as its data got worse, silently and without bound."""
+    layout = _layout(both_win=4, split=2, both_lose=4, single_wins=16)  # the FAIL scenario
+    losers = [i for i, (_, _, won, _) in enumerate(layout) if not won]
+    assert len(losers) >= 10
+
+    def _corrupt_losers(rows):
+        for i in losers[:12]:  # make the losing fills unreadable, not wrong
+            rows[i] = {k: v for k, v in rows[i].items() if k != "quantity"}
+        return rows
+
+    journal, state, registration = _write_record(
+        tmp_path, layout,
+        journal_rows_override=_corrupt_losers,
+        state_rows_override=lambda rows: [r for i, r in enumerate(rows) if i not in losers[:12]],
+    )
+    v = _run(tmp_path, journal, state, registration)
+    c = v["conditions"]["excluded_rate_within_bound"]
+    assert c["ok"] is False
+    assert c["quality_excluded"] == 12 and c["observed"] == pytest.approx(12 / 60)
+    assert c["excluded_by_reason"] == {"missing_numeric_field": 12}
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+    assert any("excluded_rate" in r for r in v["refusals"])
+    # every hole is named, not just counted
+    assert len(v["counts"]["excluded_rows"]) == 12
+    assert {r["reason"] for r in v["counts"]["excluded_rows"]} == {"missing_numeric_field"}
+    assert "excluded_rate_within_bound" in v["failing"]
+
+
+def test_exclusion_budget_is_configurable_from_the_registration(tmp_path):
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _strip(rows):
+        for i in (14, 16):
+            rows[i] = {k: v for k, v in rows[i].items() if k != "settlement_outcome"}
+        return rows
+
+    strip_state = lambda rows: [  # noqa: E731
+        {k: v for k, v in r.items() if k != "settlement_outcome"} if i in (14, 16) else r
+        for i, r in enumerate(rows)
+    ]
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_strip, state_rows_override=strip_state
+    )
+    v = _run(tmp_path, journal, state, registration)
+    assert v["counts"]["excluded_rate"] == pytest.approx(2 / 60)  # 3.3% > the 2% default
+    assert v["refused"] is True
+    journal, state, registration = _write_record(
+        tmp_path, layout, journal_rows_override=_strip, state_rows_override=strip_state,
+        thresholds={"n_min": 50, "alpha": 0.05, "net_pnl_gt": 0.0, "max_excluded_rate": 0.05},
+    )
+    v2 = _run(tmp_path, journal, state, registration)
+    assert v2["conditions"]["excluded_rate_within_bound"]["required_le"] == 0.05
+    assert v2["refused"] is False and v2["verdict"] == "PASS"
+    assert gate.MAX_EXCLUDED_RATE == 0.02  # the default the registration overrode
+
+
+# ---------------------------------------------------------------------------
+# target_date (F3 review defect 4)
+# ---------------------------------------------------------------------------
+def test_target_date_is_cross_checked_against_the_ticker_label(tmp_path):
+    """A wrong label splits one city-day ladder into several 'independent' units."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _shift(rows):
+        rows[0] = {**rows[0], "target_date": "2026-07-04"}  # the ticker says 2026-06-01
+        return rows
+
+    journal, state, registration = _write_record(tmp_path, layout, journal_rows_override=_shift)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "target_date_mismatch" in str(exc.value) and "2026-07-04" in str(exc.value)
+
+    def _garbage(rows):
+        rows[2] = {**rows[2], "target_date": "sometime in June"}
+        return rows
+
+    journal, state, registration = _write_record(tmp_path, layout, journal_rows_override=_garbage)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "target_date_unparseable" in str(exc.value)
+
+
+def test_target_date_string_variants_stay_one_unit(tmp_path):
+    """Three fills on ONE ladder must not become three units through formatting."""
+    d = date(2026, 6, 1)
+    fills = []
+    for idx, label in enumerate(("2026-06-01", "2026-06-01T00:00:00", "2026-06-01T00:00:00+00:00")):
+        j, s = _fill(d, CITIES[idx], idx == 0, idx)
+        fills.append(({**j, "target_date": label}, s))
+    for i in range(49):  # 49 clean single-fill dates so n_units clears n_min
+        day = d + timedelta(days=1 + i)
+        fills.append(_fill(day, CITIES[i % 4], i < 24, 100 + i))
+    journal, state, registration = _write_record(tmp_path, [], fills=fills)
+    v = _run(tmp_path, journal, state, registration)
+    assert v["units"]["n"] == 50, "the three labels named one settlement day"
+    first = [u for u in v["unit_table"] if u["target_date"] == "2026-06-01"][0]
+    assert first["n_fills"] == 3
+    # and three brackets on one day carry no evidence under the least-favourable null
+    assert first["null_saturated"] is True and first["null_win_probability"] == 1.0
+    assert v["units"]["units_with_saturated_null"] == 1
+    assert gate._parse_iso_day("2026-06-01T00:00:00+00:00") == date(2026, 6, 1)
+    assert gate._parse_iso_day("not a date") is None
+
+
+def test_target_date_derived_from_a_wrong_expiration_stamp_is_refused(tmp_path):
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+
+    def _bad_stamp(rows):
+        row = dict(rows[1])  # an odd index: no explicit target_date, so it is derived
+        assert "target_date" not in row
+        row["expiration_time"] = "2026-09-09T04:00:00+00:00"
+        return [row if i == 1 else r for i, r in enumerate(rows)]
+
+    journal, state, registration = _write_record(tmp_path, layout, journal_rows_override=_bad_stamp)
+    with pytest.raises(gate.GateRefusal) as exc:
+        _run(tmp_path, journal, state, registration)
+    assert "target_date_mismatch" in str(exc.value) and "expiration_time" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Power / CLI / registration schema
+# ---------------------------------------------------------------------------
 def test_fewer_than_n_min_units_is_refused(tmp_path):
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)[:40]  # 10x2 + 20 = 30 units
     journal, state, registration = _write_record(tmp_path, layout)
@@ -610,26 +1170,31 @@ def test_fewer_than_n_min_units_is_refused(tmp_path):
     assert v["conditions"]["n_units_ge_n_min"]["ok"] is False
     assert "underpowered" in v["refusal"]
     rc = gate.main(
-        ["--journal", str(journal), "--state", str(state), "--registration", str(registration), "--quiet"]
+        ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
+         "--realistic-fills", "true", "--allow-unverified-registration", "--quiet"]
     )
     assert rc == gate.EXIT_REFUSED
 
 
 def test_cli_exit_codes(tmp_path, capsys):
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
-    journal, state, registration = _write_record(tmp_path, layout)
+    journal, state, registration = _write_record(tmp_path, layout, commit_utc=None)
     rc = gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
+         "--realistic-fills", "true", "--allow-unverified-registration",
          "--out", str(tmp_path / "v.json")]
     )
     assert rc == gate.EXIT_PASS
     printed = json.loads(capsys.readouterr().out)
     assert printed["verdict"] == "PASS" and "fills" not in printed
     layout = _layout(both_win=4, split=2, both_lose=4, single_wins=16)
-    journal, state, registration = _write_record(tmp_path, layout)
+    journal, state, registration = _write_record(tmp_path, layout, commit_utc=None)
     assert gate.main(
-        ["--journal", str(journal), "--state", str(state), "--registration", str(registration), "--quiet"]
+        ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
+         "--realistic-fills", "true", "--allow-unverified-registration", "--quiet"]
     ) == gate.EXIT_FAIL
+    out = capsys.readouterr().out
+    assert "excluded_rate=" in out and "saturated_units=" in out
 
 
 def test_journal_rows_missing_from_state_get_recomputed_taker_fee(tmp_path):
