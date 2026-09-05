@@ -151,8 +151,11 @@ pooled out-of-sample report for the whole procedure by the end of week two.
 - FR-F1.4 `folds.py` (campaigns A/B/C/ALL69 with 2-day embargo; blocked 5-fold diagnostic),
   `ledger.py` (write-then-evaluate parquet, per-date vectors), `registry.py` (family line
   written **before** any result), `coverage.py`, `report.py`.
-- FR-F1.5 Gen-0 seeds encoded exactly: `fr31a_taker`, `fr31b`, `nofilter_no`,
-  `salvage_5f` (diagnostic), `mlweather_fallback` (what maia trades today), `fr31a_gefs`.
+- FR-F1.5 Gen-0 seeds encoded exactly — **seven**: `fr31a_taker`, `fr31b`,
+  `nofilter_no`, `far_yes_taker` (diagnostic, the fourth Phase-2 taker shape),
+  `salvage_5f` (diagnostic, the only MAKER seed), `mlweather_fallback` (what maia
+  trades today), `fr31a_gefs`. `src/factory/genome.py:SEEDS` is the roster of record;
+  the earlier wording named six and dropped `far_yes_taker`.
 - FR-F1.6 `scripts/factory.py freeze-frame | gen0 | board`; compose `factory` and
   `factory-holdout` services; `.gitignore` entries; Hermes `mp_factory_status` and
   `mp_factory_board` tools plus the hourly byte-hash monitor cron to Discord.
@@ -343,19 +346,70 @@ and planted edge, yielding the first pooled OOS number — accepted whatever its
 **Deliverables:** FR-F3.1–F3.4; tests `test_genome_strategy.py`, `test_factory_isolation.py`.
 **Exit criteria:**
 - Replay parity: 0 discrepancies between `GenomeStrategy`'s emitted set and the offline
-  trade set over 1,656 markets for the six seeds and the family-#1 picks; live `p_yes`
-  within 1e-9 of the frame's.
+  trade set over 1,656 markets for the **ten taker genomes** — six of the seven
+  GENE_SPEC v1 seeds plus the four family-#1 picks — with live `p_yes` within 1e-9 of
+  the frame's. `reports/factory/replay_parity_bfcf94654a3a.json`:
+  `discrepancies_gating = 0`, `p_yes_all_within_tol = true`.
+  - **Registered deviation (2026-09-05, HANDOFF section 3 rule 9) — the seventh seed is
+    excluded, and the report is not clean.** The criterion said "the six seeds";
+    `genome.py` defines seven. The extra one, `salvage_5f`, is the MAKER diagnostic and
+    carries **all 148** of the report's discrepancies (`n_offline` 117 vs `n_live` 199),
+    so `ok_strict` is **false** and the 0 quoted above is `discrepancies_gating`, not
+    `discrepancies_total`. The exclusion is permanent and principled rather than a
+    deferral: a maker genome's offline executability folds the forward-looking fill
+    flags `maker_yes_fill`/`maker_no_fill`, which no live path can know at decision
+    time — which is why `scripts/factory.py` refuses to promote any `mode == maker`
+    genome at all. Maker parity is unmeasurable by construction, so it gates nothing;
+    `factory_replay_parity.py --strict` is the switch that makes it gate.
+  - **Registered deviation (2026-09-05) — parity was never run against the calibration
+    provider the bot actually builds. F4 BLOCKER.**
+    `scripts/factory_replay_parity.py` serves the frame's own
+    `WalkForwardCalibrationProvider` (`calibration_kind: "walk_forward"` on every row
+    of the report); `src/bots/weather_bot.py:280` builds `FrozenCalibrationProvider`.
+    Re-running parity for the deployed genome `0c4b20502f2daf65` with the live provider
+    substituted and every other input held fixed gives **60 discrepancies** (`n_live`
+    144 vs `n_offline` 130) and `p_yes_max_abs_diff` **0.336**, against 0 and 0.0 on the
+    control run on the same frame. So what is proven is that the strategy reproduces the
+    frame under the *frame's* calibration — not under the one maia runs. Nothing detects
+    the substitution: the promoted spec's calibration block is `{dir, sha256}` with no
+    `kind`, and the construction guard hashes only the directory, which is byte-identical
+    for both providers. Before any F4 promotion to paper, either serve walk-forward
+    payloads live or re-establish parity under the frozen provider, and record the
+    provider kind in the spec so the guard can refuse a mismatch.
 - `grep -nE 'datetime\.now|time\.time'` over `genome_strategy.py`, `features.py`,
   `genome.py` returns nothing.
 - Every emitted signal has a tz-aware `expiration_time` at settlement-day close; a 24-h
   dev-box dry run settles its positions.
 - On maia: EMIT lines at :00 UTC only, each with exactly one EXECUTED or REJECT line;
-  `limit_price = quote + 0.01`.
-- Risk/mixin/engine diffs empty except the CONTRA-3 log line and the `_load_state` backfill;
-  the sandbox image builds without lightgbm/scipy/pyarrow and imports the strategy.
+  `limit_price = quote + 0.01`. **MET 2026-09-05T15:00:23Z** — 4 EMITs, 4 `GENOME_SHADOW`
+  rejects, `emit_executed []`; see the HANDOFF entry for the tickers.
+- Risk/mixin diffs empty except the CONTRA-3 log line; the engine diff empty except the
+  `_load_state` backfill **and a third exception: the NO-side settlement hunk** (commit
+  724d93c, +15 lines in `SimulatedExchange._close_position`, owner-ratified 2026-09-05,
+  allow-listed by content hash in `tests/test_protected_files.py`). It is the only one of
+  the three that changes booked PnL, and it is registered here because the criterion as
+  written named two exceptions and would otherwise read as violated. The sandbox image
+  builds without lightgbm/scipy and imports the strategy.
+  - **Correction (2026-09-05): the image DOES ship pyarrow.**
+    `deploy/pi/requirements-runtime.txt` pins `pyarrow>=23.0` because the harvester writes
+    parquet. The accurate claim is narrower and is the one that matters: the genome path
+    (`genome_strategy.py`, `features.py`, `genome.py`) is numpy + stdlib only and imports
+    none of the three. lightgbm and scipy are genuinely absent from the image.
 - `gate.py` on a synthetic 60-trade / 50-date journal reproduces a hand-computed binomial p
   and verdict; `measure_fill_realism.py` reports the 90th-percentile drift and, if > 1c,
   the registry records the raised `adverse_fill` and family #1 is re-scored (not re-searched).
+  Both runs report p90 = 0.00, so `adverse_fill = 0.01` stands unchanged.
+  - **Registered deviation (2026-09-05) — the 0.00 is measured on hours the genome does
+    not trade, in a window with no observations.** Both runs
+    (`reports/factory/fill_realism_2026-09-05.json` and `.../fill_realism_2026-09-05b/`)
+    cover the 02:00Z and 03:00Z boundaries only. The deployed genome's 130 offline trades
+    contain **zero** at 02Z or 03Z; they concentrate at 15Z (34.6 %), 04Z (27.7 %) and 16Z
+    (16.2 %). And the declared 20-second primary window has **n = 0** in both runs
+    (`p90_primary_window: null`; every decision poll is a follow-up gap), because the
+    sandbox's per-market poll cadence is p50 35 s / p90 74 s — so the quoted p90 is a
+    next-poll number at a ~35-40 s median lag, not a 20-second one. `adverse_fill = 0.01`
+    is therefore *assumed*, not measured, for the hours that matter; a daytime collector
+    over 15Z/16Z is owed before F4 treats it as evidence.
 
 ### Phase F4 — Sealed holdouts, R3, promotion, paper run (after ratification)
 **Objective:** score the proposed genome exactly once per virgin root, promote through git,
