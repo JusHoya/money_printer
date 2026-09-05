@@ -178,12 +178,36 @@ def test_no_contract_settles_against_the_yes_outcome(exchange):
         qty=10,
         contract_side="NO",
     )
-    # Entry price of a NO contract is already the NO cost; the exchange settles
-    # the YES leg to 1.00 and the buy-side PnL falls out of that.
+    # Entry price of a NO contract is already the NO cost; the YES leg settles
+    # to 1.00, so the NO leg is worth 0.00 and the buyer loses the whole 0.60.
+    # (Until 2026-09-04 the engine booked the YES payoff against the NO entry
+    # and this trade showed +0.40/contract -- a profit on a losing NO.)
     exchange._close_position(pos, 86, reason="EXPIRATION")
     trade = exchange.closed_trades[-1]
-    assert trade["exit_price"] == pytest.approx(1.00)
+    assert trade["exit_price"] == pytest.approx(0.00)
     assert trade["settlement_outcome"] == "yes"
+    assert trade["pnl"] == pytest.approx(_expected_pnl(0.60, 0.00, 10))
+    assert trade["pnl"] < 0
+
+
+def test_no_contract_wins_when_bracket_settles_no(exchange):
+    """A NO position on a NO-settling bracket pays 1.00 on the NO leg."""
+    pos = _open_weather(
+        exchange,
+        "KXHIGHNY-26JUL25-B86.5",
+        "between",
+        86,
+        87,
+        entry=0.33,
+        qty=50,
+        contract_side="NO",
+    )
+    exchange._close_position(pos, 79, reason="EXPIRATION")  # high 79F: bracket settles NO
+    trade = exchange.closed_trades[-1]
+    assert trade["settlement_outcome"] == "no"
+    assert trade["exit_price"] == pytest.approx(1.00)
+    assert trade["pnl"] == pytest.approx(_expected_pnl(0.33, 1.00, 50))
+    assert trade["pnl"] > 0
 
 
 # ======================================================================

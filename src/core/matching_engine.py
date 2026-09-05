@@ -2257,6 +2257,21 @@ class SimulatedExchange:
                 # (passed from update_market using pos['current_price'])
                 exit_price = final_spot_price
 
+            # --- NO-SIDE SETTLEMENT (2026-09-04, F3 dry run finding) ---
+            # ``entry_price`` of a NO position is the NO cost (the
+            # mark-to-market sweep above inverts the YES estimate the same
+            # way), but every binary settlement branch returns the payoff of
+            # the YES leg (1.00 when the bracket settles yes). Booking that
+            # against a NO entry flipped the sign of every settled NO paper
+            # trade (a winning NO at 0.33 closed at 0.00 = -0.33/contract).
+            # The unresolved flat close returns entry_price and is excluded.
+            if (
+                is_binary_settlement
+                and reason != "SETTLEMENT_UNRESOLVED"
+                and pos.get("contract_side") == "NO"
+            ):
+                exit_price = 1.0 - exit_price
+
             # --- SANITY CHECK: Binary options must be in [0.00, 1.00] ---
             if exit_price > 1.0 or exit_price < 0.0:
                 logger.error(
