@@ -57,12 +57,17 @@ upsert GENOME_STRATEGY_ID "$GENOME_ID"
 upsert GENOME_STRATEGY_MODE shadow
 sudo grep -E '^GENOME_' "$ENV_FILE"
 
-SERVICE="$("${COMPOSE[@]}" config --services | head -n 1)"
+SERVICE=sandbox   # the runtime service (container mp-sandbox); NOT config --services|head, which lists autoheal first
+STOPPED=0
+restore() { if [[ "$STOPPED" == 1 ]]; then log "restoring the sandbox after a failure"; "${COMPOSE[@]}" up -d || true; fi; }
+trap restore ERR
 if [[ "$DO_REPAIR" == 1 ]]; then
   log "4/6 NO-side settlement repair (sandbox stopped while the state file is rewritten)"
   "${COMPOSE[@]}" stop
+  STOPPED=1
   REPAIR=(python scripts/repair_no_settlement_pnl.py --state /app/data/exchange_state.json --journal /app/data/trade_journal.jsonl)
   RUN=("${COMPOSE[@]}" run --rm --no-deps --entrypoint python "$SERVICE")
+  "${RUN[@]}" -c 'import src.core.matching_engine; print("repair image OK")' || die "the $SERVICE image cannot import the engine"
   set +e
   "${RUN[@]}" "${REPAIR[@]:1}"                      # dry run: exit 1 = repairs pending, 0 = nothing to do
   rc=$?
@@ -82,6 +87,7 @@ fi
 
 log "5/6 docker compose up -d --build"
 "${COMPOSE[@]}" up -d --build
+STOPPED=0
 sleep 8
 curl -sf http://localhost:8050/healthz || die "healthz failed"
 echo
