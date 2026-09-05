@@ -60,7 +60,8 @@ FEE_REGIME = REPO_ROOT / "configs" / "fees" / "fee_regime.csv"
 FRAMES_ROOT = REPO_ROOT / "data" / "factory" / "frames"
 RUNS_ROOT = REPO_ROOT / "data" / "factory" / "runs"
 REPORTS_ROOT = REPO_ROOT / "reports" / "factory"
-NOT_IMPLEMENTED = ("holdout", "score", "promote")  # run/resume: F2 EVOLVE; controls/report: F2 STATS (below)
+NOT_IMPLEMENTED = ("holdout", "score")  # run/resume: F2 EVOLVE; controls/report: F2 STATS; promote: F3 STRATEGY (below)
+PROMOTED_DIR = REPO_ROOT / "configs" / "factory" / "promoted"
 
 
 # ---------------------------------------------------------------------------
@@ -663,6 +664,134 @@ def cmd_report(args: argparse.Namespace) -> int:
 # ===========================================================================
 
 
+# ===========================================================================
+# F3 STRATEGY block: `promote <id> --from-seed NAME | --from-pick RUN:CAMPAIGN`
+# ===========================================================================
+def _parity_module():
+    """``scripts/factory_replay_parity.py`` as a module (same directory, no package)."""
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import factory_replay_parity as rp  # noqa: E402
+
+    return rp
+
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    """Write ``configs/factory/promoted/<genome_id>.json`` after replay parity passes for that genome.
+
+    Refuses: an id that is not the seed's/pick's genome_id; any replay
+    discrepancy or a ``p_yes`` outside 1e-9; ``--mode paper`` unless the
+    family's registry status is PROPOSED or RATIFIED (family #1 is CLOSED,
+    so only shadow specs can exist today); a maker genome (its offline
+    executability folds forward-looking fill flags, so it never reaches 0
+    discrepancies honestly).
+    """
+    from src.factory import genome as G
+    from src.factory import promoted as P
+    from src.factory.registry import Registry
+    from src.factory.report import write_json
+
+    rp = _parity_module()
+    if bool(args.from_seed) == bool(args.from_pick):
+        _die("promote needs exactly one of --from-seed NAME or --from-pick RUN_ID:CAMPAIGN")
+    if args.from_seed:
+        if args.from_seed not in G.SEEDS:
+            _die(f"unknown seed {args.from_seed!r}; have {sorted(G.SEEDS)}")
+        genome = G.SEEDS[args.from_seed]
+        name = args.from_seed
+        which = "seeds"
+        run_id = args.run_id or rp.DEFAULT_RUN_ID
+        source_label = "seed"
+    else:
+        try:
+            run_id, camp = str(args.from_pick).split(":", 1)
+        except ValueError:
+            _die("--from-pick expects RUN_ID:CAMPAIGN (e.g. run_2026-09-03b:ALL69)")
+        picks = rp.load_pick_genomes(run_id)
+        label = f"pick:{camp}:{run_id}"
+        if label not in picks:
+            _die(f"no pick {camp!r} in reports/factory/{run_id}/summary.json; have {sorted(picks)}")
+        genome = picks[label]
+        name = genome.name
+        which = "picks"
+        source_label = label
+    gid = P.genome_id_for(P.genome_json_for(genome))
+    if args.id != gid and not (len(args.id) >= 8 and gid.startswith(args.id)):
+        _die(f"id {args.id!r} is not the genome_id of {name} ({gid}); refusing to promote the wrong genome")
+    if int(genome.mode) == 1:
+        _die(f"{name} is a MAKER genome: its offline executability folds the forward-looking fill flags "
+             "(maker_yes_fill/maker_no_fill), which no live path can know at decision time")
+
+    cfg_path = Path(args.config) if args.config else DEFAULT_FAMILY_CONFIG
+    if not cfg_path.exists():
+        _die(f"family config missing: {cfg_path}")
+    config = load_family_config(cfg_path)
+    family = str(config.get("family"))
+    reg = Registry(REPORTS_ROOT / "registry.jsonl", repo_root=REPO_ROOT)
+    line = reg.family_line(family)
+    if line is None:
+        _die(f"family {family!r} has no registry line")
+    status = reg.status(family) or "OPEN"
+    config_sha = str(line.get("config_sha256") or config.get("_config_sha256"))
+    if config.get("_config_sha256") and config_sha != config["_config_sha256"]:
+        _die(f"{cfg_path.name} hashes to {str(config['_config_sha256'])[:12]} but the registry line says {config_sha[:12]}")
+    mode = str(args.mode)
+    if mode == "paper" and status not in P.PAPER_ALLOWED_STATUSES:
+        _die(f"--mode paper refused: family {family} is {status}, not one of {P.PAPER_ALLOWED_STATUSES} "
+             "(nothing may paper-trade a CLOSED genome; use --mode shadow)")
+
+    frames_dir = Path(args.frames) if args.frames else _latest_frames_dir(str(config.get("lane", "weather")))
+    if frames_dir is None or not frames_dir.exists():
+        _die("no frozen frames found; pass --frames DIR")
+    print(f"promote {gid} ({name}, {source_label}): replay parity on {frames_dir.name} ...")
+    try:
+        doc = rp.run_parity(
+            frames_dir, ladder_root=Path(args.ladders) if args.ladders else None, which=which, run_id=run_id,
+            only=[name], mode=mode, registry_status=status, family=family, config_sha256=config_sha,
+        )
+    except rp.ParityAbort as exc:
+        _die(f"replay parity aborted: {exc}")
+    res = doc["genomes"][name]
+    print(rp.render_table(doc))
+    report_path = REPORTS_ROOT / f"replay_parity_{str(doc['search_sha256'])[:12]}_{gid}.json"
+    write_json(report_path, doc)
+    print(f"promote: parity report {report_path}")
+    if res["n_discrepancies"] != 0 or not res["p_yes_within_tol"]:
+        _die(f"replay parity FAILED for {name}: {res['n_discrepancies']} discrepancies, "
+             f"p_yes max diff {res['p_yes_max_abs_diff']:.3e}; nothing written")
+    parity = {
+        "frame_sha12": str(doc["search_sha256"])[:12],
+        "frame": res["frame"],
+        "n_markets": int(res["n_markets"]),
+        "n_markets_frame": int(res["n_markets_frame"]),
+        "n_offline": int(res["n_offline"]),
+        "n_live": int(res["n_live"]),
+        "n_discrepancies": int(res["n_discrepancies"]),
+        "rows_compared": int(res["rows_compared"]),
+        "p_yes_max_abs_diff": float(res["p_yes_max_abs_diff"]),
+        "report": report_path.relative_to(REPO_ROOT).as_posix(),
+    }
+    spec = P.build_spec(
+        genome, family=family, config_sha256=config_sha, frame_search_sha256=str(doc["search_sha256"]),
+        calibration_dir=str(REPO_ROOT / doc["calibration"]["dir"]), calibration_sha256=doc["calibration"]["sha256"],
+        fee_type=doc["fee_type"], fee_regime_sha256=doc["fee_regime_sha256"],
+        adverse_fill=float(res["inputs"]["adverse_fill"]), contracts_frame=int(res["inputs"]["contracts"]),
+        availability_lag_min=int(res["inputs"]["availability_lag_min"]),
+        sigma_cap=float(res["inputs"]["sigma_cap"] if res["inputs"].get("sigma_cap") is not None
+                        else (config.get("frame") or {}).get("sigma_cap", 4.0)),
+        mode=mode, registry_status=status, source=source_label, parity=parity,
+    )
+    out_dir = Path(args.out_dir) if args.out_dir else PROMOTED_DIR
+    path = P.write_promoted(spec, out_dir / f"{gid}.json")
+    P.load_promoted(path)  # round-trip: hash verifies
+    print(f"promote: wrote {path} (mode={mode}, registry={status}, spec_hash={spec.spec_hash[:12]})")
+    return 0
+# ===========================================================================
+# end F3 STRATEGY block
+# ===========================================================================
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -749,6 +878,21 @@ def build_parser() -> argparse.ArgumentParser:
                          "absent -> the condition is recorded as not applicable")
     rp.set_defaults(func=cmd_report)
     # ---- end F2 STATS block --------------------------------------------------
+
+    # ---- F3 STRATEGY block: promote ------------------------------------------
+    pm = sub.add_parser("promote", help="replay-parity a seed/pick and write configs/factory/promoted/<genome_id>.json")
+    pm.add_argument("id", help="the genome_id (sha256(genome_json)[:16], >= 8-char prefix accepted) -- must match the seed/pick")
+    pm.add_argument("--from-seed", default=None, help="a src.factory.genome.SEEDS name")
+    pm.add_argument("--from-pick", default=None, help="RUN_ID:CAMPAIGN from reports/factory/<run_id>/summary.json picks")
+    pm.add_argument("--mode", default="shadow", choices=("shadow", "paper"),
+                    help="paper is refused unless the family is PROPOSED/RATIFIED (default shadow)")
+    pm.add_argument("--frames", default=None, help="frozen frame dir (default newest under data/factory/frames)")
+    pm.add_argument("--ladders", default=None, help="ladder root (default the frame provenance's)")
+    pm.add_argument("--run-id", default=None, help="F2 run id for the parity report's pick set (seeds only)")
+    pm.add_argument("--config", default=None, help=f"family YAML (default {DEFAULT_FAMILY_CONFIG.name})")
+    pm.add_argument("--out-dir", default=None, help=f"default {PROMOTED_DIR}")
+    pm.set_defaults(func=cmd_promote)
+    # ---- end F3 STRATEGY block ---------------------------------------------
 
     for name in NOT_IMPLEMENTED:
         ni = sub.add_parser(name, help="F4 — not implemented yet")

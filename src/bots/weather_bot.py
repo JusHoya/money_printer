@@ -9,6 +9,7 @@ from src.bots.base import Bot
 from src.bots.registry import BotRegistry
 from src.bots.mixins import TickerResolverMixin, SignalProcessorMixin
 from src.core.interfaces import TradeSignal
+from src.core.risk_manager import log_rejection
 from src.strategies.weather_strategy import WeatherArbitrageStrategyV2
 from src.strategies.ml_weather import MLWeatherStrategy
 from src.data.nws_provider import NWSProvider
@@ -39,6 +40,28 @@ WEATHER_TRADING_ENABLED = True
 # to WeatherArbitrageStrategyV2 ("Meteorologist V2"). When True the waterfall
 # is exactly what it was before this flag existed. See HANDOFF.md §8.
 ML_WEATHER_ENABLED = False
+
+# 2026-09-04 (PRD_STRATEGY_FACTORY FR-F3.3): a promoted factory genome enters
+# the waterfall FIRST when ``GENOME_STRATEGY_ID`` names a spec under
+# ``configs/factory/promoted/``. The bot injects the clock
+# (``datetime.now(ET)`` -- the strategy itself never reads a wall clock), the
+# live forecast-vintage provider and the frozen calibration; the strategy
+# refuses to construct on a fee-type / calibration-hash mismatch.
+# ``GENOME_STRATEGY_MODE=shadow`` (or ``spec.mode == "shadow"``) means the
+# bot logs the ``[Signal] EMIT`` line exactly as for any strategy and then
+# exactly one ``REJECT ... reason=GENOME_SHADOW`` line WITHOUT handing the
+# signal to ``_process_signals`` -- nothing can paper-trade a CLOSED genome.
+# The env can only tighten (a "paper" env never overrides a shadow spec).
+GENOME_STRATEGY_ID_ENV = "GENOME_STRATEGY_ID"
+GENOME_STRATEGY_MODE_ENV = "GENOME_STRATEGY_MODE"
+GENOME_SHADOW = "shadow"
+GENOME_STRATEGY_KEY = "genome"
+
+# Waterfall key -> the strategy_name that appears in EMIT/EXECUTED/REJECT lines.
+STRATEGY_LABELS: Dict[str, str] = {
+    "ml_weather": "ML Weather",
+    "weather": "Meteorologist V2",
+}
 
 # Kalshi dates a weather event by its settlement day in New York time
 # (``KXHIGHNY-26SEP01-...``); the tracked-date window must be computed on
@@ -155,12 +178,126 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # first tick so a fresh session records a baseline immediately).
         self._last_depth_snapshot = 0.0
 
-        # Waterfall: [ML-driven primary, owner-only via ML_WEATHER_ENABLED]
-        # -> V2 rule-based. Dict order is the waterfall order.
+        # Waterfall, in declared order (FR-F3.3): [GenomeStrategy when
+        # GENOME_STRATEGY_ID is set] -> [ML Weather, owner-only via
+        # ML_WEATHER_ENABLED] -> V2 rule-based. Dict order is the waterfall
+        # order; tick() loops over it and stops at the first strategy that
+        # trades. ``self.genome_shadow`` is True when the genome's signals are
+        # logged (EMIT + GENOME_SHADOW) but never reach _process_signals.
         self.strategies = {}
+        self.genome_shadow = False
+        self.genome_spec = None
+        genome_id = (os.getenv(GENOME_STRATEGY_ID_ENV) or "").strip()
+        if genome_id:
+            self.strategies[GENOME_STRATEGY_KEY] = self._build_genome_strategy(genome_id)
         if ML_WEATHER_ENABLED:
             self.strategies["ml_weather"] = MLWeatherStrategy()
         self.strategies["weather"] = WeatherArbitrageStrategyV2()
+
+    # ── GenomeStrategy wiring (FR-F3.3) ─────────────────────────────
+
+    @staticmethod
+    def _genome_clock():
+        """The ONE wall-clock read the genome path makes -- in the bot, never in the strategy."""
+        return datetime.now(ET)
+
+    def _build_genome_strategy(self, genome_id: str):
+        """Construct ``GenomeStrategy`` from a promoted spec; fail fast on any mismatch.
+
+        Imports are deferred so a sandbox without ``GENOME_STRATEGY_ID`` never
+        touches the factory modules (``tests/test_factory_isolation.py``).
+        """
+        from src.data.forecast_vintage_provider import (
+            CACHE_DIR_ENV,
+            DEFAULT_CACHE_DIR,
+            ForecastVintageProvider,
+        )
+        from src.data.mos_guidance_provider import MOSGuidanceProvider
+        from src.factory import fees as fees_mod
+        from src.factory.promoted import REPO_ROOT as _REPO_ROOT
+        from src.factory.promoted import load_promoted
+        from src.strategies.genome_strategy import FrozenCalibrationProvider, GenomeStrategy
+
+        spec = load_promoted(genome_id)
+        env_mode = (os.getenv(GENOME_STRATEGY_MODE_ENV) or "").strip().lower()
+        self.genome_shadow = spec.mode == GENOME_SHADOW or env_mode == GENOME_SHADOW
+        self.genome_spec = spec
+        # Repo-relative spec paths resolve against the checkout, never the CWD.
+        cal_dir = spec.calibration.dir
+        if not os.path.isabs(cal_dir):
+            cal_dir = os.path.join(_REPO_ROOT, cal_dir)
+        cache_dir = os.getenv(CACHE_DIR_ENV) or DEFAULT_CACHE_DIR
+        mos = MOSGuidanceProvider(cache_dir=os.path.join(cache_dir, "mos"))
+        provider = ForecastVintageProvider.live(
+            mos,
+            clock=self._genome_clock,
+            lag_min=spec.availability_lag_min,
+            cache_dir=cache_dir,
+            forecast_source=spec.forecast_source,
+        )
+        calibration = FrozenCalibrationProvider(cal_dir, source=spec.forecast_source)
+        strategy = GenomeStrategy(
+            spec,
+            clock=self._genome_clock,
+            forecast_provider=provider,
+            fee_regime=fees_mod.load_regime(),
+            calibration_provider=calibration,
+        )
+        logger.info(
+            "[Weather] GenomeStrategy %s loaded (genome_id=%s mode=%s registry=%s shadow=%s)",
+            strategy.name, spec.genome_id, spec.mode, spec.registry_status, self.genome_shadow,
+        )
+        return strategy
+
+    def _strategy_label(self, key: str, strategy) -> str:
+        if key == GENOME_STRATEGY_KEY:
+            return str(getattr(strategy, "name", "Genome"))
+        return STRATEGY_LABELS.get(key, key)
+
+    def _shadow_signals(self, signals, strategy_name, dashboard) -> None:
+        """Shadow mode: the FR-0.4 EMIT line, then exactly one GENOME_SHADOW reject per signal.
+
+        Mirrors ``SignalProcessorMixin._process_signals``'s EMIT format so the
+        maia log tooling (``/api/logs/tail``, ``factory_paper_reconcile.py``)
+        sees the genome's decisions; the signal is never sized, EV-gated or
+        booked (the protected mixin is not touched).
+        """
+        if not signals:
+            return
+        if not isinstance(signals, list):
+            signals = [signals]
+        for sig in signals:
+            conf = getattr(sig, "confidence", 0.0)
+            logger.info(
+                "[Signal] EMIT strategy=%s symbol=%s side=%s contract=%s "
+                "price=%s qty=%s confidence=%.3f",
+                strategy_name,
+                sig.symbol,
+                sig.side,
+                getattr(sig, "contract_side", "YES"),
+                sig.limit_price,
+                sig.quantity,
+                conf,
+            )
+            log_rejection(
+                "GENOME_SHADOW",
+                strategy_name,
+                sig.symbol,
+                side=sig.side,
+                contract=getattr(sig, "contract_side", "YES"),
+                price=sig.limit_price,
+                quantity=sig.quantity,
+                confidence=conf,
+                expiration=(
+                    sig.expiration_time.isoformat()
+                    if getattr(sig, "expiration_time", None) is not None
+                    else None
+                ),
+            )
+            try:
+                dashboard.record_signal(sig, status="SHADOW", strategy_name=strategy_name)
+            except Exception as e:  # the dashboard is a sink, never a gate
+                logger.debug(f"[Weather] shadow record_signal failed: {e}")
 
     # ── Config accessors ────────────────────────────────────────────
 
@@ -283,6 +420,10 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                     ladder = self._ladder_for_city(kalshi_ticker)
 
                     if ladder:
+                        # FR-F3.3: strategies that price the WHOLE ladder
+                        # (GenomeStrategy) read it from the observation; the
+                        # existing strategies ignore the key. Additive.
+                        obs_data.extra["ladder_markets"] = list(ladder)
                         # Active market = highest YES bid (same "sentiment"
                         # criterion the legacy resolver used).
                         k_data = max(ladder, key=lambda m: m.bid)
@@ -410,23 +551,28 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             # 2026-09-01: paper trading re-enabled on the sandbox (see the
             # WEATHER_TRADING_ENABLED comment). Every signal still runs the
             # full risk/EV/Kelly gauntlet in _process_signals.
+            # FR-F3.3: the waterfall is ``self.strategies`` in declared order
+            # ([genome] -> [ml_weather] -> weather); the first strategy whose
+            # signals trade ends the pass. Behaviour-preserving for the
+            # existing two: every strategy reached has its (possibly empty)
+            # signal list handed to _process_signals exactly as before.
             if WEATHER_TRADING_ENABLED:
-                traded = False
-                ml_strategy = self.strategies.get("ml_weather")
-                if ml_strategy is not None:
+                for key, strategy in list(self.strategies.items()):
+                    signals = strategy.analyze(obs_data)
+                    label = self._strategy_label(key, strategy)
+                    if key == GENOME_STRATEGY_KEY and self.genome_shadow:
+                        # Shadow: EMIT + one GENOME_SHADOW reject, never
+                        # sized/booked; the waterfall continues to V2.
+                        self._shadow_signals(signals, label, dashboard)
+                        continue
                     traded = self._process_signals(
-                        ml_strategy.analyze(obs_data),
-                        strategy_name="ML Weather",
+                        signals,
+                        strategy_name=label,
                         risk_manager=risk_manager,
                         dashboard=dashboard,
                     )
-                if not traded:
-                    self._process_signals(
-                        self.strategies["weather"].analyze(obs_data),
-                        strategy_name="Meteorologist V2",
-                        risk_manager=risk_manager,
-                        dashboard=dashboard,
-                    )
+                    if traded:
+                        break
 
             time.sleep(1)  # 1 sec between cities
 
