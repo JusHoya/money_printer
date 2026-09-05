@@ -30,11 +30,30 @@ services:
       ]
     environment:
       TZ: UTC
+      # --- Strategy factory F3: the promoted-genome slot (docs/factory/F3_RUNBOOK.md)
+      # GENOME_STRATEGY_ID is read from /srv/money_printer/.env (env_file below):
+      # the id of a configs/factory/promoted/<id>.json spec; unset = no genome
+      # slot, the waterfall is exactly what it was. It is deliberately NOT
+      # listed here — an `environment:` entry beats env_file, so a
+      # `${GENOME_STRATEGY_ID:-}` line would blank the .env value.
+      #
+      # GENOME_STRATEGY_MODE is pinned to "shadow" unless the *invoking shell*
+      # says otherwise (same mechanism as SIM_BALANCE):
+      #     GENOME_STRATEGY_MODE=paper docker compose -f deploy/pi/docker-compose.yml up -d
+      # Shadow = the bot logs the [Signal] EMIT line, then REJECTs GENOME_SHADOW
+      # and never reaches _process_signals. Because this entry overrides
+      # env_file, a stray "paper" in /srv/money_printer/.env cannot paper-trade
+      # a CLOSED genome; F4 flips it on purpose from the shell, and the promoted
+      # spec's own "mode" must ALSO say paper.
+      GENOME_STRATEGY_MODE: "${GENOME_STRATEGY_MODE:-shadow}"
+      # Live forecast-vintage cache (FR-F3.2, fetched_at recording). Container
+      # path of the bind mount below; the host side is on the USB-SSD state root.
+      MP_FORECAST_CACHE_DIR: /app/data/forecast_cache
     # /srv/money_printer/.env carries the runtime secrets and feature envs:
     # Kalshi read-only creds, NWS_USER_AGENT, DISCORD_WEBHOOK_URL, and the
     # 2026-09 additions — MP_CONTROL_TOKEN (gates POST /api/bots/*/start|stop),
-    # MENTION_SERIES, X_FEED_ENABLED, X_BEARER_TOKEN, X_TRACK_HANDLES.
-    # See .env.example for what each does.
+    # MENTION_SERIES, X_FEED_ENABLED, X_BEARER_TOKEN, X_TRACK_HANDLES, and
+    # (F3) GENOME_STRATEGY_ID. See .env.example for what each does.
     env_file:
       - /srv/money_printer/.env
     ports:
@@ -46,6 +65,13 @@ services:
     volumes:
       - /srv/money_printer/data:/app/data
       - /srv/money_printer/logs:/app/logs
+      # F3: the forecast-vintage cache gets its own bind so it survives a
+      # data/ re-layout and is visible on the host by path. Create it BEFORE
+      # `up` and give it to the runtime uid, or Docker auto-creates it
+      # root-owned and the container cannot write:
+      #     sudo mkdir -p /srv/money_printer/data/forecast_cache
+      #     sudo chown 1000:1000 /srv/money_printer/data/forecast_cache
+      - /srv/money_printer/data/forecast_cache:/app/data/forecast_cache
       - /srv/money_printer/kalshi_priv.key:/app/kalshi_priv.key:ro
     healthcheck:
       # /healthz is side-effect free; /api/status wrote a CSV row per probe.
