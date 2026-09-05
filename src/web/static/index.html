@@ -79,12 +79,17 @@
       <div class="pf-value neu" id="pf-exposure-pct2">0.0%</div>
     </div>
     <div class="pf-card">
-      <div class="pf-label">Realized PnL</div>
+      <div class="pf-label" title="RiskManager.daily_pnl — the per-cycle fragment the 4-hourly balance re-peg zeroes. NOT the lifetime total.">Realized PnL (cycle)</div>
       <div class="pf-value neu" id="pf-realized">$0.00</div>
     </div>
     <div class="pf-card">
       <div class="pf-label">Unrealized PnL</div>
       <div class="pf-value neu" id="pf-unrealized">$0.00</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label" title="SimulatedExchange.get_cumulative_net_pnl() — lifetime realized PnL net of every fee, immune to balance syncs and restarts.">Net PnL (lifetime)</div>
+      <div class="pf-value neu" id="pf-cumulative">--</div>
+      <div class="pf-sub" id="pf-closed-trades">0 closed</div>
     </div>
   </section>
 
@@ -248,6 +253,39 @@
           <div id="market-list">
             <div class="empty-state">No feeds</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Genome (snapshot.genome — hidden until a genome is loaded/refused) -->
+      <div class="card" id="genome-card" style="display:none;">
+        <div class="card-header">
+          <span class="card-title">Genome</span>
+          <span class="card-badge" id="genome-mode">--</span>
+        </div>
+        <div class="card-body">
+          <div class="stat-tiles" id="genome-tiles">
+            <div class="stat-tile">
+              <div class="stat-label">Signals</div>
+              <div class="stat-value neu" id="genome-signals">--</div>
+              <div class="stat-sub" id="genome-rejects">0 rejects</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Hours Evaluated</div>
+              <div class="stat-value neu" id="genome-hours">--</div>
+              <div class="stat-sub" id="genome-polls">0 poll failures</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Traded Today</div>
+              <div class="stat-value neu" id="genome-traded">--</div>
+              <div class="stat-sub" id="genome-missed">0 missed days</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Cities Tracked</div>
+              <div class="stat-value neu" id="genome-cities">--</div>
+              <div class="stat-sub" id="genome-lasthour">last hour --</div>
+            </div>
+          </div>
+          <div id="genome-detail" class="empty-state"></div>
         </div>
       </div>
 
