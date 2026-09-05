@@ -433,7 +433,11 @@ a lost tick.
 `p = 0.6 * wr + 0.4 * p_win`, and below `MIN_WIN_SAMPLES` closed trades in the window it
 uses the neutral prior `wr = 0.50` — so a cold-start `p` cannot exceed 0.70 no matter how
 confident the signal. `fr31a_taker` buys NO at a median quote of 0.83 (min 0.37, max
-0.94), and `f = p - q/b` is negative for any price above ~0.50 under that ceiling.
+0.94), and for a zero-fee binary `f = p - q/b` reduces to **`f > 0` iff `p > price`** — so
+the ceiling is a price cut at the blended `p` itself, not a confidence cut. Measured
+against the real sizer at confidence 0.99: 0.65 sizes, 0.70 does not. Across the genome's
+130 trades the blended `p` spans only [0.638, 0.700], so on the 1c grid price <= 0.63 is
+always admitted and price >= 0.71 never is.
 Replaying the genome's 130 offline trades through the real sizing arithmetic,
 **117 of 130 (90 %) return 0 contracts with `KELLY_ZERO`** — identically at $100 (Seed),
 $1,000 (Early) and $10,000 (Scale), because what binds is the blend, not the balance.
