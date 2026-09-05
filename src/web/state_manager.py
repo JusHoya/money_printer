@@ -191,7 +191,9 @@ class StateManager:
                 "exposure": 0.0,
                 "exposure_pct": 0.0,
                 "realized_pnl": 0.0,
+                "realized_pnl_cycle": 0.0,
                 "unrealized_pnl": 0.0,
+                **self._lifetime_pnl(None),
             }
         bal = rm.balance
         realized_pnl = rm.daily_pnl
@@ -204,10 +206,55 @@ class StateManager:
             "cash": round(bal, 4),
             "exposure": round(exposure, 4),
             "exposure_pct": round(exposure_pct, 2),
+            # ``realized_pnl`` is RiskManager.daily_pnl — a per-CYCLE fragment
+            # that run_dashboard's 4-hourly update_balance() zeroes along with
+            # the equity re-peg. Kept under its historical name because the
+            # front-end reads it; ``realized_pnl_cycle`` is the same number
+            # under a name that cannot be mistaken for a lifetime total.
             "realized_pnl": round(realized_pnl, 4),
+            "realized_pnl_cycle": round(realized_pnl, 4),
             "unrealized_pnl": round(unrealized_pnl, 4),
+            **self._lifetime_pnl(rm),
         }
 
+    @staticmethod
+    def _lifetime_pnl(rm) -> dict:
+        """The exchange's immutable lifetime ledger — the only PnL an operator
+        (or a real-capital decision) should read.
+
+        ``SimulatedExchange.reset_stats`` deliberately zeroes only the
+        per-sync ``realized_pnl`` fragment and never the cumulative
+        accumulators, so ``get_cumulative_net_pnl()`` (= cumulative realized
+        minus cumulative entry fees) survives every balance sync and restart.
+        Read through ``get_stats()`` so nothing here writes to the engine; any
+        field the engine cannot supply is reported as null rather than as a
+        confident zero.
+        """
+        out = {
+            "cumulative_net_pnl": None,
+            "cumulative_realized_pnl": None,
+            "cumulative_fees": None,
+            "closed_trades": None,
+        }
+        if rm is None:
+            return out
+        try:
+            stats = rm.exchange.get_stats()
+        except Exception:
+            return out
+        if isinstance(stats, Mapping):
+            for key, src in (
+                ("cumulative_net_pnl", "cumulative_net"),
+                ("cumulative_realized_pnl", "cumulative_realized"),
+                ("cumulative_fees", "cumulative_fees"),
+            ):
+                value = _as_float(stats.get(src))
+                out[key] = None if value is None else round(value, 4)
+        try:
+            out["closed_trades"] = int(len(rm.exchange.closed_trades))
+        except Exception:
+            pass
+        return out
 
     # ---------------- genome (F3 red team, 2026-09-05) ----------------
     #

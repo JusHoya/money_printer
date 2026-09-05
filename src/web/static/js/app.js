@@ -407,6 +407,10 @@ function updatePortfolio(pf) {
     ['pf-exposure',   pf.exposure],
     ['pf-realized',   pf.realized_pnl],
     ['pf-unrealized', pf.unrealized_pnl],
+    // Lifetime net of every fee — realized_pnl above is the per-cycle
+    // fragment the 4-hourly balance re-peg zeroes. Null until the engine
+    // reports it (formatCurrency renders null as '--').
+    ['pf-cumulative', pf.cumulative_net_pnl],
   ];
 
   fields.forEach(([id, v]) => {
@@ -424,6 +428,9 @@ function updatePortfolio(pf) {
     }
     el.dataset.prev = v;
   });
+
+  const closed = $('pf-closed-trades');
+  if (closed) closed.textContent = `${pf.closed_trades != null ? pf.closed_trades : 0} closed`;
 
   // Exposure % appears in two places in the HTML
   const pct = formatPercent(pf.exposure_pct);

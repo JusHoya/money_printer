@@ -9,7 +9,12 @@ Three defects this file pins, all found against the live maia sandbox:
    the same observation from outside. ``snapshot()["genome"]`` now carries it,
    including the refusal reason, bounded for a 1 Hz broadcast, and built by
    duck typing so ``tests/test_factory_isolation.py`` stays green.
-2. **``mode`` lied by ambiguity.** It describes the Kalshi credential, not what
+2. **The reported PnL was not the paper account's.** ``portfolio.realized_pnl``
+   is ``RiskManager.daily_pnl``, a per-cycle fragment the 4-hourly
+   ``update_balance()`` zeroes; live on 2026-09-05 it read 0.0 against a
+   journal summing to -13.34. ``cumulative_net_pnl`` is the engine's lifetime
+   total, net of every fee.
+3. **``mode`` lied by ambiguity.** It describes the Kalshi credential, not what
    any strategy is doing: 'paper' on maia while the genome ran in shadow.
 
 The stubs here mimic ``GenomeStrategy``'s public surface (``state_dict``,
@@ -370,6 +375,48 @@ class TestGenomeStateConcurrency:
 
 
 # ---------------------------------------------------------------------------
+# 3. Lifetime PnL
+# ---------------------------------------------------------------------------
+
+
+class TestLifetimePnL:
+    def test_cumulative_net_pnl_is_exposed_next_to_the_cycle_fragment(self, orch):
+        pf = _sm(orch).snapshot()["portfolio"]
+        # The per-cycle fragment keeps its historical name and value...
+        assert pf["realized_pnl"] == -0.88
+        assert pf["realized_pnl_cycle"] == -0.88
+        # ...and the lifetime total, net of every fee, sits beside it.
+        assert pf["cumulative_net_pnl"] == -13.34
+        assert pf["cumulative_realized_pnl"] == -9.34
+        assert pf["cumulative_fees"] == 4.0
+        assert pf["closed_trades"] == 6
+
+    def test_lifetime_fields_are_null_when_the_engine_cannot_answer(self, orch):
+        orch.risk_manager.exchange.get_stats.side_effect = AttributeError("no exchange")
+        del orch.risk_manager.exchange.closed_trades
+        pf = _sm(orch).snapshot()["portfolio"]
+        assert pf["cumulative_net_pnl"] is None
+        assert pf["closed_trades"] is None
+        assert pf["realized_pnl"] == -0.88  # the fragment still reports
+
+    def test_nan_from_the_engine_never_reaches_the_serialiser(self, orch):
+        orch.risk_manager.exchange.get_stats.return_value = {
+            "cumulative_net": float("nan"),
+            "cumulative_realized": None,
+            "cumulative_fees": "not a number",
+        }
+        pf = _sm(orch).snapshot()["portfolio"]
+        assert pf["cumulative_net_pnl"] is None
+        json.dumps(pf, allow_nan=False)
+
+    def test_portfolio_without_a_risk_manager_still_has_the_keys(self, orch):
+        orch.risk_manager = None
+        pf = _sm(orch).snapshot()["portfolio"]
+        assert pf["cumulative_net_pnl"] is None
+        assert pf["realized_pnl_cycle"] == 0.0
+
+
+# ---------------------------------------------------------------------------
 # 4. Mode disambiguation
 # ---------------------------------------------------------------------------
 
@@ -415,6 +462,7 @@ class TestGenomeRoutes:
         body = resp.json()
         assert body["genome"]["genome_id"] == GENOME_ID
         assert body["genome"]["execution_mode"] == "shadow"
+        assert body["portfolio"]["cumulative_net_pnl"] == -13.34
 
     def test_genome_route_serves_the_block_alone(self, client):
         resp = client.get("/api/genome")

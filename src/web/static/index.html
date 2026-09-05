@@ -79,12 +79,17 @@
       <div class="pf-value neu" id="pf-exposure-pct2">0.0%</div>
     </div>
     <div class="pf-card">
-      <div class="pf-label">Realized PnL</div>
+      <div class="pf-label" title="RiskManager.daily_pnl — the per-cycle fragment the 4-hourly balance re-peg zeroes. NOT the lifetime total.">Realized PnL (cycle)</div>
       <div class="pf-value neu" id="pf-realized">$0.00</div>
     </div>
     <div class="pf-card">
       <div class="pf-label">Unrealized PnL</div>
       <div class="pf-value neu" id="pf-unrealized">$0.00</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label" title="SimulatedExchange.get_cumulative_net_pnl() — lifetime realized PnL net of every fee, immune to balance syncs and restarts.">Net PnL (lifetime)</div>
+      <div class="pf-value neu" id="pf-cumulative">--</div>
+      <div class="pf-sub" id="pf-closed-trades">0 closed</div>
     </div>
   </section>
 
