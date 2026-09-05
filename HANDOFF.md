@@ -428,21 +428,87 @@ NY/CHI/LAX/MIA, and the marks persist in `state_dict()` for `STATE_KEEP_DAYS = 7
 before `_prune` drops them. The weekly reconcile flags it; it is a lost day of tape, not
 a lost tick.
 
-**The open decision for F4: the genome's own signals size to zero at cold start.**
-`RiskManager.calculate_kelly_size` blends recent win rate with signal confidence as
-`p = 0.6 * wr + 0.4 * p_win`, and below `MIN_WIN_SAMPLES` closed trades in the window it
-uses the neutral prior `wr = 0.50` — so a cold-start `p` cannot exceed 0.70 no matter how
-confident the signal. `fr31a_taker` buys NO at a median quote of 0.83 (min 0.37, max
-0.94), and `f = p - q/b` is negative for any price above ~0.50 under that ceiling.
+**A promotion defect, quantified and decided: the genome's own signals size to zero at
+cold start.** `RiskManager.calculate_kelly_size` blends recent win rate with signal
+confidence as `p = 0.6 * wr + 0.4 * p_win`, and below `MIN_WIN_SAMPLES` = 20 closed trades
+in the window it uses the neutral prior `wr = 0.50` — so a cold-start `p` cannot exceed
+0.70 no matter how confident the signal. The fee `calculate_kelly_size` puts into `b` is
+the **maker** fee, which on the KXHIGH standard schedule is exactly 0.0 for all 130 trades
+(the genome is a taker; the sizing function reads the maker leg regardless), so
+`f = p - q/b` reduces to positive **iff `p > price`** — the ceiling is a price cut at
+~0.70, not a confidence cut. `fr31a_taker` buys NO at a median quote of 0.83
+(min 0.37, max 0.94) — median **price paid 0.84**, since the signal prices at `quote + 1c`.
 Replaying the genome's 130 offline trades through the real sizing arithmetic,
-**117 of 130 (90 %) return 0 contracts with `KELLY_ZERO`** — identically at $100 (Seed),
-$1,000 (Early) and $10,000 (Scale), because what binds is the blend, not the balance.
-Shadow mode hides this: `GENOME_SHADOW` rejects before sizing is ever reached. Flip the
-genome to paper as-is and it books almost nothing, and the ~10 % it does book is the cheap
-tail of its distribution rather than the strategy — while FR-5.2 wants >= 50 settled
-`target_date`s. The choice is the owner's: seed the win-rate window from the offline
-record, give the genome its own sizing path, or accept a paper record that accrues at a
-tenth of the modelled rate. Nothing should be promoted to paper before it is made.
+**117 of 130 (90 %) return 0 contracts with `KELLY_ZERO`**, and the surviving 13 size at
+the `MAX_CONTRACTS = 50` cap: **identically at every bankroll stage from $100 (Seed) to
+$60,000 (Compound), including the sandbox's actual ~$2,873**, because what binds is the
+blend, not the balance. It cannot be funded away and there is no caller-side workaround —
+reaching `p = 0.80` would need `confidence = 1.25`. Shadow mode hides it:
+`GENOME_SHADOW` rejects before sizing is ever reached.
+
+**This is a defect in the promotion, not in the RiskManager.** The factory searched a space
+the runtime cannot trade in: `src/factory/columns.py` folds the mixin's EV gate into the
+frame as `sandbox_admissible` (which passes 130/130 and never binds) but models the gate
+that *does* bind — `calculate_kelly_size > 0` — not at all. Do not read this entry as a
+case for loosening the sizing gauntlet.
+
+**Owner decision, taken 2026-09-05.** Every option that moves the number by editing
+`src/core/risk_manager.py` is **REJECTED**: seeding the win record from the genome's own
+in-sample outcomes (it lets a modelled quantity license position size, inverting FR-0.6),
+and lowering `MIN_WIN_SAMPLES` (non-monotone, and at 1 it is an absorbing state — the
+first admissible trade lost, so the ceiling falls to 0.40 and never recovers; ~1 run in 5
+to 1 in 8 stalls this way even at 20). Sizing from `p_win` directly is **held as a general
+sizing-policy question**, to be decided on its own merits and applied to every genome if it
+is adopted — never introduced to unblock a specific genome, which would be post-hoc
+parameter selection wearing a research citation. Full option analysis, with the arithmetic:
+`reports/factory/sizing_cold_start_2026-09-05.md`. Do not restate it here; read it.
+
+**The shadow run is instrumentation, not a gate run.** What it IS producing is the
+`KELLY_ZERO`/`GENOME_SHADOW` evidence that the sandbox will not size the promoted shape —
+and that evidence is already complete, confirmed live: all four 2026-09-05T15:00:23Z EMITs
+(prices 0.74–0.92, `p_win` 0.949–0.999, blended `p` 0.679–0.700) size to **0 contracts**,
+and `GET /api/win_rates` shows no win record for the genome strategy at all. What it is
+**NOT** producing is progress toward the FR-5.2 gate's ≥50 settled `target_date` units: it
+books nothing, so it accrues zero units. Leave it running — it costs nothing — but nothing
+in the record should describe it as accruing gate evidence.
+
+**What the shape is actually worth, and how little gate margin it has.** The genome's
+realized edge on the search frame is **+0.0750/contract per-trade** and **+0.0723
+date-clustered** (§3 rule 3 prefers the clustered figure). An earlier draft quoted
++0.0705 as the full-set figure; that number is the **rejected** subset — the 117 trades the
+runtime cannot size — not the full set. And under the corrected gate null the full genome
+clears `n = 50` in-sample at **p = 0.047** against alpha 0.05, with a unit-win-rate CI of
+**[0.667, 0.875]** against a null of **0.683** — i.e. the in-sample unit win rate is not
+significantly above breakeven, on the data the genome was selected on. Any out-of-sample
+shrinkage at all and it fails. Set beside the F2 verdict (family CLOSED, six of twelve
+conditions failed: pooled OOS **+0.0308**, boot **[−0.0900, +0.1417]**, `p_RC` **0.886**,
+Holm `p_adj` **0.2895**, `beats_every_control: false`), the prior on this genome is
+"no edge", and spending governance capital to accelerate evidence collection on it is a
+poor trade at any speed.
+
+**Time to the gate at the measured rate: 287 days** (point estimate; 95 % band
+**208–367 days**), from 12 sizable units over the frame's 69 days. That is mid-2027, and it
+runs past the holdout-B deadline below.
+
+**The holdout-B deadline is the one decision here with a hard external clock.**
+`data/ladders_holdout/` (2026-07-26..08-31) expires around **2026-10-03** and is the only
+virgin root this project will ever have. Whether to spend an unseal on a CLOSED family's
+seed genome is an owner call — it is recorded here, rather than left implicit in the F4
+list, because waiting out the 287 days outlives the data.
+
+**The identified fix is a v2 family, and it is a separate phase.** Fold the runtime's
+sizing law — the closed-form, state-free predicate `0.6*0.50 + 0.4*p_win > price_paid +
+fee(price_paid)` — into the frame's `sandbox_admissible`, and register
+`weather/gfs_mex/taker/v2` (the registry refuses to re-register a CLOSED family name by
+design; a rerun is a new family). Then everything promoted is executable from trade 1 and
+the pre-registration becomes true rather than worked around. Honest cost: it removes
+**~86 %** of the executable NO-taker rows, and the surviving universe realizes about
+**−0.048/contract** unfiltered on this frame — so **budget for it returning CLOSED**, which
+a documented "no" satisfies (§3 rule 6). This branch does **not** do it: it needs a new
+frame freeze (new frame sha), a fresh search, a new parity run and a new gate registration.
+The frame schema and `executable`/`sandbox_admissible` semantics stay exactly as they are
+here, because the existing frames, the promoted specs' `frame_search_sha256` and FR-F3.4's
+`n_discrepancies: 0` all depend on them.
 
 Still open for F4, completely:
 1. **Calibration-provider transfer gap (blocker).** Parity proven under walk-forward, bot
@@ -460,4 +526,8 @@ Still open for F4, completely:
    the first paper trade, or `gate.py` has no pre-registered window to score.
 5. **The fresh-deploy missed day** is the one missed-hour case the strategy cannot prove
    from its own state; the weekly reconcile is what catches it.
-6. **The cold-start sizing ceiling above** — the decision that gates everything else.
+6. **The v2 re-search above.** The cold-start ceiling itself is no longer an open decision:
+   editing `risk_manager.py` is rejected, and the fix is the `.../v2` family that folds the
+   sizing law into `sandbox_admissible`. What is open is whether to spend that phase on a
+   family whose prior is "no edge" — and, separately and on a hard clock, whether to spend
+   a holdout-B unseal (~2026-10-03) on a CLOSED family's seed genome.

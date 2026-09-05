@@ -5,6 +5,13 @@ criterion is a check a red team can run from the repo, the run directory, or the
 without the author. Calendar anchors: ladder retention for 07-26..08-31 expires
 ~2026-10-03; M0 capture kill date 2026-09-15; M1 (Sept–Oct verdict) ~2026-11-07.
 
+**The ~2026-10-03 anchor is a decision, not just a date.** `data/ladders_holdout/` is the
+only virgin root the factory will ever have, and whether to spend an unseal on family #1's
+seed genome — a CLOSED family whose paper route needs 287 days (95 % band 208–367) to reach
+the FR-5.2 gate — is an owner call that has to be made before the data expires. It is
+registered as owner decision 9 in `PRD_STRATEGY_FACTORY.md` section 9 with no encoded
+default.
+
 Dependency graph: F0 and F1 run in parallel from day 1. F1 → F2 (evolution). F0 + F2 → F3
 (sandbox strategy). F3 + ratification + data → F4. F5 is data-gated and independent.
 
@@ -295,6 +302,29 @@ paper record toward FR-5.2.
   p vs fee-adjusted breakeven at actual entry, net PnL, spec hash unchanged; PASS requires
   all four. If HALT: the board shows the weather family KILLED, and no file under
   `src/factory/` references any live-capital flag (grep).
+  - **Registered deviation (2026-09-05) — the maia shadow run is instrumentation and
+    accrues ZERO units toward this criterion.** `RiskManager.calculate_kelly_size` pins
+    `historical_wr = 0.50` until 20 closed trades, capping the blended sizing probability
+    at `p = 0.6*0.50 + 0.4*p_win ≤ 0.70`; at the KXHIGH zero maker fee `f > 0` iff
+    `p > price`, so everything above ~0.70 sizes to zero. The deployed genome buys NO at a
+    median price paid of 0.84: **117 of its 130 offline trades size to 0 contracts**, at
+    every bankroll stage, and all four live 15:00:23Z EMITs sized to 0. The shadow run is
+    therefore producing `KELLY_ZERO` evidence (already complete), **not** gate evidence —
+    it books nothing. At the measured rate `n_min = 50` is 287 days out (95 % band
+    208–367). This is a **promotion** defect, not a risk-manager defect: `columns.py`
+    models the mixin EV gate as `sandbox_admissible` (never binds) and not the Kelly gate
+    (always binds). Owner decision: options editing `src/core/risk_manager.py` are
+    REJECTED; the fix is the `.../v2` re-search below. Numbers and full option analysis:
+    `reports/factory/sizing_cold_start_2026-09-05.md`; record in `HANDOFF.md` section 8
+    and `PRD_STRATEGY_FACTORY.md` section 8 / Phase F4.
+  - **Not scheduled here: `weather/gfs_mex/taker/v2`.** Folding the cold-start sizing law
+    into `sandbox_admissible` and re-searching is the identified fix, but it is its own
+    phase — new frame freeze, search, parity run and gate registration — and it must not
+    disturb the v1 frame schema or `executable`/`sandbox_admissible` semantics, on which
+    the frozen frames, the promoted specs' `frame_search_sha256` and F3's
+    `n_discrepancies: 0` all depend. Budget for v2 returning CLOSED: it removes ~86 % of
+    the executable NO-taker rows and the survivors realize about −0.048/contract
+    unfiltered on this frame. A documented "no" satisfies the criterion.
 
 ---
 
