@@ -1,0 +1,37 @@
+{
+  "adverse_fill": 0.01,
+  "availability_lag_min": 240,
+  "calibration": {
+    "dir": "data/calibration",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
+  "contracts_frame": 20,
+  "family": "weather/gfs_mex/taker/v1",
+  "fee": {
+    "fee_type": "quadratic",
+    "regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+    "type": "taker"
+  },
+  "forecast_source": "gfs_mex",
+  "frame_search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "genome_id": "d02c9e2b25965752",
+  "genome_json": "{\"encoding\":[1,0,7,62,0,0,0,0,9,0,7,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"1-2F\",\"2-3F\",\"3-4F\",\"4-5F\",\"5F+\"],\"direction\":\"buy_no\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\",\"medium\",\"long\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":0.85,\"quote_lo\":\"OFF\",\"sigma_cap\":\"OFF\",\"windows\":[\">=24h\",\"12-24h\",\"6-12h\"]},\"n_active_clauses\":3,\"name\":\"mlweather_fallback\",\"notes\":\"APPROXIMATION of what maia's MLWeatherStrategy analytical fallback traded (src/strategies/ml_weather.py + src/ml/predictor.py:583-604): buy NO, taker, when the predictor's Gaussian P(in bracket)=max(0.05, exp(-0.5 z^2)), z=(forecast-mid)/(width/2) with width = cap-floor = 1 for 'between' brackets, gives no_edge = bid - P >= 0.08. For a forecast >= 1.22F from the bracket midpoint P floors at 0.05 so the rule is 'bid >= 0.13'. GENE_SPEC v1 encoding: bands {1-2F..5F+} (distance_f = |midpoint - mu| >= 1F is the nearest legal value to 1.22F, and mu_f is the calibrated median, not the raw NWS high the sandbox used); quote_hi 0.85 (quote = 1 - bid <= 0.87 -> nearest grid value); windows {>=24h,12-24h,6-12h} (the 10:00-13:59 ET decision window maps to 12-24h/6-12h for same-day and >=24h for next-day markets on the parity tape); p_win OFF (the fallback never used the calibration). NOT encoded: the one-slot-per-city 'highest YES bid first' selection (cross-row), the METAR/NWS source gate, the winner guard, the Yogi-Berra branch, and the fallback's YES branch on open-ended tails (P clipped to 0.95 on a 50F virtual bracket -> BUY YES when ask <= 0.87).\",\"source\":\"gfs_mex\"}",
+  "mode": "shadow",
+  "parity": {
+    "frame": "search",
+    "frame_sha12": "bfcf94654a3a",
+    "n_discrepancies": 0,
+    "n_live": 599,
+    "n_markets": 1656,
+    "n_markets_frame": 1518,
+    "n_offline": 599,
+    "p_yes_max_abs_diff": 0.0,
+    "report": "reports/factory/replay_parity_bfcf94654a3a_d02c9e2b25965752.json",
+    "rows_compared": 54159
+  },
+  "registry_status": "CLOSED",
+  "sigma_cap": 4.0,
+  "source": "seed",
+  "spec_hash": "d34f67deb836c3c07cfed1e76cb09bd4c1c4a73e8f5d8e955ee8fb6085b51007"
+}

@@ -1,0 +1,1082 @@
+{
+  "calibration": {
+    "dir": "data/calibration",
+    "replay_kind": "walk_forward",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "candle_only_columns": [
+    "price_mean",
+    "volume",
+    "open_interest",
+    "last"
+  ],
+  "discrepancies_gating": 0,
+  "discrepancies_total": 148,
+  "fee_regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+  "fee_type": "quadratic",
+  "frames_dir": "weather_2026-07-25_bfcf94654a3a",
+  "gefs_twin_sha256": "5d6611a3cbb7e6053db15f5793d2ff2f01e5ac1749da9db58b3662b63bdabe4b",
+  "genomes": {
+    "far_yes_taker": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 0 & mode_code == 0 & window_code in bits(0b11) & band_code in bits(0b110000)",
+      "direction": "buy_yes",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "09fca4bc5ac55470",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 256,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 256,
+      "n_snapshots": 10750,
+      "name": "far_yes_taker",
+      "offline_shape": {
+        "dates": 69,
+        "markets": 256,
+        "realized": -0.03451411318150449,
+        "trades": 256
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64244,
+        "signals": 256
+      }
+    },
+    "fr31a_gefs": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b11) & yes_ask < 1.0 & p_yes <= yes_ask - 0.08 & edge_distance_f >= 4.0",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "gefs_twin",
+      "genome_id": "008458c1bd0dc5e7",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gefs.csv",
+          "sha256": "564dbec7d19e634e7bc2a0ff06fa1226977e650760cece51dff18eda1ef9349d"
+        },
+        "frame_sha256": "5d6611a3cbb7e6053db15f5793d2ff2f01e5ac1749da9db58b3662b63bdabe4b",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 79,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 79,
+      "n_snapshots": 10750,
+      "name": "fr31a_gefs",
+      "offline_shape": {
+        "dates": 42,
+        "markets": 79,
+        "realized": -0.030781746031746042,
+        "trades": 79
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 43427,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 21073,
+      "rows_live_sigma_capped": 19740,
+      "source": "gefs",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64421,
+        "signals": 79
+      }
+    },
+    "fr31a_taker": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b11) & yes_ask < 1.0 & p_yes <= yes_ask - 0.08 & edge_distance_f >= 4.0",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "0c4b20502f2daf65",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 130,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 130,
+      "n_snapshots": 10750,
+      "name": "fr31a_taker",
+      "offline_shape": {
+        "dates": 57,
+        "markets": 130,
+        "realized": 0.07228684210526316,
+        "trades": 130
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64370,
+        "signals": 130
+      }
+    },
+    "fr31b": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 0 & mode_code == 0 & window_code in bits(0b111100) & p_win >= 0.95",
+      "direction": "buy_yes",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "03355f020c241912",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 3,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 3,
+      "n_snapshots": 10750,
+      "name": "fr31b",
+      "offline_shape": {
+        "dates": 3,
+        "markets": 3,
+        "realized": 0.09683333333333334,
+        "trades": 3
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64497,
+        "signals": 3
+      }
+    },
+    "mlweather_fallback": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b111) & band_code in bits(0b111110) & quote <= 0.85",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "d02c9e2b25965752",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 599,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 599,
+      "n_snapshots": 10750,
+      "name": "mlweather_fallback",
+      "offline_shape": {
+        "dates": 69,
+        "markets": 599,
+        "realized": -0.01886048597135554,
+        "trades": 599
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 63901,
+        "signals": 599
+      }
+    },
+    "nofilter_no": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b11) & band_code in bits(0b110000)",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "ad4825b831cbd887",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 241,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 241,
+      "n_snapshots": 10750,
+      "name": "nofilter_no",
+      "offline_shape": {
+        "dates": 67,
+        "markets": 241,
+        "realized": 0.06017212153518124,
+        "trades": 241
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64259,
+        "signals": 241
+      }
+    },
+    "pick_A": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b1001) & band_code in bits(0b10011) & p_win >= 0.75 & p_win <= 0.95 & quote >= 0.5 & sigma_f <= 3.5",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "cebde501743c359c",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 85,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 85,
+      "n_snapshots": 10750,
+      "name": "pick_A",
+      "offline_shape": {
+        "dates": 55,
+        "markets": 85,
+        "realized": 0.15577424242424245,
+        "trades": 85
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "pick:A:run_2026-09-03b",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64415,
+        "signals": 85
+      }
+    },
+    "pick_ALL69": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 0 & mode_code == 0 & window_code in bits(0b1) & band_code in bits(0b110010) & lead_bucket_code in bits(0b1) & quote >= 0.1 & quote <= 0.95 & sigma_f <= 4.0",
+      "direction": "buy_yes",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "aaa5c8c88d5c887c",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 71,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 71,
+      "n_snapshots": 10750,
+      "name": "pick_ALL69",
+      "offline_shape": {
+        "dates": 44,
+        "markets": 71,
+        "realized": 0.20213636363636364,
+        "trades": 71
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "pick:ALL69:run_2026-09-03b",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64429,
+        "signals": 71
+      }
+    },
+    "pick_B": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b111) & band_code in bits(0b11111) & p_win >= 0.85 & p_win <= 0.95 & quote >= 0.45 & quote <= 0.8 & sigma_f <= 3.0",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "fd6570788806db6b",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 106,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 106,
+      "n_snapshots": 10750,
+      "name": "pick_B",
+      "offline_shape": {
+        "dates": 56,
+        "markets": 106,
+        "realized": 0.09979910714285713,
+        "trades": 106
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "pick:B:run_2026-09-03b",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64394,
+        "signals": 106
+      }
+    },
+    "pick_C": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [],
+      "column_mismatches": {},
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b11011) & band_code in bits(0b101111) & p_win >= 0.95 & yes_ask < 1.0 & p_yes <= yes_ask - 0.08 & quote <= 0.95 & sigma_f <= 4.0 & edge_distance_f >= 3.0",
+      "direction": "buy_no",
+      "extra_live": [],
+      "frame": "search",
+      "genome_id": "2324266ec828a5f2",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [],
+      "mode": "taker",
+      "n_discrepancies": 0,
+      "n_live": 79,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 79,
+      "n_snapshots": 10750,
+      "name": "pick_C",
+      "offline_shape": {
+        "dates": 45,
+        "markets": 79,
+        "realized": 0.12028037037037037,
+        "trades": 79
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "pick:C:run_2026-09-03b",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64421,
+        "signals": 79
+      }
+    },
+    "salvage_5f": {
+      "calibration_failures": {},
+      "calibration_kind": "walk_forward",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-T69",
+          "ts": 1779030000
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779033600
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-T69",
+          "ts": 1779033600
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B79.5",
+          "ts": 1779033600
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B81.5",
+          "ts": 1779033600
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-T69",
+          "ts": 1779037200
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B79.5",
+          "ts": 1779037200
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B81.5",
+          "ts": 1779037200
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-T69",
+          "ts": 1779040800
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B81.5",
+          "ts": 1779040800
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B83.5",
+          "ts": 1779040800
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-T69",
+          "ts": 1779044400
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B81.5",
+          "ts": 1779044400
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHLAX-26MAY18-T69",
+          "ts": 1779048000
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHMIA-26MAY18-B88.5",
+          "ts": 1779051600
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHMIA-26MAY18-B90.5",
+          "ts": 1779055200
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B83.5",
+          "ts": 1779055200
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHMIA-26MAY18-B88.5",
+          "ts": 1779058800
+        },
+        {
+          "col": "executable",
+          "frame": 0.0,
+          "live": 1.0,
+          "market": "KXHIGHNY-26MAY18-B83.5",
+          "ts": 1779058800
+        }
+      ],
+      "column_mismatches": {
+        "executable": 2627
+      },
+      "describe": "direction_code == 1 & mode_code == 1 & band_code in bits(0b100000)",
+      "direction": "buy_no",
+      "extra_live": [
+        [
+          "KXHIGHCHI-26JUL04-B89.5",
+          1783137600,
+          "NO",
+          0.94
+        ],
+        [
+          "KXHIGHCHI-26JUL05-B81.5",
+          1783245600,
+          "NO",
+          0.83
+        ],
+        [
+          "KXHIGHCHI-26JUL14-B100.5",
+          1784001600,
+          "NO",
+          0.88
+        ],
+        [
+          "KXHIGHCHI-26JUL14-B98.5",
+          1784001600,
+          "NO",
+          0.72
+        ],
+        [
+          "KXHIGHCHI-26JUL14-T101",
+          1784001600,
+          "NO",
+          0.97
+        ],
+        [
+          "KXHIGHCHI-26JUL15-B100.5",
+          1784091600,
+          "NO",
+          0.97
+        ],
+        [
+          "KXHIGHCHI-26JUL15-B98.5",
+          1784088000,
+          "NO",
+          0.8
+        ],
+        [
+          "KXHIGHCHI-26JUL16-B94.5",
+          1784174400,
+          "NO",
+          0.88
+        ],
+        [
+          "KXHIGHCHI-26JUL18-B95.5",
+          1784347200,
+          "NO",
+          0.95
+        ],
+        [
+          "KXHIGHCHI-26JUL24-B84.5",
+          1784865600,
+          "NO",
+          0.94
+        ],
+        [
+          "KXHIGHCHI-26JUL25-B86.5",
+          1784952000,
+          "NO",
+          0.97
+        ],
+        [
+          "KXHIGHCHI-26JUN21-B75.5",
+          1782014400,
+          "NO",
+          0.86
+        ],
+        [
+          "KXHIGHCHI-26JUN26-B74.5",
+          1782446400,
+          "NO",
+          0.94
+        ],
+        [
+          "KXHIGHCHI-26JUN29-B96.5",
+          1782705600,
+          "NO",
+          0.76
+        ],
+        [
+          "KXHIGHCHI-26MAY21-T58",
+          1779336000,
+          "NO",
+          0.94
+        ],
+        [
+          "KXHIGHCHI-26MAY23-T67",
+          1779508800,
+          "NO",
+          0.7
+        ],
+        [
+          "KXHIGHCHI-26MAY24-T79",
+          1779595200,
+          "NO",
+          0.83
+        ],
+        [
+          "KXHIGHCHI-26MAY26-B89.5",
+          1779775200,
+          "NO",
+          0.93
+        ],
+        [
+          "KXHIGHCHI-26MAY28-B66.5",
+          1779940800,
+          "NO",
+          0.96
+        ],
+        [
+          "KXHIGHCHI-26MAY30-T77",
+          1780113600,
+          "NO",
+          0.93
+        ]
+      ],
+      "frame": "search",
+      "genome_id": "97c9f14cac33f506",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": true,
+      "missing_live": [
+        [
+          "KXHIGHCHI-26JUL04-B89.5",
+          1783141200,
+          "NO",
+          0.95
+        ],
+        [
+          "KXHIGHCHI-26JUL14-B100.5",
+          1784016000,
+          "NO",
+          0.94
+        ],
+        [
+          "KXHIGHCHI-26JUL14-B98.5",
+          1784005200,
+          "NO",
+          0.76
+        ],
+        [
+          "KXHIGHCHI-26JUL15-B98.5",
+          1784091600,
+          "NO",
+          0.85
+        ],
+        [
+          "KXHIGHCHI-26JUL16-B94.5",
+          1784178000,
+          "NO",
+          0.92
+        ],
+        [
+          "KXHIGHCHI-26JUL24-B84.5",
+          1784869200,
+          "NO",
+          0.96
+        ],
+        [
+          "KXHIGHCHI-26JUN21-B75.5",
+          1782018000,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHCHI-26JUN29-B96.5",
+          1782709200,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHCHI-26MAY21-T58",
+          1779343200,
+          "NO",
+          0.96
+        ],
+        [
+          "KXHIGHCHI-26MAY23-T67",
+          1779523200,
+          "NO",
+          0.82
+        ],
+        [
+          "KXHIGHLAX-26JUL16-B85.5",
+          1784131200,
+          "NO",
+          0.84
+        ],
+        [
+          "KXHIGHLAX-26JUL17-B73.5",
+          1784232000,
+          "NO",
+          0.96
+        ],
+        [
+          "KXHIGHLAX-26JUL17-B75.5",
+          1784228400,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHLAX-26JUL23-T86",
+          1784750400,
+          "NO",
+          0.97
+        ],
+        [
+          "KXHIGHLAX-26JUN01-B74.5",
+          1780254000,
+          "NO",
+          0.78
+        ],
+        [
+          "KXHIGHLAX-26JUN01-T75",
+          1780257600,
+          "NO",
+          0.96
+        ],
+        [
+          "KXHIGHLAX-26JUN09-T75",
+          1780981200,
+          "NO",
+          0.92
+        ],
+        [
+          "KXHIGHLAX-26JUN11-B78.5",
+          1781110800,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHLAX-26JUN16-T74",
+          1781586000,
+          "NO",
+          0.93
+        ],
+        [
+          "KXHIGHLAX-26JUN17-T74",
+          1781683200,
+          "NO",
+          0.96
+        ]
+      ],
+      "mode": "maker",
+      "n_discrepancies": 148,
+      "n_live": 199,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 117,
+      "n_snapshots": 10750,
+      "name": "salvage_5f",
+      "offline_shape": {
+        "dates": 56,
+        "markets": 117,
+        "realized": 0.06202678571428572,
+        "trades": 117
+      },
+      "p_yes_max_abs_diff": 0.0,
+      "p_yes_within_tol": true,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 8970,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64301,
+        "signals": 199
+      }
+    }
+  },
+  "kind": "replay_parity",
+  "ladder_root": "data/ladders",
+  "n_city_days": 276,
+  "n_genomes": 11,
+  "n_markets_ladder": 1656,
+  "n_markets_search_frame": 1518,
+  "n_snapshots": 10750,
+  "ok": true,
+  "ok_strict": false,
+  "p_yes_all_within_tol": true,
+  "p_yes_tol": 1e-09,
+  "search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "skip_columns": [
+    "target_date_code",
+    "market_code"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "adverse_fill": 0.01,
+  "availability_lag_min": 240,
+  "calibration": {
+    "dir": "data/calibration",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
+  "contracts_frame": 20,
+  "family": "weather/gfs_mex/taker/v1",
+  "fee": {
+    "fee_type": "quadratic",
+    "regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+    "type": "taker"
+  },
+  "forecast_source": "gfs_mex",
+  "frame_search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "genome_id": "09fca4bc5ac55470",
+  "genome_json": "{\"encoding\":[0,0,3,48,0,0,0,0,0,0,7,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"4-5F\",\"5F+\"],\"direction\":\"buy_yes\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\",\"medium\",\"long\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":\"OFF\",\"quote_hi\":\"OFF\",\"quote_lo\":\"OFF\",\"sigma_cap\":\"OFF\",\"windows\":[\">=24h\",\"12-24h\"]},\"n_active_clauses\":2,\"name\":\"far_yes_taker\",\"notes\":\"Diagnostic: the Phase-2 'far-bracket YES (buy the tail), taker, >=12h' shape (813 trades, -0.062) so all four Phase-2 taker shapes are covered.\",\"source\":\"gfs_mex\"}",
+  "mode": "shadow",
+  "parity": {
+    "frame": "search",
+    "frame_sha12": "bfcf94654a3a",
+    "n_discrepancies": 0,
+    "n_live": 256,
+    "n_markets": 1656,
+    "n_markets_frame": 1518,
+    "n_offline": 256,
+    "p_yes_max_abs_diff": 0.0,
+    "report": "reports/factory/replay_parity_bfcf94654a3a_09fca4bc5ac55470.json",
+    "rows_compared": 54159
+  },
+  "registry_status": "CLOSED",
+  "sigma_cap": 4.0,
+  "source": "seed",
+  "spec_hash": "a65cefd9c32284e3bf97ec1a4dbb17076f4177965995ccd23cf3477e19f3d280"
+}

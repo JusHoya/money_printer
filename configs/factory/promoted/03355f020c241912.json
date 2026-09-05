@@ -1,0 +1,37 @@
+{
+  "adverse_fill": 0.01,
+  "availability_lag_min": 240,
+  "calibration": {
+    "dir": "data/calibration",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
+  "contracts_frame": 20,
+  "family": "weather/gfs_mex/taker/v1",
+  "fee": {
+    "fee_type": "quadratic",
+    "regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+    "type": "taker"
+  },
+  "forecast_source": "gfs_mex",
+  "frame_search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "genome_id": "03355f020c241912",
+  "genome_json": "{\"encoding\":[0,0,60,63,10,0,0,0,0,0,7,0,0],\"gene_spec_version\":1,\"genes\":{\"bands\":[\"0-1F\",\"1-2F\",\"2-3F\",\"3-4F\",\"4-5F\",\"5F+\"],\"direction\":\"buy_yes\",\"edge_distance_lo\":\"OFF\",\"entries_per_market\":1,\"far_margin\":\"OFF\",\"lead_buckets\":[\"short\",\"medium\",\"long\"],\"mode\":\"taker\",\"p_win_hi\":\"OFF\",\"p_win_lo\":0.95,\"quote_hi\":\"OFF\",\"quote_lo\":\"OFF\",\"sigma_cap\":\"OFF\",\"windows\":[\"6-12h\",\"3-6h\",\"1-3h\",\"<1h\"]},\"n_active_clauses\":2,\"name\":\"fr31b\",\"notes\":\"PRD FR-3.1(b) lock-in: buy YES, taker, <12h to close, p_win >= 0.95 (== ev_analysis.fr31b_mask & mode==taker).\",\"source\":\"gfs_mex\"}",
+  "mode": "shadow",
+  "parity": {
+    "frame": "search",
+    "frame_sha12": "bfcf94654a3a",
+    "n_discrepancies": 0,
+    "n_live": 3,
+    "n_markets": 1656,
+    "n_markets_frame": 1518,
+    "n_offline": 3,
+    "p_yes_max_abs_diff": 0.0,
+    "report": "reports/factory/replay_parity_bfcf94654a3a_03355f020c241912.json",
+    "rows_compared": 54159
+  },
+  "registry_status": "CLOSED",
+  "sigma_cap": 4.0,
+  "source": "seed",
+  "spec_hash": "baa0c0688fb0de47f5be33642de4fa621ee675c753356c47cc9657aca9673781"
+}
