@@ -57,7 +57,8 @@ DEPLOY_TEXT = open(DEPLOY, "r", encoding="utf-8").read()
 
 TOP_OF_HOUR = 1757041200           # exactly on a :00 boundary (epoch % 3600 == 0)
 LATE_IN_HOUR = TOP_OF_HOUR + 2968  # +49m28s, the real 2026-09-05T03:49:28Z offset
-JUST_AFTER_HOUR = TOP_OF_HOUR + 50    # inside the 120 s tolerance, past the 45 s "usable"
+JUST_AFTER_HOUR = TOP_OF_HOUR + 50    # `now` is inside the tolerance, but +50+75 = +125 is NOT
+SAFE_AFTER_HOUR = TOP_OF_HOUR + 30    # +30+75 = +105: the tick really does land in the band
 RUN_UP_TO_HOUR = TOP_OF_HOUR + 3525   # 75 s BEFORE the next :00 -- where the wait parks
 MID_HOUR = TOP_OF_HOUR + 1800         # the one place that really is off-boundary
 
@@ -474,12 +475,30 @@ def test_preflight_reports_the_forfeited_market_day_off_hour():
 
 
 @needs_bash
-def test_preflight_is_silent_about_cost_inside_the_aligned_window():
-    proc = _plan(epoch=TOP_OF_HOUR)
+def test_preflight_is_silent_about_cost_when_nothing_will_push_the_launch():
+    """On the boundary with no repair ahead, `up -d` really does land aligned."""
+    proc = _plan("--no-repair", epoch=TOP_OF_HOUR)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "boundary verdict    = IN_WINDOW" in proc.stdout, proc.stdout
     assert "no city-day is forfeited" in proc.stdout
     assert "COST of deploying now" not in proc.stdout
+
+
+@needs_bash
+def test_being_on_the_boundary_now_does_not_excuse_the_repair_that_follows():
+    """The cost question is about the LAUNCH, not about `now`.
+
+    At :00 exactly the verdict is IN_WINDOW -- but the default path spends
+    REPAIR_BUDGET_S on the NO-side repair first, so proceeding without waiting puts
+    the first tick at +315 s and forfeits the day. Keying the cost block off the
+    verdict instead of the budgeted projection hid exactly that.
+    """
+    proc = _plan(epoch=TOP_OF_HOUR)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "boundary verdict    = IN_WINDOW" in proc.stdout, proc.stdout
+    assert "COST of deploying now" in proc.stdout, proc.stdout
+    assert "Launching NOW would be aligned, but `up -d` will not be" in proc.stdout, proc.stdout
+    assert "planned wait 3285s" in proc.stdout, proc.stdout
 
 
 @needs_bash
@@ -513,40 +532,74 @@ def test_the_scripts_default_lead_and_budget_are_what_these_tests_assume():
 
 
 # ---------------------------------------------------------------------------
-# Remediation blocking 2 -- the verdict is the distance to the NEAREST :00.
+# Remediation blocking 2, and the regression the first attempt at it introduced.
 #
-# `usable = TOLERANCE - LAUNCH_LEAD_S` (45 s) cannot express "just before the next
-# :00", so everything past +45 s was LATE: a deploy 50 s into the hour got the full
-# "unrecoverable ... closes EVERY city-day" block plus a 57.9-minute sleep, and the
-# spot the wait itself parks in (75 s BEFORE a :00) was reported LATE too -- a
-# successful wait logged as a failure.
+# The verdict is a property of where the FIRST TICK lands, and the band is ONE-SIDED:
+# `_analyze` floor-snaps a tick to its hour and calls it late when `now - hour_epoch >
+# tolerance`, so only [:00, :00+120s] is aligned. Landing 75 s BEFORE a :00 snaps to
+# the PREVIOUS hour and is ~3525 s late for it -- maximally wrong, not nearly right.
+#
+# Two earlier models were both wrong. `usable = TOLERANCE - LAUNCH_LEAD_S` (45 s)
+# called the spot the wait parks in LATE -- a successful wait logged as a failure.
+# Replacing it with distance-to-the-nearest-:00 fixed that but called +50 s aligned
+# (its tick lands at +125 s) and -120 s aligned (its tick lands at +3555 s, the exact
+# offset where the default path silently forfeits the day).
 # ---------------------------------------------------------------------------
 
 @needs_bash
 @pytest.mark.parametrize("epoch,verdict", [
-    (TOP_OF_HOUR, "IN_WINDOW"),          # on the boundary
-    (JUST_AFTER_HOUR, "IN_WINDOW"),      # +50 s: first tick lands well inside 120 s
-    (RUN_UP_TO_HOUR, "IN_WINDOW"),       # -75 s: exactly where the wait parks
-    (TOP_OF_HOUR + 3480, "IN_WINDOW"),   # -120 s: the far edge of the tolerance
-    (TOP_OF_HOUR + 121, "LATE"),         # +121 s: one second past it
-    (TOP_OF_HOUR + 3479, "LATE"),        # -121 s: one second before it
+    (TOP_OF_HOUR, "IN_WINDOW"),          # tick at +75 s
+    (SAFE_AFTER_HOUR, "IN_WINDOW"),      # +30 s -> tick at +105 s, inside the band
+    (TOP_OF_HOUR + 45, "IN_WINDOW"),     # +45 s -> tick at +120 s, the last aligned second
+    (JUST_AFTER_HOUR, "LATE"),           # +50 s -> tick at +125 s: `now` is early, the tick is not
+    (RUN_UP_TO_HOUR, "IN_WINDOW"),       # -75 s -> tick at +0 s: exactly where the wait parks
+    (TOP_OF_HOUR + 3480, "LATE"),        # -120 s -> tick at +3555 s, snapped to the PREVIOUS hour
+    (TOP_OF_HOUR + 121, "LATE"),         # +121 s -> tick at +196 s
     (MID_HOUR, "LATE"),                  # the middle of the hour
 ])
-def test_the_verdict_measures_the_nearest_boundary(epoch, verdict):
+def test_the_verdict_projects_the_first_tick_against_a_one_sided_band(epoch, verdict):
     proc = _plan(epoch=epoch)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert f"boundary verdict    = {verdict}" in proc.stdout, proc.stdout
 
 
 @needs_bash
-def test_a_deploy_just_after_the_hour_is_not_told_it_forfeits_the_day():
-    """+50 s is inside the tolerance: no unrecoverable-cost block, and no hour-long sleep."""
-    proc = _plan("--no-repair", epoch=JUST_AFTER_HOUR)
+def test_a_genuinely_aligned_deploy_is_not_told_it_forfeits_the_day():
+    """+30 s: the tick lands at +105 s, inside the band. No cost block, no sleep."""
+    proc = _plan("--no-repair", epoch=SAFE_AFTER_HOUR)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "COST of deploying now" not in proc.stdout, proc.stdout
     assert "unrecoverable" not in proc.stdout
     assert "will WAIT" not in proc.stdout
     assert "planned wait 0s" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_the_launch_lead_is_counted_so_a_near_miss_is_not_waved_through():
+    """The regression: `into + budget <= tolerance` omitted LAUNCH_LEAD_S entirely.
+
+    At +50 s with no repair the old arithmetic answered "no wait needed" while the
+    first tick landed at +125 s -- 5 s past the tolerance, forfeiting the day.
+    """
+    proc = _plan("--no-repair", epoch=JUST_AFTER_HOUR)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "first tick would be = +125s past its :00" in proc.stdout, proc.stdout
+    assert "boundary verdict    = LATE" in proc.stdout, proc.stdout
+    assert "planned wait 0s" not in proc.stdout, proc.stdout
+    assert "COST of deploying now" in proc.stdout, proc.stdout
+
+
+@needs_bash
+def test_a_launch_late_in_the_hour_rolls_to_the_next_boundary_instead_of_clamping():
+    """The other regression: a negative target was clamped to 0 and launched anyway.
+
+    At -120 s with the repair ahead, `until_next - LAUNCH_LEAD_S - budget` is negative;
+    clamping it to 0 launched immediately and the tick landed at +3555 s.
+    """
+    proc = _plan(epoch=TOP_OF_HOUR + 3480)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "planned wait 0s" not in proc.stdout, proc.stdout
+    assert "planned wait 3405s" in proc.stdout, proc.stdout
 
 
 @needs_bash
@@ -672,7 +725,7 @@ def test_help_stops_at_the_end_of_the_header():
     assert "unknown option" not in proc.stdout
     assert "case \"$1\" in" not in proc.stdout
     # and it still prints the whole header, including its last section
-    assert "§BOUNDARY" in proc.stdout and "reported a successful wait as a failure" in proc.stdout
+    assert "§BOUNDARY" in proc.stdout and "fire the first tick in the previous hour" in proc.stdout
     assert all(ln.startswith("#") for ln in proc.stdout.splitlines()), proc.stdout
 
 

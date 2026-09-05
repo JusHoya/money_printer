@@ -55,9 +55,15 @@
 #                      only `up -d` followed could sleep most of an hour and still
 #                      launch past the tolerance, which is the exact forfeiture this
 #                      gate exists to prevent.
-#   "Aligned" is measured against the NEAREST :00, not against seconds-into-the-hour:
-#   75 s BEFORE a boundary is the very spot the wait parks in, and calling it LATE
-#   reported a successful wait as a failure.
+#   "Aligned" is a property of where the FIRST TICK lands, not of where `now` is, and
+#   the window is ONE-SIDED. `_analyze` floor-snaps a tick to its hour
+#   (`hour_epoch = (now // grid) * grid`) and calls it late when `now - hour_epoch >
+#   tolerance`, so the acceptable band is [:00, :00+120s]. A tick 75 s BEFORE a :00
+#   snaps to the PREVIOUS hour and is ~3525 s late for it -- maximally wrong, not
+#   nearly right. Every verdict and every wait below is therefore computed on the
+#   projected tick offset `(into + pending_work + LAUNCH_LEAD_S) % 3600`, and the wait
+#   aims the tick AT a :00 rather than just before one: a boot faster than
+#   LAUNCH_LEAD_S would otherwise fire the first tick in the previous hour.
 set -euo pipefail
 
 # ---- tunables (env-overridable; the defaults are what maia runs) --------------
@@ -81,36 +87,55 @@ log() { printf '[deploy_f3_shadow %s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 # without waiting an hour. Never set it on maia.
 now_epoch() { echo "${MP_DEPLOY_NOW_EPOCH:-$(date -u +%s)}"; }
 
-# Prints "<into> <until_next> <nearest> <IN_WINDOW|LATE>".
-# The verdict is the distance to the NEAREST :00 measured against the strategy's own
-# tolerance. Seconds-into-the-hour alone cannot express "just before the next :00",
-# so it called the wait's own target LATE and printed an unrecoverable-cost warning
-# a few seconds past the hour (F3 remediation, blocking 2).
+# tick_offset_after <pending_work_s> -- where the container's FIRST tick would land,
+# as seconds past the :00 it will snap to, if we launched after <pending_work_s> more
+# seconds of work. The band is one-sided (§BOUNDARY), so this single number decides
+# every verdict: <= TOP_OF_HOUR_TOLERANCE_S is aligned, anything else is late.
+tick_offset_after() {
+  local pending="$1" now
+  now="$(now_epoch)"
+  echo $(( (now % 3600 + pending + LAUNCH_LEAD_S) % 3600 ))
+}
+
+# Prints "<into> <until_next> <tick_offset> <IN_WINDOW|LATE>".
+# The verdict projects the FIRST TICK (launch lead included) against the strategy's
+# one-sided tolerance, so it answers the question the operator is actually asking:
+# "if this launches now, does the genome get its hour?" Measuring `now` instead --
+# or measuring distance to the nearest :00 on either side -- reported the very spot
+# the wait parks in (75 s before a :00) as LATE, and called +50 s aligned when its
+# tick lands at +125 s (F3 remediation, blocking 2 and its regression).
 boundary_state() {
-  local now into until_next nearest
+  local now into until_next tick
   now="$(now_epoch)"
   into=$(( now % 3600 ))
   until_next=$(( 3600 - into ))
-  nearest=$(( into < until_next ? into : until_next ))
-  if (( nearest <= TOP_OF_HOUR_TOLERANCE_S )); then
-    echo "$into $until_next $nearest IN_WINDOW"
+  tick=$(( (into + LAUNCH_LEAD_S) % 3600 ))
+  if (( tick <= TOP_OF_HOUR_TOLERANCE_S )); then
+    echo "$into $until_next $tick IN_WINDOW"
   else
-    echo "$into $until_next $nearest LATE"
+    echo "$into $until_next $tick LATE"
   fi
 }
 
 # wait_seconds_for <budget_s> -- how long to sleep so that, after <budget_s> more
-# seconds of work, `docker compose up -d` runs inside the aligned window. 0 when it
-# already would. <budget_s> is what makes the repair fit: see §BOUNDARY.
+# seconds of work plus the launch lead, the container's FIRST tick lands inside the
+# aligned window. 0 when it already would. <budget_s> is what makes the repair fit.
+#
+# Both earlier versions were wrong in the same direction -- they under-waited and
+# forfeited the day the gate exists to protect:
+#   * `into + budget <= tolerance` omitted LAUNCH_LEAD_S, so `into + budget` in
+#     [46,120] answered "no wait needed" while the tick landed at +121..+195 s;
+#   * `until_next - LAUNCH_LEAD_S - budget` clamped a negative target to 0 instead of
+#     rolling to the boundary AFTER next, so a launch late in the hour proceeded
+#     immediately and missed.
+# Projecting the tick and rolling forward handles both, and cannot return a negative.
 wait_seconds_for() {
-  local budget="$1" now into until_next target
-  now="$(now_epoch)"
-  into=$(( now % 3600 ))
-  until_next=$(( 3600 - into ))
-  if (( into + budget <= TOP_OF_HOUR_TOLERANCE_S )); then echo 0; return 0; fi
-  target=$(( until_next - LAUNCH_LEAD_S - budget ))
-  (( target < 0 )) && target=0
-  echo "$target"
+  local budget="$1" tick
+  tick="$(tick_offset_after "$budget")"
+  if (( tick <= TOP_OF_HOUR_TOLERANCE_S )); then echo 0; return 0; fi
+  # Aim the tick AT the next :00 (offset 0), never just before it: landing early
+  # snaps the tick to the previous hour, which is the worst outcome available.
+  echo $(( 3600 - tick ))
 }
 
 on_int() {
@@ -199,16 +224,21 @@ GENOME_ID=""
 DO_REPAIR=1
 WAIT_FOR_BOUNDARY=1
 PLAN_ONLY=0
+# A non-numeric --max-wait/--repair-budget used to evaluate as 0 inside the later
+# (( )) arithmetic, silently disabling the bound it was passed to set.
+require_seconds() {
+  [[ "$2" =~ ^[0-9]+$ ]] || { echo "$1 needs a whole number of seconds, got: $2" >&2; exit 2; }
+}
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-repair)          DO_REPAIR=0 ;;
     --any-time)           WAIT_FOR_BOUNDARY=0 ;;
     --at-boundary)        WAIT_FOR_BOUNDARY=1 ;;
     --plan|--dry-plan)    PLAN_ONLY=1 ;;
-    --max-wait)           shift; MAX_WAIT_S="${1:?--max-wait needs a number of seconds}" ;;
-    --max-wait=*)         MAX_WAIT_S="${1#*=}" ;;
-    --repair-budget)      shift; REPAIR_BUDGET_S="${1:?--repair-budget needs a number of seconds}" ;;
-    --repair-budget=*)    REPAIR_BUDGET_S="${1#*=}" ;;
+    --max-wait)           shift; require_seconds --max-wait "${1:?--max-wait needs a number of seconds}"; MAX_WAIT_S="$1" ;;
+    --max-wait=*)         require_seconds --max-wait "${1#*=}"; MAX_WAIT_S="${1#*=}" ;;
+    --repair-budget)      shift; require_seconds --repair-budget "${1:?--repair-budget needs a number of seconds}"; REPAIR_BUDGET_S="$1" ;;
+    --repair-budget=*)    require_seconds --repair-budget "${1#*=}"; REPAIR_BUDGET_S="${1#*=}" ;;
     -h|--help)            awk 'NR==1{next} /^#/{print; next} {exit}' "${BASH_SOURCE[0]}"; exit 0 ;;
     -*)                   echo "unknown option: $1" >&2; exit 2 ;;
     *)                    [[ -n "$GENOME_ID" ]] && { echo "unexpected argument: $1" >&2; exit 2; }
@@ -245,9 +275,11 @@ echo "  spec                = $SPEC"
 echo "  shell GENOME_STRATEGY_MODE = ${ENV_MODE:-<unset, compose default: shadow>}"
 echo "  seconds into hour   = $SEC_INTO_HOUR"
 echo "  next :00 UTC in     = ${SEC_TO_BOUNDARY}s"
-echo "  nearest :00 UTC     = ${SEC_TO_NEAREST}s away (aligned window: within ${TOP_OF_HOUR_TOLERANCE_S}s of a :00)"
+echo "  first tick would be = +${SEC_TO_NEAREST}s past its :00 (aligned band: 0..${TOP_OF_HOUR_TOLERANCE_S}s AFTER a :00)"
 echo "  boundary verdict    = $BOUNDARY_VERDICT"
-if [[ "$BOUNDARY_VERDICT" == LATE ]]; then
+# The cost question is about proceeding WITHOUT waiting, and the repair (step 6) runs
+# before `up -d`, so it is the budgeted projection that decides -- not where `now` is.
+if (( PLANNED_WAIT_S > 0 )); then
   echo "  COST of deploying now: the container's first tick lands more than"
   echo "    ${TOP_OF_HOUR_TOLERANCE_S}s past :00, so the missed-hour rule closes EVERY city-day now"
   echo "    visible (all four cities) with GENOME_MISSED_HOUR for the rest of the market-day."
@@ -266,8 +298,8 @@ if [[ "$WAIT_FOR_BOUNDARY" == 1 ]]; then
   echo "  SCHEDULE: repair budget ${REPAIR_BUDGET_S}s + launch lead ${LAUNCH_LEAD_S}s -> planned wait ${PLANNED_WAIT_S}s"
   if (( PLANNED_WAIT_S > 0 )); then
     if [[ "$BOUNDARY_VERDICT" == IN_WINDOW ]]; then
-      echo "    NOW is inside the window but \`up -d\` will not be: the repair moves the launch"
-      echo "    ${REPAIR_BUDGET_S}s into the future, past the ${TOP_OF_HOUR_TOLERANCE_S}s tolerance. Hence the wait."
+      echo "    Launching NOW would be aligned, but \`up -d\` will not be: the repair moves the"
+      echo "    launch ${REPAIR_BUDGET_S}s into the future, past the ${TOP_OF_HOUR_TOLERANCE_S}s tolerance. Hence the wait."
     fi
     echo "    The repair (step 6) runs BETWEEN the wait and \`up -d\`, so its ${REPAIR_BUDGET_S}s are"
     echo "    subtracted: the wait ends, the repair runs, and \`up -d\` lands ~${LAUNCH_LEAD_S}s before a :00."
@@ -397,9 +429,9 @@ for i in $(seq 1 30); do curl -sf "$DASHBOARD_URL/healthz" && break || sleep 3; 
 curl -sf "$DASHBOARD_URL/healthz" >/dev/null || die "healthz failed after 90 s -- see: ${COMPOSE[*]} logs --tail 100 $SERVICE"
 echo
 read -r SEC_INTO_HOUR SEC_TO_BOUNDARY SEC_TO_NEAREST BOUNDARY_VERDICT <<<"$(boundary_state)"
-log "launched at +${SEC_INTO_HOUR}s into the hour (nearest :00 is ${SEC_TO_NEAREST}s away: $BOUNDARY_VERDICT)"
+log "launched at +${SEC_INTO_HOUR}s into the hour; first tick lands +${SEC_TO_NEAREST}s past its :00 ($BOUNDARY_VERDICT)"
 if [[ "$BOUNDARY_VERDICT" == LATE ]]; then
-  log "WARNING: that is past the ${TOP_OF_HOUR_TOLERANCE_S}s tolerance on both sides of a :00."
+  log "WARNING: that is past the ${TOP_OF_HOUR_TOLERANCE_S}s tolerance the strategy allows after a :00."
   log "         Expect GENOME_MISSED_HOUR for today's city-days (§BOUNDARY). This is not recoverable."
 fi
 
