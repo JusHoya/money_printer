@@ -393,6 +393,32 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         if not os.path.isabs(cal_dir):
             cal_dir = os.path.join(_REPO_ROOT, cal_dir)
         cache_dir = os.getenv(CACHE_DIR_ENV) or DEFAULT_CACHE_DIR
+        # A genome can only be served the forecast SOURCE it was selected on. The live
+        # vintage path fetches GFS-MEX MOS guidance and nothing else; handed a `gefs`
+        # spec it used to relabel MEX rows as gefs and price them through the GEFS-fitted
+        # calibration, silently (second red team, 2026-09-06; the F3 record that a gefs
+        # genome "would always hit GENOME_NO_VINTAGE" was wrong). Paper: refuse via the
+        # spec-mismatch path; shadow: a loud line and the genome is NOT loaded -- in no
+        # mode does it price relabelled guidance.
+        from src.data.forecast_vintage_provider import LIVE_SOURCES
+
+        if spec.forecast_source not in LIVE_SOURCES:
+            reason = (
+                f"no live provider for forecast_source {spec.forecast_source!r} (the live vintage path "
+                f"fetches {LIVE_SOURCES} only; serving relabelled guidance is not a forecast)"
+            )
+            if not self.genome_shadow:
+                from src.strategies.genome_strategy import GenomeSpecMismatch
+
+                raise GenomeSpecMismatch(reason)
+            logger.error(
+                "[Weather] FORECAST SOURCE UNAVAILABLE: GenomeStrategy REFUSED %s -- %s; running V2 only",
+                spec.genome_id, reason,
+            )
+            self.genome_spec = None
+            self.genome_shadow = False
+            self.genome_refused_reason = f"{spec.genome_id}: FORECAST SOURCE UNAVAILABLE -- {reason}"
+            return None
         mos = MOSGuidanceProvider(cache_dir=os.path.join(cache_dir, "mos"))
         provider = ForecastVintageProvider.live(
             mos,

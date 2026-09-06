@@ -54,6 +54,10 @@ SOURCE_REPLAY = "replay"
 SOURCE_LIVE = "live"
 DEFAULT_LAG_MIN = 240
 DEFAULT_MODEL = "MEX"
+#: The forecast sources the LIVE path can genuinely fetch. The MOS wrapper serves GFS-MEX
+#: guidance; there is no live GEFS fetch, so a ``gefs`` genome cannot be served live and
+#: ``ForecastVintageProvider.live`` refuses it rather than relabelling MEX rows as gefs.
+LIVE_SOURCES: Tuple[str, ...] = ("gfs_mex",)
 #: How many UTC days back the live path looks for a run that forecasts ``target_date``.
 LIVE_LOOKBACK_DAYS = 3
 
@@ -145,6 +149,16 @@ class ForecastVintageProvider:
     ) -> None:
         if source not in (SOURCE_REPLAY, SOURCE_LIVE):
             raise ForecastVintageError(f"source must be 'replay' or 'live', got {source!r}")
+        if source == SOURCE_LIVE and str(forecast_source) not in LIVE_SOURCES:
+            # The live path fetches MOS guidance (model MEX = GFS MOS extended) and stamps
+            # `forecast_source` on the rows it ingests. For any other source that is a
+            # RELABELLING, not a fetch: a gefs genome would price GFS-MEX guidance through a
+            # GEFS-fitted calibration, silently (second red team, 2026-09-06). Refuse.
+            raise ForecastVintageError(
+                f"no live provider for forecast_source {forecast_source!r}: the live path can only "
+                f"fetch {LIVE_SOURCES} (MOS model {model!r}); serving it re-labelled guidance "
+                f"is not a forecast"
+            )
         if int(lag_min) < 0:
             raise ForecastVintageError("lag_min must be >= 0")
         self.source = source

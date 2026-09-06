@@ -354,6 +354,100 @@ def test_paper_refuses_and_shadow_warns_when_the_archives_are_not_the_pinned_one
     assert fz.archive_pins_ok is None and fz.calibration_kind_ok is True
 
 
+def _kw(spec):
+    import datetime as _dt
+
+    from src.data.forecast_vintage_provider import ForecastVintageProvider
+    from src.factory.fees import load_regime
+
+    return dict(clock=lambda: _dt.datetime(2026, 7, 19, 15, 0, tzinfo=_dt.timezone.utc),
+                forecast_provider=ForecastVintageProvider.from_rows([], lag_min=spec.availability_lag_min),
+                fee_regime=load_regime())
+
+
+def _mutated_knyc_provider(tmp_path):
+    """The archives with every KNYC truth row shifted (the red team's mutation), as a provider."""
+    fcsv, tdir = _perturbed_archive(tmp_path, "NY", from_date="2026-01-01")
+    return gs.WalkForwardCalibrationProvider(str(CAL_DIR), source="gfs_mex", forecast_csv=fcsv, truth_dir=tdir)
+
+
+def test_partial_pin_map_hole_a_served_station_the_spec_omits_is_a_mismatch(tmp_path, caplog):
+    """Second red team (2026-09-06): delete KNYC from the pin map, rehash, mutate KNYC ->
+    the guard iterated the SPEC's pins and passed. It must iterate what is SERVED."""
+    import logging
+
+    from src.utils.logger import logger as mp_logger
+
+    spec = _spec()
+    doc = spec.to_doc(with_hash=False)
+    assert "KNYC" in doc["calibration"]["truth_sha256"]
+    del doc["calibration"]["truth_sha256"]["KNYC"]  # 3-station map
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    three = P.from_doc(doc)
+    prov = _mutated_knyc_provider(tmp_path)
+    prov_f = gs.build_calibration_provider(three, str(CAL_DIR))
+    # forecast archive untouched in this attack: the mutated provider must be built with the
+    # spec's forecast pin intact, so redirect only the truth dir
+    prov = gs.WalkForwardCalibrationProvider(str(CAL_DIR), source="gfs_mex", truth_dir=prov.truth_dir)
+    assert prov.forecast_sha256 == three.calibration.forecast_sha256
+    assert prov.truth_sha256["KNYC"] != _provider().truth_sha256["KNYC"]
+    # shadow: loads, warns, names KNYC as unpinned
+    caplog.set_level(logging.INFO, logger=mp_logger.name)
+    mp_logger.addHandler(caplog.handler)
+    try:
+        strat = gs.GenomeStrategy(three, calibration_provider=prov, **_kw(three))
+    finally:
+        mp_logger.removeHandler(caplog.handler)
+    assert strat.archive_pins_ok is False
+    assert "the spec pins no KNYC" in strat.archive_pins_detail
+    assert any("ARCHIVE PIN MISMATCH (shadow)" in r.getMessage() and "pins no KNYC" in r.getMessage()
+               for r in caplog.records)
+    # paper: refused
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    with pytest.raises(gs.GenomeSpecMismatch, match="pins no KNYC"):
+        gs.GenomeStrategy(P.from_doc(doc), calibration_provider=prov, **_kw(three))
+    # and even with the REAL archives a 3-station map is not a pass: the served KNYC is unpinned
+    with pytest.raises(gs.GenomeSpecMismatch, match="pins no KNYC"):
+        gs.GenomeStrategy(P.from_doc(doc), calibration_provider=prov_f, **_kw(three))
+
+
+def test_partial_pin_map_hole_b_forecast_pin_absent_while_truth_pins_exist_is_a_mismatch():
+    spec = _spec()
+    doc = spec.to_doc(with_hash=False)
+    doc["calibration"]["forecast_sha256"] = None
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    half = P.from_doc(doc)
+    prov = gs.build_calibration_provider(half, str(CAL_DIR))
+    strat = gs.GenomeStrategy(half, calibration_provider=prov, **_kw(half))  # shadow: warns
+    assert strat.archive_pins_ok is False and "the spec pins none" in strat.archive_pins_detail
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    with pytest.raises(gs.GenomeSpecMismatch, match="the spec pins none"):
+        gs.GenomeStrategy(P.from_doc(doc), calibration_provider=prov, **_kw(half))
+    # the converse -- a pinned station the provider does not serve -- is a mismatch too
+    doc = spec.to_doc(with_hash=False)
+    doc["calibration"]["truth_sha256"]["KDEN"] = "d" * 64
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    with pytest.raises(gs.GenomeSpecMismatch, match="serves no KDEN"):
+        gs.GenomeStrategy(P.from_doc(doc), calibration_provider=prov, **_kw(half))
+
+
+def test_live_vintage_provider_refuses_a_source_it_cannot_fetch():
+    """Second red team: a gefs spec was served GFS-MEX MOS rows relabelled as gefs."""
+    import datetime as _dt
+
+    from src.data.forecast_vintage_provider import LIVE_SOURCES, ForecastVintageError, ForecastVintageProvider
+
+    assert LIVE_SOURCES == ("gfs_mex",)
+    clock = lambda: _dt.datetime(2026, 9, 6, 15, tzinfo=_dt.timezone.utc)  # noqa: E731
+    with pytest.raises(ForecastVintageError, match="no live provider for forecast_source 'gefs'"):
+        ForecastVintageProvider.live(object(), clock=clock, forecast_source="gefs")
+    ForecastVintageProvider.live(object(), clock=clock, forecast_source="gfs_mex")  # still constructs
+    ForecastVintageProvider.from_rows([], forecast_source="gefs")  # replay is unaffected
+
+
 # ---------------------------------------------------------------------------
 # import graph
 # ---------------------------------------------------------------------------

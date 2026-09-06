@@ -315,6 +315,102 @@ def test_paper_bot_on_a_redirected_mutated_archive_is_refused(monkeypatch, mp_ca
     assert bot.genome_refused_reason is None and bot.strategies["genome"].archive_pins_ok is True
 
 
+GEFS_SPEC = "008458c1bd0dc5e7"  # fr31a_gefs, shadow -- forecast_source "gefs"
+
+
+def test_shadow_bot_refuses_a_gefs_genome_instead_of_relabelling_mex_guidance(monkeypatch, mp_caplog, tmp_path):
+    """Second red team (2026-09-06): the live vintage path handed a gefs spec fetched GFS-MEX
+    MOS rows and stamped them 'gefs', priced through the GEFS-fitted calibration, silently.
+    Shadow: FORECAST SOURCE UNAVAILABLE, genome NOT loaded, V2 only."""
+    src = os.path.join(PROMOTED_DIR, f"{GEFS_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted gefs spec not present")
+    monkeypatch.setenv("GENOME_STRATEGY_ID", GEFS_SPEC)
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    bot = WeatherBot()  # must not raise
+    assert list(bot.strategies) == ["weather"] and bot.genome_spec is None
+    assert "FORECAST SOURCE UNAVAILABLE" in bot.genome_refused_reason
+    assert "no live provider for forecast_source 'gefs'" in bot.genome_refused_reason
+    assert any("FORECAST SOURCE UNAVAILABLE" in r.getMessage() and GEFS_SPEC in r.getMessage()
+               for r in mp_caplog.records)
+    # /api/genome surfaces exactly this attribute as refused / refused_reason (state_manager)
+    assert bot.genome_shadow is False  # no execution mode is reported for a refused genome
+
+
+def test_paper_bot_refuses_a_gefs_genome_as_a_spec_mismatch(monkeypatch, mp_caplog, tmp_path):
+    src = os.path.join(PROMOTED_DIR, f"{GEFS_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted gefs spec not present")
+    from src.factory import promoted
+
+    doc = json.load(open(src, encoding="utf-8"))
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = promoted.spec_hash_of(doc)
+    spec_path = tmp_path / f"{GEFS_SPEC}.json"
+    spec_path.write_text(json.dumps(doc, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setenv("GENOME_STRATEGY_ID", str(spec_path))
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "paper")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    monkeypatch.setattr(WeatherBot, "_registry_status", staticmethod(lambda family: "PROPOSED"))
+    bot = WeatherBot()
+    assert list(bot.strategies) == ["weather"]
+    assert "GenomeSpecMismatch" in bot.genome_refused_reason
+    assert "no live provider for forecast_source 'gefs'" in bot.genome_refused_reason
+
+
+def test_the_gfs_mex_genome_is_unaffected_by_the_source_check(monkeypatch, tmp_path):
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    monkeypatch.setenv("GENOME_STRATEGY_ID", SEED_SPEC)
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    bot = WeatherBot()
+    assert bot.genome_refused_reason is None and "genome" in bot.strategies
+    assert bot.strategies["genome"].forecast_provider.forecast_source == "gfs_mex"
+
+
+def test_shadow_bot_with_a_three_station_pin_map_and_mutated_knyc_logs_the_unpinned_station(monkeypatch, mp_caplog, tmp_path):
+    """Second red team: KNYC deleted from the pin map (spec rehashed) + KNYC mutated loaded clean."""
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    import src.strategies.genome_strategy as gs
+    from src.factory import promoted
+
+    doc = json.load(open(src, encoding="utf-8"))
+    del doc["calibration"]["truth_sha256"]["KNYC"]
+    doc["spec_hash"] = promoted.spec_hash_of(doc)
+    spec_path = tmp_path / f"{SEED_SPEC}.json"
+    spec_path.write_text(json.dumps(doc, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setattr(gs, "_REPO_ROOT", _redirected_root_with_mutated_ny_truth(tmp_path))
+    monkeypatch.setenv("GENOME_STRATEGY_ID", str(spec_path))
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    bot = WeatherBot()
+    strat = bot.strategies["genome"]
+    assert strat.archive_pins_ok is False and "the spec pins no KNYC" in strat.archive_pins_detail
+    assert any("ARCHIVE PIN MISMATCH (shadow)" in r.getMessage() and "pins no KNYC" in r.getMessage()
+               for r in mp_caplog.records)
+    # paper on the same spec + root: REFUSED
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = promoted.spec_hash_of(doc)
+    spec_path.write_text(json.dumps(doc, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "paper")
+    monkeypatch.setattr(WeatherBot, "_registry_status", staticmethod(lambda family: "PROPOSED"))
+    bot = WeatherBot()
+    assert "genome" not in bot.strategies and "pins no KNYC" in bot.genome_refused_reason
+
+
 def test_missing_walk_forward_archives_refuse_the_genome_and_name_the_deploy_step(monkeypatch, mp_caplog, tmp_path):
     """The maia failure mode: data/calibration is in the bind but the archives are not."""
     src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
