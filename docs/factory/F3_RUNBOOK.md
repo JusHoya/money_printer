@@ -447,6 +447,12 @@ n = 0 and the reported p90 is a *next-poll* number at a ~35-40 s lag — a conse
 upper bound, and the report says so in `p90_basis`. The table's older "14-s maia tape"
 was wrong; nothing polls that fast.
 
+**Analyse from the tape, not from the collecting process.** `--collect-seconds N` runs
+one process for N seconds and then analyses, using the module it imported at *launch*.
+On 2026-09-06 the fix below landed while a 3.5-hour collection was already running, and
+that run's own end-of-run report still printed the pre-fix number. Collect, then re-run
+the study over `--csv <cache>` at HEAD; that second pass is the artifact to commit.
+
 **A zero ask is an empty book, not a cheap contract.** `_parse_price` returns `0.0`
 for a missing ask, and a next-day ladder sits at ask 0.00 / volume 0 until it opens,
 so the first real quote used to score as adverse drift of the entire ask. On the
