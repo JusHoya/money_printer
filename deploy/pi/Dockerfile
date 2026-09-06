@@ -21,6 +21,13 @@ RUN pip install -r /tmp/requirements-runtime.txt
 
 # The application. .dockerignore keeps data/, logs/, reports/ and the
 # vm_snapshot out of the build context.
+#
+# reports/ stays out ON PURPOSE and must not be COPYed back in. The sandbox does
+# need reports/factory/registry.jsonl (WeatherBot._registry_status gates paper
+# mode on a family's CURRENT status), but an image is a build-time snapshot: a
+# family closed after the build would still read PROPOSED. docker-compose.yml
+# bind-mounts the live tracked reports/factory read-only at run time instead, so
+# /app/reports does not exist in this image and Docker creates the mount point.
 COPY . /app
 
 # Non-root user. data/ and logs/ are bind-mounted in compose, but the image

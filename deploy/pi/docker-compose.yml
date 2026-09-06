@@ -73,6 +73,31 @@ services:
       #     sudo chown 1000:1000 /srv/money_printer/data/forecast_cache
       - /srv/money_printer/data/forecast_cache:/app/data/forecast_cache
       - /srv/money_printer/kalshi_priv.key:/app/kalshi_priv.key:ro
+      # The family registry, read-only. WeatherBot._registry_status() opens
+      # /app/reports/factory/registry.jsonl to confirm a family's CURRENT status
+      # before paper mode is allowed; without this bind the path did not exist in
+      # mp-sandbox at all (.dockerignore keeps reports/ out of the build context),
+      # so the gate could never return an authorizing value.
+      #
+      # Why a bind and not a COPY in the Dockerfile: an image is a build-time
+      # snapshot, and this check exists precisely to see status changes that happen
+      # AFTER the build -- a family closed post-build would still read PROPOSED.
+      # The host side is relative to THIS file's directory, i.e. the repo checkout
+      # deploy_f3_shadow.sh just ran `git pull --ff-only` in, so the container reads
+      # the live tracked file.
+      #
+      # Why the directory and not registry.jsonl itself: git updates a tracked file
+      # by writing a temp file and renaming over it (a new inode). A single-file
+      # bind pins the inode at container-create time and would go stale exactly the
+      # way the image does; a directory bind resolves the name on every open.
+      #
+      # `docker compose run` inherits this service's volumes, so the throwaway
+      # containers in deploy_f3_shadow.sh step 6 get it too. A RAW `docker run --rm`
+      # (F3_RUNBOOK §2 import checks) does not -- add the same live path explicitly
+      # if such a container ever needs the registry:
+      #     docker run --rm -v "$PWD/reports/factory:/app/reports/factory:ro" ...
+      # Never `docker cp` it in: that reintroduces the snapshot this bind avoids.
+      - ../../reports/factory:/app/reports/factory:ro
     healthcheck:
       # /healthz is side-effect free; /api/status wrote a CSV row per probe.
       test: ["CMD", "curl", "-fsS", "http://localhost:8050/healthz"]

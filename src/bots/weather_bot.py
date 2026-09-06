@@ -64,6 +64,19 @@ GENOME_PAPER = "paper"
 GENOME_MODES = (GENOME_PAPER, GENOME_SHADOW)
 GENOME_STRATEGY_KEY = "genome"
 
+#: Repo-relative path of the governance record the paper gate reads (POSIX form; it is
+#: also the container-relative path under /app, which is what the compose bind targets).
+REGISTRY_RELPATH = "reports/factory/registry.jsonl"
+
+
+class RegistryUnavailable(RuntimeError):
+    """The family registry the paper gate must read is missing or unreadable.
+
+    Distinct from "the file was read and the family is not PROPOSED/RATIFIED": that is a
+    governance answer, this is a broken deployment. Raising rather than returning ``None``
+    makes it impossible to mistake the two at the call site.
+    """
+
 # Waterfall key -> the strategy_name that appears in EMIT/EXECUTED/REJECT lines.
 STRATEGY_LABELS: Dict[str, str] = {
     "ml_weather": "ML Weather",
@@ -267,9 +280,18 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         # spec to shadow; asking for paper on a shadow spec is a configuration
         # error and the genome is refused outright rather than silently run in
         # shadow. Paper mode additionally needs the family's CURRENT registry
-        # status (reports/factory/registry.jsonl, tracked, shipped in the image)
-        # to be PROPOSED/RATIFIED and to match the spec -- spec_hash is
-        # integrity, not authorization.
+        # status (``reports/factory/registry.jsonl``) to be PROPOSED/RATIFIED and
+        # to match the spec -- spec_hash is integrity, not authorization.
+        #
+        # 2026-09-06 correction: that file is tracked but is NOT, and must not be,
+        # shipped in the image. ``.dockerignore`` keeps ``reports/`` out of the
+        # build context on purpose -- a build-time copy of a CURRENT-status record
+        # is a snapshot, and would keep reporting PROPOSED for a family closed
+        # after the image was built. ``deploy/pi/docker-compose.yml`` bind-mounts
+        # the live tracked directory read-only instead. Until 2026-09-06 there was
+        # no such bind, so the path did not exist in ``mp-sandbox`` at all and this
+        # gate could never return an authorizing value (it failed closed, so
+        # nothing was unsafe -- but it was decorative).
         if env_mode == GENOME_PAPER and spec.mode == GENOME_SHADOW:
             logger.error(
                 "[Weather] GenomeStrategy REFUSED: GENOME_STRATEGY_MODE=paper but spec %s is mode=shadow "
@@ -283,8 +305,42 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             )
             return None
         self.genome_shadow = spec.mode == GENOME_SHADOW or env_mode == GENOME_SHADOW
-        if not self.genome_shadow:
-            registry_status = self._registry_status(spec.family)
+        if self.genome_shadow:
+            # Shadow never consults the registry, so a deployment that cannot read it
+            # would stay silent until the day someone flips to paper -- and would then
+            # refuse for a reason that LOOKS like a governance decision. Say it now.
+            # Log-only: the genome still loads and still runs in shadow.
+            try:
+                self._registry_status(spec.family)
+            except RegistryUnavailable as exc:
+                logger.warning(
+                    "[Weather] DEPLOYMENT MISCONFIGURED (shadow mode is unaffected): %s. "
+                    "Paper mode would be REFUSED here for a deployment reason, not a governance one. "
+                    "The sandbox gets this file from the read-only %s bind in "
+                    "deploy/pi/docker-compose.yml; recreate the container to pick it up.",
+                    exc, REGISTRY_RELPATH,
+                )
+        else:
+            try:
+                registry_status = self._registry_status(spec.family)
+            except RegistryUnavailable as exc:
+                # NOT a governance refusal: the gate could not read the family's current
+                # status at all. Different fault, different fix, so a different message.
+                logger.error(
+                    "[Weather] GenomeStrategy REFUSED paper mode: DEPLOYMENT MISCONFIGURED -- %s. "
+                    "This is not a verdict on family %s; the paper gate could not read its CURRENT "
+                    "status. The sandbox gets this file from the read-only %s bind in "
+                    "deploy/pi/docker-compose.yml -- recreate the container "
+                    "(`docker compose -f deploy/pi/docker-compose.yml up -d`) so the bind exists, "
+                    "and check the checkout really has the tracked file. Running V2 only.",
+                    exc, spec.family, REGISTRY_RELPATH,
+                )
+                self.genome_spec = None
+                self.genome_refused_reason = (
+                    f"paper mode refused: DEPLOYMENT MISCONFIGURED -- {exc}; the registry bind is "
+                    f"missing from this container, so family {spec.family} could not be checked"
+                )
+                return None
             if registry_status not in ("PROPOSED", "RATIFIED") or registry_status != spec.registry_status:
                 logger.error(
                     "[Weather] GenomeStrategy REFUSED paper mode: family %s registry status is %s, spec says %s "
@@ -334,12 +390,24 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
     @staticmethod
     def _registry_status(family: str):
-        """Current registry status of ``family`` from the tracked registry.jsonl (no factory import)."""
+        """Current registry status of ``family`` from the tracked registry.jsonl (no factory import).
+
+        Returns the last status recorded for ``family``, or ``None`` when the registry was
+        read and simply does not mention it. Raises :class:`RegistryUnavailable` when the
+        file itself cannot be read -- that is a broken deployment, not a governance answer,
+        and conflating the two (both used to be ``None``) hid the fact that the sandbox had
+        no copy of the file at all. Callers must fail closed on both, but say different things.
+
+        The file is tracked in git and reaches the sandbox through the read-only
+        ``reports/factory`` bind in ``deploy/pi/docker-compose.yml``. It is deliberately NOT
+        in the image: ``.dockerignore`` excludes ``reports/`` so this check can never read a
+        build-time snapshot of a status that is supposed to be current.
+        """
         import json as _json
 
         from src.factory.promoted import REPO_ROOT as _REPO_ROOT
 
-        path = os.path.join(_REPO_ROOT, "reports", "factory", "registry.jsonl")
+        path = os.path.join(_REPO_ROOT, *REGISTRY_RELPATH.split("/"))
         status = None
         try:
             with open(path, "r", encoding="utf-8") as fh:
@@ -357,8 +425,13 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         status = "OPEN"
                     elif line.get("event") == "transition":
                         status = line.get("status")
-        except OSError:
-            return None
+        except OSError as exc:
+            # IsADirectoryError lands here too: docker creates a DIRECTORY at a bind
+            # target whose host path is missing, which is a misconfiguration, not a status.
+            raise RegistryUnavailable(
+                f"cannot read the family registry {REGISTRY_RELPATH} at {path} "
+                f"({type(exc).__name__}: {exc})"
+            ) from exc
         return status
 
     def _genome_hour_hook(self, method: str, city_key: str, *args) -> None:

@@ -2,6 +2,11 @@
 .git
 data/
 logs/
+# KEEP THIS. reports/factory/registry.jsonl is tracked and the sandbox DOES need it
+# (WeatherBot._registry_status gates paper mode on a family's CURRENT status), but it
+# must never be baked in: an image is a build-time snapshot, and a family closed after
+# the build would still read PROPOSED. deploy/pi/docker-compose.yml bind-mounts the
+# live tracked reports/factory read-only instead. Un-ignoring this is not a fix.
 reports/
 review_2026_07_24/
 vm_snapshot_2026_08_22/

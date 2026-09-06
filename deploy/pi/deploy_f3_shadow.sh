@@ -449,6 +449,20 @@ echo "  container MP_FORECAST_CACHE_DIR= ${ACTUAL_CACHE:-<unset>}"
 [[ "$ACTUAL_ID" == "$GENOME_ID" ]] || die "container GENOME_STRATEGY_ID is '${ACTUAL_ID:-<unset>}', expected '$GENOME_ID'"
 [[ -n "$ACTUAL_CACHE" ]] || die "MP_FORECAST_CACHE_DIR is unset in the container -- the genome state file has nowhere to live"
 
+# The family registry the PAPER gate reads (WeatherBot._registry_status). Shadow deploys
+# do not need it, so this REPORTS and never dies: it exists so the bind is proven working
+# on a shadow deploy instead of being discovered broken on the day F4 flips to paper.
+# Until 2026-09-06 there was no bind and this path did not exist in the container at all.
+REGISTRY_IN_CONTAINER=/app/reports/factory/registry.jsonl
+if docker exec "$CID" test -r "$REGISTRY_IN_CONTAINER"; then
+  echo "  container $REGISTRY_IN_CONTAINER = readable ($(docker exec "$CID" sh -c "wc -l < $REGISTRY_IN_CONTAINER" | tr -d ' \r') lines; read-only bind)"
+else
+  log "WARNING: $REGISTRY_IN_CONTAINER is NOT readable in the container. Shadow is unaffected,"
+  log "         but paper mode would be REFUSED as DEPLOYMENT MISCONFIGURED. Check the"
+  log "         '../../reports/factory:/app/reports/factory:ro' volume in $HERE/docker-compose.yml"
+  log "         and that this checkout really has the tracked reports/factory/registry.jsonl."
+fi
+
 GENOME_LOG="$(poll_genome_log "$CID")" || die \
   "no GenomeStrategy line in the container's newest /app/logs/money_printer_*.log within
      ${LOADED_DEADLINE_S}s (polled every ${LOADED_POLL_S}s) --
