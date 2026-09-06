@@ -599,6 +599,26 @@ Still open for F4, completely:
    (default 2026-08-31), verified to fire on exactly the historical case. **The four
    already-captured files are still there — decide whether to drop them from the R3 root
    before it is scored.**
+   **RESOLVED 2026-09-06 (owner decision): dropped.** And the overlap was worse than
+   recorded — the four files are not just the same city-day, they are **byte-identical**
+   across the two roots (sha256 matches on all four: CHI `53ef51e4…`, LAX `99e35835…`,
+   MIA `69a8ae77…`, NY `b5f2bb46…`). They are **moved, not deleted**, to
+   `data/quarantine/r3_holdout_b_overlap/` on alcyone (commit `0ec72a6`, local and
+   unpushed like the capture commits) — deliberately outside any `ladders_*` root so
+   neither a walk of the R3 tree nor a glob of `data/ladders_2026-09*` can pick them up.
+   Nothing is lost: the same bytes are still scored once, on holdout-B.
+   **R3 now starts 2026-09-01 — 5 dates × 4 cities as of today.**
+   `data/ladders_2026-09/manifests/2026-09-01.json` is left untouched as the record of
+   the run that made the mistake; the top-level `manifest.json` never named the date.
+   **The guard was not on the machine it guards.** `MP_HOLDOUT_LAST_DATE` shipped in the
+   repo on 2026-09-05, but alcyone's checkout was **59 commits behind** (at its own
+   capture commit `8808cd9`), so every capture 09-01..09-05 ran the unguarded script. The
+   checkout was rebased to the branch head on 2026-09-06 — its 5 local capture commits
+   replayed cleanly, both ladder roots intact — and the guard is now live there.
+   **Loose end for F4: nothing schedules the capture.** No user crontab, no systemd timer
+   (user or system), no Hermes cron job on alcyone mentions `ladder`. The daily captures
+   are evidently run by hand. R3 accrues one date per day only as long as someone runs it,
+   which is a poor foundation for a root F4 wants to score on a fixed cadence.
 9. **Two F4 preconditions found in the review but never registered here.** Both are
    structural and would break a `.../v2` run exactly as they break this one:
    - **The sandbox cannot authorize paper mode at all.** `weather_bot.py`'s
