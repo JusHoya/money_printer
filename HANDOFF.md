@@ -556,6 +556,22 @@ The frame schema and `executable`/`sandbox_admissible` semantics stay exactly as
 here, because the existing frames, the promoted specs' `frame_search_sha256` and FR-F3.4's
 `n_discrepancies: 0` all depend on them.
 
+**The F2 search is exactly reproducible — verified 2026-09-06, and never recorded before.**
+An untracked `reports/factory/f2local/` turned out to be a full local re-run of the
+canonical family run `run_2026-09-03b`: 60 generations, 96,000 evaluations, on a
+different machine (x86-64 Windows vs alcyone aarch64) and a different commit
+(`4a8b27be` vs `fb918982+dirty`). Every number matches to the last digit — verdict
+CLOSED, `holm_p` 0.2895, `best_fit` 0.11143352272727274, pooled OOS mean 0.03083620689655171
+over 29 dates / 49 trades — and **all four picked genomes are byte-identical**
+(A `7d857b00d373`, B `7f1bc9234830`, C `03a5966189d0`, ALL69 `4b5acfa1055e`). A 96k-evaluation
+stochastic search landing on the same four genomes across two architectures is the
+strongest statement available that the factory's seeding and evaluation are deterministic,
+which is what lets a verdict be re-derived rather than trusted.
+The directory itself is now gitignored. It is a determinism check, **not** a second scoring
+of family #1 — but a folder in `reports/factory/` that looks like an independent run is
+precisely the ambiguity FR-F4's *"no second scoring of the same genome on the same root
+exists anywhere"* cannot afford, so it stays out of the record by name.
+
 Still open for F4, completely:
 1. **Calibration-provider transfer gap (blocker — still open, but no longer invisible).**
    Parity proven under walk-forward, bot runs frozen; 60 discrepancies and `p_yes` off by
