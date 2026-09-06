@@ -1,0 +1,490 @@
+{
+  "calibration": {
+    "dir": "data/calibration",
+    "replay_kind": "frozen",
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+  },
+  "candle_only_columns": [
+    "price_mean",
+    "volume",
+    "open_interest",
+    "last"
+  ],
+  "discrepancies_gating": 60,
+  "discrepancies_total": 60,
+  "fee_regime_sha256": "d38016500fbaadd9cb2af57826c5c986098029737aca51c44a88000d1677a830",
+  "fee_type": "quadratic",
+  "frames_dir": "weather_2026-07-25_bfcf94654a3a",
+  "gefs_twin_sha256": "5d6611a3cbb7e6053db15f5793d2ff2f01e5ac1749da9db58b3662b63bdabe4b",
+  "genomes": {
+    "fr31a_taker": {
+      "calibration_failures": {},
+      "calibration_kind": "frozen",
+      "calibration_payloads": 276,
+      "column_mismatch_examples": [
+        {
+          "col": "p_yes",
+          "frame": 0.0076028803936368725,
+          "live": 0.0034845513456551944,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "p_win",
+          "frame": 0.9923971196063631,
+          "live": 0.9965154486543448,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "mu_f",
+          "frame": 77.3811,
+          "live": 77.5598,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "sigma_f",
+          "frame": 2.8919,
+          "live": 2.6439,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "distance_f",
+          "frame": 7.8811000000000035,
+          "live": 8.059799999999996,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "edge_distance_f",
+          "frame": 7.3811000000000035,
+          "live": 7.559799999999996,
+          "market": "KXHIGHLAX-26MAY18-B69.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "p_yes",
+          "frame": 0.037050291382311876,
+          "live": 0.024035118765665664,
+          "market": "KXHIGHLAX-26MAY18-B71.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "p_win",
+          "frame": 0.9629497086176881,
+          "live": 0.9759648812343343,
+          "market": "KXHIGHLAX-26MAY18-B71.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "mu_f",
+          "frame": 77.3811,
+          "live": 77.5598,
+          "market": "KXHIGHLAX-26MAY18-B71.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "sigma_f",
+          "frame": 2.8919,
+          "live": 2.6439,
+          "market": "KXHIGHLAX-26MAY18-B71.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "distance_f",
+          "frame": 5.8811000000000035,
+          "live": 6.059799999999996,
+          "market": "KXHIGHLAX-26MAY18-B71.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "edge_distance_f",
+          "frame": 5.3811000000000035,
+          "live": 5.559799999999996,
+          "market": "KXHIGHLAX-26MAY18-B71.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "band_code",
+          "frame": 3.0,
+          "live": 4.0,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "p_yes",
+          "frame": 0.11384080291331572,
+          "live": 0.09574861038896343,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "p_win",
+          "frame": 0.8861591970866842,
+          "live": 0.9042513896110366,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "mu_f",
+          "frame": 77.3811,
+          "live": 77.5598,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "sigma_f",
+          "frame": 2.8919,
+          "live": 2.6439,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "distance_f",
+          "frame": 3.8811000000000035,
+          "live": 4.059799999999996,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "edge_distance_f",
+          "frame": 3.3811000000000035,
+          "live": 3.5597999999999956,
+          "market": "KXHIGHLAX-26MAY18-B73.5",
+          "ts": 1779030000
+        },
+        {
+          "col": "band_code",
+          "frame": 1.0,
+          "live": 2.0,
+          "market": "KXHIGHLAX-26MAY18-B75.5",
+          "ts": 1779030000
+        }
+      ],
+      "column_mismatches": {
+        "band_code": 16230,
+        "distance_f": 53390,
+        "edge_distance_f": 49762,
+        "executable": 2256,
+        "mu_f": 53403,
+        "p_win": 53545,
+        "p_yes": 53545,
+        "sandbox_admissible": 2256,
+        "sigma_f": 53545
+      },
+      "describe": "direction_code == 1 & mode_code == 0 & window_code in bits(0b11) & yes_ask < 1.0 & p_yes <= yes_ask - 0.08 & edge_distance_f >= 4.0",
+      "direction": "buy_no",
+      "extra_live": [
+        [
+          "KXHIGHCHI-26JUL06-T76",
+          1783332000,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHCHI-26JUL10-T79",
+          1783656000,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHCHI-26JUL20-T83",
+          1784566800,
+          "NO",
+          0.87
+        ],
+        [
+          "KXHIGHCHI-26JUN01-T72",
+          1780286400,
+          "NO",
+          0.54
+        ],
+        [
+          "KXHIGHCHI-26JUN08-B86.5",
+          1780891200,
+          "NO",
+          0.84
+        ],
+        [
+          "KXHIGHCHI-26JUN10-B94.5",
+          1781064000,
+          "NO",
+          0.87
+        ],
+        [
+          "KXHIGHCHI-26JUN11-T86",
+          1781150400,
+          "NO",
+          0.69
+        ],
+        [
+          "KXHIGHCHI-26JUN14-B73.5",
+          1781409600,
+          "NO",
+          0.58
+        ],
+        [
+          "KXHIGHCHI-26JUN14-B75.5",
+          1781409600,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHCHI-26JUN16-B71.5",
+          1781582400,
+          "NO",
+          0.84
+        ],
+        [
+          "KXHIGHCHI-26JUN17-B67.5",
+          1781668800,
+          "NO",
+          0.76
+        ],
+        [
+          "KXHIGHCHI-26JUN17-B69.5",
+          1781668800,
+          "NO",
+          0.75
+        ],
+        [
+          "KXHIGHCHI-26JUN17-T67",
+          1781668800,
+          "NO",
+          0.88
+        ],
+        [
+          "KXHIGHCHI-26MAY19-B82.5",
+          1779163200,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHCHI-26MAY20-B63.5",
+          1779278400,
+          "NO",
+          0.92
+        ],
+        [
+          "KXHIGHLAX-26JUL10-B78.5",
+          1783684800,
+          "NO",
+          0.93
+        ],
+        [
+          "KXHIGHLAX-26JUN09-T75",
+          1780977600,
+          "NO",
+          0.92
+        ],
+        [
+          "KXHIGHLAX-26JUN11-T79",
+          1781150400,
+          "NO",
+          0.93
+        ],
+        [
+          "KXHIGHLAX-26JUN14-T75",
+          1781424000,
+          "NO",
+          0.92
+        ],
+        [
+          "KXHIGHLAX-26JUN16-T74",
+          1781582400,
+          "NO",
+          0.94
+        ]
+      ],
+      "frame": "search",
+      "genome_id": "0c4b20502f2daf65",
+      "inputs": {
+        "adverse_fill": 0.01,
+        "availability_lag_min": 240,
+        "contracts": 20,
+        "embargo_days": 1,
+        "forecast_csv": {
+          "path": "data/forecast_archive/forecast_series_gfs_mex.csv",
+          "sha256": "2c8367037cbfbe97d9a36753d87c2dec940444973b9a058ee5e38a59596fae04"
+        },
+        "frame_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+        "sigma_cap": 4.0,
+        "truth_sha256": {
+          "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+          "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+          "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+          "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        }
+      },
+      "maker_fill_unknowable": false,
+      "missing_live": [
+        [
+          "KXHIGHCHI-26JUL04-B87.5",
+          1783137600,
+          "NO",
+          0.83
+        ],
+        [
+          "KXHIGHCHI-26JUL05-B81.5",
+          1783245600,
+          "NO",
+          0.84
+        ],
+        [
+          "KXHIGHCHI-26JUL13-T94",
+          1783915200,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHCHI-26JUL15-B96.5",
+          1784088000,
+          "NO",
+          0.61
+        ],
+        [
+          "KXHIGHCHI-26JUL17-B95.5",
+          1784307600,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHCHI-26JUL18-B93.5",
+          1784347200,
+          "NO",
+          0.82
+        ],
+        [
+          "KXHIGHLAX-26JUL10-B78.5",
+          1783681200,
+          "NO",
+          0.93
+        ],
+        [
+          "KXHIGHLAX-26JUN11-T79",
+          1781186400,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHMIA-26JUL11-B89.5",
+          1783782000,
+          "NO",
+          0.93
+        ],
+        [
+          "KXHIGHMIA-26JUL12-B92.5",
+          1783828800,
+          "NO",
+          0.51
+        ],
+        [
+          "KXHIGHMIA-26JUN03-B88.5",
+          1780498800,
+          "NO",
+          0.82
+        ],
+        [
+          "KXHIGHMIA-26JUN04-B79.5",
+          1780516800,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHMIA-26JUN21-T95",
+          1781996400,
+          "NO",
+          0.9
+        ],
+        [
+          "KXHIGHMIA-26MAY24-B91.5",
+          1779598800,
+          "NO",
+          0.91
+        ],
+        [
+          "KXHIGHMIA-26MAY29-B86.5",
+          1780027200,
+          "NO",
+          0.92
+        ],
+        [
+          "KXHIGHNY-26JUL14-B96.5",
+          1784001600,
+          "NO",
+          0.89
+        ],
+        [
+          "KXHIGHNY-26JUN01-T70",
+          1780329600,
+          "NO",
+          0.7
+        ],
+        [
+          "KXHIGHNY-26JUN14-B85.5",
+          1781409600,
+          "NO",
+          0.7
+        ],
+        [
+          "KXHIGHNY-26JUN17-B76.5",
+          1781668800,
+          "NO",
+          0.6
+        ],
+        [
+          "KXHIGHNY-26JUN19-T81",
+          1781845200,
+          "NO",
+          0.83
+        ]
+      ],
+      "mode": "taker",
+      "n_discrepancies": 60,
+      "n_live": 144,
+      "n_markets": 1656,
+      "n_markets_frame": 1518,
+      "n_offline": 130,
+      "n_snapshots": 10750,
+      "name": "fr31a_taker",
+      "offline_shape": {
+        "dates": 57,
+        "markets": 130,
+        "realized": 0.07228684210526316,
+        "trades": 130
+      },
+      "p_yes_max_abs_diff": 0.33566268734392757,
+      "p_yes_within_tol": false,
+      "rows_compared": 54159,
+      "rows_frame_unvisited": 0,
+      "rows_live_not_in_frame": 10341,
+      "rows_live_sigma_capped": 5382,
+      "source": "gfs_mex",
+      "spec_source": "seed",
+      "strategy_stats": {
+        "analyze_calls": 6670,
+        "hours_evaluated": 6670,
+        "rejects": 64356,
+        "signals": 144
+      }
+    }
+  },
+  "kind": "replay_parity_diagnostic",
+  "ladder_root": "data/ladders",
+  "n_city_days": 276,
+  "n_genomes": 1,
+  "n_markets_ladder": 1656,
+  "n_markets_search_frame": 1518,
+  "n_snapshots": 10750,
+  "ok": false,
+  "ok_strict": false,
+  "p_yes_all_within_tol": false,
+  "p_yes_tol": 1e-09,
+  "search_sha256": "bfcf94654a3a22f229079cd26e88a24144512d8b643c4fc60bbb71649065d076",
+  "skip_columns": [
+    "target_date_code",
+    "market_code"
+  ]
+}

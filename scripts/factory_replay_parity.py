@@ -3,7 +3,7 @@
 
     python scripts/factory_replay_parity.py [--frames DIR] [--ladders ROOT] [--genomes seeds,picks]
                                             [--run-id run_2026-09-03b] [--only NAME[,NAME]] [--out PATH]
-                                            [--strict]
+                                            [--strict] [--calibration walk_forward|frozen]
 
 For every genome (the gen-0 ``genome.SEEDS`` and the F2 picks A/B/C/ALL69 of
 ``reports/factory/<run_id>/summary.json``) a fresh ``GenomeStrategy`` is
@@ -22,6 +22,19 @@ snapshots) exactly as the weather bot would present them:
 * calibration = the frame's walk-forward payloads
   (``ev_analysis.WalkForwardCalibrator``, same source / embargo), reported
   under the calibration-dir identity the promoted spec carries.
+
+``--calibration frozen`` swaps that last input -- and ONLY that input -- for the
+``FrozenCalibrationProvider`` ``src/bots/weather_bot.py`` builds live. That is a
+DIAGNOSTIC of the transfer gap, never parity evidence: the report is written as
+``kind: "replay_parity_diagnostic"`` under a ``_frozen`` filename so it cannot be
+mistaken for, or overwrite, the FR-F3.4 artifact. The measured gap for the
+deployed genome 0c4b20502f2daf65 is **60 discrepancies** (n_live 144 vs n_offline
+130) and ``p_yes_max_abs_diff`` **0.336**, against 0 / 0.0 on the walk-forward
+control run of the same genome, same frame, same ladders
+(``replay_parity_bfcf94654a3a_frozen.json`` vs ``..._frozen_control.json``). Both
+providers read the SAME directory and report the SAME ``sha256``, which is why the
+spec now carries ``calibration.kind`` and the strategy's construction guard refuses
+paper mode on a mismatch.
 
 The emitted set ``(market_ticker, ts_utc, contract_side, limit_price)`` is
 diffed against ``fitness.score(F, genome.to_mask(g, F), constraints=False)
@@ -291,6 +304,9 @@ def city_calls(days: Dict[Tuple[str, str], DayLadder]) -> List[Tuple[int, str, L
 # ---------------------------------------------------------------------------
 # replay-side providers
 # ---------------------------------------------------------------------------
+CALIBRATION_KINDS = ("walk_forward", "frozen")
+
+
 class WalkForwardCalibrationProvider:
     """The frame's walk-forward payloads (``WalkForwardCalibrator.calibration_as_of``).
 
@@ -312,6 +328,38 @@ class WalkForwardCalibrationProvider:
         key = f"{city}|{target_date}"
         try:
             payload = self.wf.calibration_as_of(city, target_date)
+        except Exception as exc:
+            self.failures[key] = str(exc)[:160]
+            raise
+        self.payload_hashes[key] = str(payload.get("content_hash"))
+        return payload
+
+
+class _FrozenProviderProbe:
+    """The LIVE ``FrozenCalibrationProvider``, wrapped only to record what it served.
+
+    This is not a replay stand-in: it delegates every ``payload_for`` to the real
+    provider ``src/bots/weather_bot.py`` constructs, so a ``--calibration frozen``
+    run measures the transfer gap between the frame's walk-forward payloads and the
+    ones the sandbox actually prices with. The wrapper adds the ``payload_hashes`` /
+    ``failures`` bookkeeping the report renders for either kind, nothing else.
+    """
+
+    kind = "frozen"
+
+    def __init__(self, directory: str, *, source: str) -> None:
+        from src.strategies.genome_strategy import FrozenCalibrationProvider
+
+        self._inner = FrozenCalibrationProvider(directory, source=source)
+        self.directory = directory
+        self.sha256 = self._inner.sha256
+        self.payload_hashes: Dict[str, str] = {}
+        self.failures: Dict[str, str] = {}
+
+    def payload_for(self, city: str, target_date: str):
+        key = f"{city}|{target_date}"
+        try:
+            payload = self._inner.payload_for(city, target_date)
         except Exception as exc:
             self.failures[key] = str(exc)[:160]
             raise
@@ -516,6 +564,7 @@ def run_parity(
     registry_status: str = "CLOSED",
     family: Optional[str] = None,
     config_sha256: Optional[str] = None,
+    calibration_kind: str = "walk_forward",
     log: Callable[[str], None] = print,
 ) -> Dict[str, Any]:
     """Run the whole replay; returns the report document (also what ``promote`` consumes)."""
@@ -530,7 +579,8 @@ def run_parity(
     try:
         return _run_parity(
             frames_dir, ladder_root=ladder_root, which=which, run_id=run_id, only=only, mode=mode,
-            registry_status=registry_status, family=family, config_sha256=config_sha256, log=log,
+            registry_status=registry_status, family=family, config_sha256=config_sha256,
+            calibration_kind=calibration_kind, log=log,
         )
     finally:
         for name, level in quiet.items():
@@ -548,11 +598,15 @@ def _run_parity(
     registry_status: str,
     family: Optional[str],
     config_sha256: Optional[str],
+    calibration_kind: str,
     log: Callable[[str], None],
 ) -> Dict[str, Any]:
     import src.backtest.ev_analysis as ev
     from src.data.forecast_vintage_provider import ForecastVintageProvider
     from src.factory.gen0 import load_frameset
+
+    if calibration_kind not in CALIBRATION_KINDS:
+        raise ParityAbort(f"unknown --calibration {calibration_kind!r}; expected one of {sorted(CALIBRATION_KINDS)}")
 
     fs = load_frameset(frames_dir)
     frames = {"gfs_mex": fs.search, "gefs": fs.gefs_twin}
@@ -587,8 +641,19 @@ def _run_parity(
         fcsv = verify_pinned_file(prov, "forecast_csv", "forecast archive")
         truth = verify_truth_files(prov)
         src_obj = {s.name: s for s in ev.CANDIDATE_SOURCES}[source]
-        wf = ev.WalkForwardCalibrator(src_obj, tuple(C.CITY_LABELS), embargo_days=embargo)
-        cal = WalkForwardCalibrationProvider(wf, cal_sha)
+        if calibration_kind == "frozen":
+            # Exactly what src/bots/weather_bot.py builds for the deployed genome: the
+            # committed payloads under the spec's calibration dir, one per city, no
+            # per-target-date walk-forward refit. Same directory, same dir sha -- which
+            # is the whole point: the identity the spec carries cannot tell them apart.
+            cal = _FrozenProviderProbe(str(_abs(cal_dir)), source=source)
+        else:
+            wf = ev.WalkForwardCalibrator(src_obj, tuple(C.CITY_LABELS), embargo_days=embargo)
+            cal = WalkForwardCalibrationProvider(wf, cal_sha)
+        if cal.sha256 != cal_sha:
+            raise ParityAbort(
+                f"calibration dir sha {cal.sha256[:12]} != frame provenance {cal_sha[:12]}"
+            )
         vp = ForecastVintageProvider.from_archive_csv(str(fcsv), lag_min=int(prov.get("availability_lag_min", lag)),
                                                      forecast_source=source)
         info = {"forecast_csv": prov.get("forecast_csv"), "truth_sha256": truth, "embargo_days": embargo,
@@ -610,7 +675,8 @@ def _run_parity(
         spec = P.build_spec(
             g, family=family or str(prov_search.get("family") or "weather/gfs_mex/taker/v1"),
             config_sha256=config_sha256 or "", frame_search_sha256=str(prov_search.get("frame_sha256")),
-            calibration_dir=str(_abs(cal_dir)), calibration_sha256=cal_sha, fee_type=fee_type_frame,
+            calibration_dir=str(_abs(cal_dir)), calibration_sha256=cal_sha,
+            calibration_kind=calibration_kind, fee_type=fee_type_frame,
             fee_regime_sha256=fee_regime.sha256, adverse_fill=float(prov_search.get("adverse_fill", 0.01)),
             contracts_frame=int(prov_search.get("contracts", 20)), availability_lag_min=info["availability_lag_min"],
             sigma_cap=float(prov_search.get("sigma_cap") or 4.0), mode=mode, registry_status=registry_status,
@@ -630,7 +696,7 @@ def _run_parity(
     gating_disc = sum(r["n_discrepancies"] for r in gating)
     p_ok = all(r["p_yes_within_tol"] for r in results.values())
     doc = {
-        "kind": "replay_parity",
+        "kind": "replay_parity" if calibration_kind == "walk_forward" else "replay_parity_diagnostic",
         "frames_dir": frames_dir.name,
         "search_sha256": prov_search.get("frame_sha256"),
         "gefs_twin_sha256": (fs.gefs_twin.provenance or {}).get("frame_sha256") if fs.gefs_twin is not None else None,
@@ -639,7 +705,7 @@ def _run_parity(
         "n_markets_ladder": n_ladder_markets,
         "n_markets_search_frame": int(fs.search.n_markets),
         "n_snapshots": n_snapshots,
-        "calibration": {"dir": cal_dir, "sha256": cal_sha, "replay_kind": "walk_forward"},
+        "calibration": {"dir": cal_dir, "sha256": cal_sha, "replay_kind": calibration_kind},
         "fee_regime_sha256": fee_regime.sha256,
         "fee_type": fee_type_frame,
         "p_yes_tol": P_YES_TOL,
@@ -682,6 +748,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--only", default=None, help="comma list of genome names to restrict to")
     ap.add_argument("--out", default=None, help="default reports/factory/replay_parity_<sha12>.json")
     ap.add_argument("--strict", action="store_true", help="maker genomes also gate the exit code")
+    ap.add_argument("--calibration", default="walk_forward", choices=list(CALIBRATION_KINDS),
+                    help="which calibration provider to serve: walk_forward (the frame's, the FR-F3.4 "
+                         "gating run) or frozen (the one weather_bot builds live -- a DIAGNOSTIC of the "
+                         "transfer gap, never parity evidence)")
     args = ap.parse_args(argv)
 
     frames_dir = Path(args.frames) if args.frames else latest_frames_dir()
@@ -691,12 +761,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         doc = run_parity(
             frames_dir, ladder_root=Path(args.ladders) if args.ladders else None, which=args.genomes,
             run_id=args.run_id, only=[s.strip() for s in args.only.split(",")] if args.only else None,
+            calibration_kind=args.calibration,
         )
     except ParityAbort as exc:
         _die(str(exc))
     from src.factory.report import write_json
 
-    out = Path(args.out) if args.out else REPORTS_ROOT / f"replay_parity_{str(doc['search_sha256'])[:12]}.json"
+    suffix = "" if args.calibration == "walk_forward" else f"_{args.calibration}"
+    out = Path(args.out) if args.out else REPORTS_ROOT / f"replay_parity_{str(doc['search_sha256'])[:12]}{suffix}.json"
     write_json(out, doc)
     print(render_table(doc))
     print(f"wrote {out}")
