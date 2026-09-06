@@ -411,6 +411,35 @@ class GenomeStrategy(Strategy):
                 f"calibration sha {str(cal_sha)[:12]} != spec {spec.calibration.sha256[:12]} "
                 f"({spec.calibration.dir} changed since promotion)"
             )
+        # The dir sha above is byte-identical for the walk-forward and frozen providers --
+        # they read the SAME files -- so it cannot see a provider substitution. Replay
+        # parity is proven under exactly one of them, and the spec now says which. For
+        # 0c4b20502f2daf65 the gap is 60 discrepancies / 0.336 of p_yes
+        # (reports/factory/replay_parity_bfcf94654a3a_frozen.json vs the control).
+        # Paper mode REFUSES a mismatch or an unproven spec; shadow reaches no exchange,
+        # so there it is a loud, recorded warning and the run continues.
+        self.calibration_kind = getattr(self.calibration_provider, "kind", None)
+        self.calibration_kind_ok = (
+            spec.calibration.kind is not None and self.calibration_kind == spec.calibration.kind
+        )
+        if not self.calibration_kind_ok:
+            detail = (
+                f"calibration provider is {self.calibration_kind!r} but replay parity for this spec "
+                f"was proven under {spec.calibration.kind!r}"
+                if spec.calibration.kind is not None
+                else f"calibration provider is {self.calibration_kind!r} and the spec records no "
+                     f"proven kind (promoted before the field existed)"
+            )
+            if spec.mode == "paper":
+                raise GenomeSpecMismatch(
+                    f"{detail}; refusing paper mode -- a substituted provider prices a different "
+                    f"p_yes from the frame the genome was selected on"
+                )
+            logger.error(
+                "[%s] CALIBRATION PROVIDER MISMATCH (%s): %s. Shadow mode reaches no exchange, so "
+                "the run continues, but the emitted set is NOT the frame's trade set.",
+                self._name, spec.mode, detail,
+            )
         lag = getattr(self.forecast_provider, "lag_min", None)
         if lag is not None and int(lag) != int(spec.availability_lag_min):
             raise GenomeSpecMismatch(

@@ -3,6 +3,7 @@
   "availability_lag_min": 240,
   "calibration": {
     "dir": "data/calibration",
+    "kind": "walk_forward",
     "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
   },
   "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
@@ -33,5 +34,5 @@
   "registry_status": "CLOSED",
   "sigma_cap": 4.0,
   "source": "seed",
-  "spec_hash": "318eef35b7674ac352f19a6a61158505cd1b2fcd06d64afbf8dea67628c48288"
+  "spec_hash": "66d751860b4f7a4e4cb394a15366a6e73e88628d1f75138fc9b9234c6a57cb2a"
 }

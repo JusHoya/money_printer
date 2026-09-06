@@ -20,6 +20,19 @@ from src.factory.fees import load_regime  # noqa: E402
 CAL_DIR = REPO_ROOT / "data" / "calibration"
 
 
+@pytest.fixture
+def mp_caplog(caplog):
+    """`MoneyPrinter` sets propagate=False, so caplog needs its handler attached directly."""
+    import logging
+
+    from src.utils.logger import logger as mp_logger
+
+    caplog.set_level(logging.INFO, logger=mp_logger.name)
+    mp_logger.addHandler(caplog.handler)
+    yield caplog
+    mp_logger.removeHandler(caplog.handler)
+
+
 def _spec(mode="shadow", status="CLOSED", genome=None, **over):
     g = genome or G.SEEDS["fr31b"]
     kw = dict(
@@ -186,3 +199,106 @@ class TestPromoteCLI:
     def test_needs_exactly_one_source(self):
         r = _factory("promote", "abcdef0123456789")
         assert r.returncode == 1 and "exactly one" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# The calibration-KIND field (F3 registered deviation / F4 blocker 1).
+#
+# `dir` and `sha256` are byte-identical for the walk-forward and frozen providers
+# -- they read the same files -- so before this field the substitution was
+# undetectable. It costs 60 discrepancies and 0.336 of p_yes for 0c4b20502f2daf65
+# (reports/factory/replay_parity_bfcf94654a3a_frozen.json vs the walk_forward
+# control). These tests pin the field and the guard that reads it.
+# ---------------------------------------------------------------------------
+class TestCalibrationKind:
+    def test_kind_round_trips_and_is_hash_covered(self):
+        spec = _spec(calibration_kind="walk_forward")
+        assert spec.calibration.kind == "walk_forward"
+        doc = spec.to_doc()
+        assert doc["calibration"]["kind"] == "walk_forward"
+        assert P.from_doc(doc).calibration.kind == "walk_forward"
+        # the field is inside spec_hash, so a silent edit cannot survive load
+        doc["calibration"]["kind"] = "frozen"
+        with pytest.raises(P.PromotedSpecError):
+            P.from_doc(doc)
+
+    def test_absent_kind_loads_as_unproven(self):
+        doc = _spec().to_doc()
+        del doc["calibration"]["kind"]
+        doc["spec_hash"] = P.spec_hash_of(doc)
+        assert P.from_doc(doc).calibration.kind is None
+
+    def test_every_committed_spec_names_the_provider_parity_ran_under(self):
+        """A shipped spec that does not say which provider proved it cannot be paper-promoted."""
+        specs = sorted((REPO_ROOT / "configs" / "factory" / "promoted").glob("*.json"))
+        assert specs, "no promoted specs on disk"
+        for path in specs:
+            spec = P.load_promoted(str(path))
+            assert spec.calibration.kind == "walk_forward", (
+                f"{path.name} records calibration kind {spec.calibration.kind!r}; the per-genome "
+                f"parity report for it was served walk_forward payloads"
+            )
+            report = REPO_ROOT / "reports" / "factory" / f"replay_parity_bfcf94654a3a_{spec.genome_id}.json"
+            if report.exists():  # the run that promoted it must agree
+                served = json.loads(report.read_text(encoding="utf-8"))["calibration"]["replay_kind"]
+                assert spec.calibration.kind == served, f"{path.name}: spec {spec.calibration.kind} != report {served}"
+
+
+class TestCalibrationKindGuard:
+    """Paper REFUSES a provider mismatch; shadow reaches no exchange, so it warns and runs."""
+
+    @staticmethod
+    def _build(spec):
+        import datetime as dt
+
+        from src.strategies.genome_strategy import FrozenCalibrationProvider, GenomeStrategy
+
+        class _VP:
+            lag_min = spec.availability_lag_min
+
+        return GenomeStrategy(
+            spec,
+            clock=lambda: dt.datetime(2026, 9, 6, 15, 0, tzinfo=dt.timezone.utc),
+            forecast_provider=_VP(),
+            fee_regime=load_regime(),
+            calibration_provider=FrozenCalibrationProvider(str(CAL_DIR), source=spec.forecast_source),
+        )
+
+    def test_shadow_warns_but_constructs(self, mp_caplog):
+        strategy = self._build(_spec(calibration_kind="walk_forward"))
+        assert strategy.calibration_kind == "frozen"
+        assert strategy.calibration_kind_ok is False
+        # the runtime logger, i.e. maia's log file and /api/logs/tail -- not a silent flag
+        assert "CALIBRATION PROVIDER MISMATCH" in mp_caplog.text
+
+    def test_paper_refuses_a_mismatch(self):
+        from src.strategies.genome_strategy import GenomeSpecMismatch
+
+        spec = _spec(mode="paper", status="PROPOSED", calibration_kind="walk_forward")
+        with pytest.raises(GenomeSpecMismatch, match="refusing paper mode"):
+            self._build(spec)
+
+    def test_paper_refuses_a_spec_that_names_no_kind(self):
+        """An unproven spec is not a passing one: silence must not read as agreement."""
+        from src.strategies.genome_strategy import GenomeSpecMismatch
+
+        doc = _spec(mode="paper", status="PROPOSED").to_doc()
+        del doc["calibration"]["kind"]
+        doc["spec_hash"] = P.spec_hash_of(doc)
+        with pytest.raises(GenomeSpecMismatch, match="records no proven kind"):
+            self._build(P.from_doc(doc))
+
+    def test_paper_accepts_the_provider_it_was_proven_under(self):
+        strategy = self._build(_spec(mode="paper", status="PROPOSED", calibration_kind="frozen"))
+        assert strategy.calibration_kind_ok is True
+
+    def test_the_dir_sha_alone_cannot_see_the_substitution(self):
+        """Why the field is needed at all: both providers hash the same directory."""
+        import scripts.factory_replay_parity  # noqa: F401  (path shim)
+
+        from src.strategies.genome_strategy import FrozenCalibrationProvider
+
+        spec = _spec(calibration_kind="walk_forward")
+        frozen = FrozenCalibrationProvider(str(CAL_DIR), source=spec.forecast_source)
+        assert frozen.sha256 == spec.calibration.sha256
+        assert frozen.kind != spec.calibration.kind

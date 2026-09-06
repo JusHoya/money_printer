@@ -671,6 +671,18 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
     so the accelerated run can exercise the fill/settlement path; nothing is
     written under ``configs/factory/promoted`` and the report records the
     override.  The maia sandbox never sees such a spec.
+
+    The paper override also relaxes the calibration-KIND guard, which otherwise
+    refuses paper mode outright: every committed spec records
+    ``calibration.kind = "walk_forward"`` (the provider replay parity was proven
+    under) while this harness, like the bot, builds the ``frozen`` one.  That
+    substitution is a real defect -- 60 discrepancies and 0.336 of ``p_yes`` for
+    0c4b20502f2daf65, see ``reports/factory/replay_parity_bfcf94654a3a_frozen.json``
+    -- and it is an open F4 blocker, not something this override fixes.  What the
+    override buys is the ability to keep exercising the fill/settlement plumbing
+    offline while the blocker is open; ``calibration_kind_override_for_dry_run``
+    in the report says the emitted set is NOT the frame's trade set.  The refusal
+    stands undiminished on the live paper path, which is where it matters.
     """
     info: Dict[str, Any] = {"spec_path": _rel(spec_path)}
     try:
@@ -691,10 +703,22 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
     info["genome_id"] = spec.genome_id
     info["spec_mode"] = spec.mode
     info["paper_override_for_dry_run"] = False
+    info["calibration_kind_override_for_dry_run"] = None
     if mode == "paper" and spec.mode != "paper":
         doc = spec.to_doc(with_hash=False)
         doc["mode"] = "paper"
         doc["registry_status"] = "PROPOSED"
+        # This harness builds FrozenCalibrationProvider below (deliberately: it mirrors
+        # the bot). Under a paper spec the kind guard is a refusal, so the override that
+        # created the paper spec has to carry the provider it will actually be handed --
+        # and say so in the report. See the docstring.
+        if doc["calibration"].get("kind") != "frozen":
+            info["calibration_kind_override_for_dry_run"] = {
+                "spec_kind": doc["calibration"].get("kind"),
+                "served_kind": "frozen",
+                "parity_evidence": "reports/factory/replay_parity_bfcf94654a3a_frozen.json",
+            }
+            doc["calibration"]["kind"] = "frozen"
         doc["spec_hash"] = P.spec_hash_of(doc)
         spec = P.from_doc(doc)
         info["paper_override_for_dry_run"] = True

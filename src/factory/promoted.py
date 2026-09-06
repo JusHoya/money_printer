@@ -171,6 +171,14 @@ def calibration_dir_sha256(path: str) -> str:
 class CalibrationRef:
     dir: str
     sha256: str
+    #: Which calibration PROVIDER replay parity was proven under -- "walk_forward"
+    #: (the frame's per-target-date refit, what ``factory_replay_parity.py`` serves)
+    #: or "frozen" (the committed payloads ``weather_bot`` builds live). ``dir`` and
+    #: ``sha256`` are byte-identical for both, so without this field the substitution
+    #: is undetectable; for genome 0c4b20502f2daf65 it costs 60 discrepancies and
+    #: 0.336 of p_yes (``reports/factory/replay_parity_bfcf94654a3a_frozen.json``).
+    #: ``None`` = promoted before the field existed, i.e. the provider is unproven.
+    kind: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -218,7 +226,11 @@ class PromotedSpec:
             "family": self.family,
             "config_sha256": self.config_sha256,
             "frame_search_sha256": self.frame_search_sha256,
-            "calibration": {"dir": self.calibration.dir, "sha256": self.calibration.sha256},
+            "calibration": {
+                "dir": self.calibration.dir,
+                "sha256": self.calibration.sha256,
+                "kind": self.calibration.kind,
+            },
             "fee": {
                 "type": self.fee.type,
                 "fee_type": self.fee.fee_type,
@@ -283,7 +295,11 @@ def from_doc(doc: Mapping[str, Any], *, verify_hash: bool = True) -> PromotedSpe
         family=str(doc["family"]),
         config_sha256=str(doc["config_sha256"]),
         frame_search_sha256=str(doc["frame_search_sha256"]),
-        calibration=CalibrationRef(dir=str(cal["dir"]), sha256=str(cal["sha256"])),
+        calibration=CalibrationRef(
+            dir=str(cal["dir"]),
+            sha256=str(cal["sha256"]),
+            kind=None if cal.get("kind") is None else str(cal["kind"]),
+        ),
         fee=FeeRef(
             type=str(fee["type"]), fee_type=str(fee["fee_type"]), regime_sha256=str(fee["regime_sha256"])
         ),
@@ -308,6 +324,7 @@ def build_spec(
     frame_search_sha256: str,
     calibration_dir: str,
     calibration_sha256: str,
+    calibration_kind: Optional[str] = None,
     fee_type: str,
     fee_regime_sha256: str,
     adverse_fill: float = 0.01,
@@ -333,7 +350,11 @@ def build_spec(
         "family": family,
         "config_sha256": config_sha256,
         "frame_search_sha256": frame_search_sha256,
-        "calibration": {"dir": _relpath(calibration_dir), "sha256": calibration_sha256},
+        "calibration": {
+            "dir": _relpath(calibration_dir),
+            "sha256": calibration_sha256,
+            "kind": None if calibration_kind is None else str(calibration_kind),
+        },
         "fee": {"type": mode_label, "fee_type": fee_type, "regime_sha256": fee_regime_sha256},
         "forecast_source": str(getattr(g, "source", "gfs_mex")),
         "adverse_fill": float(adverse_fill),

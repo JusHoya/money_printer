@@ -803,6 +803,9 @@ def cmd_promote(args: argparse.Namespace) -> int:
     spec = P.build_spec(
         genome, family=family, config_sha256=config_sha, frame_search_sha256=str(doc["search_sha256"]),
         calibration_dir=str(REPO_ROOT / doc["calibration"]["dir"]), calibration_sha256=doc["calibration"]["sha256"],
+        # the provider parity was ACTUALLY served under, so weather_bot's guard can refuse a
+        # substitution the dir sha cannot see (F3 registered deviation / F4 blocker 1)
+        calibration_kind=str(doc["calibration"]["replay_kind"]),
         fee_type=doc["fee_type"], fee_regime_sha256=doc["fee_regime_sha256"],
         adverse_fill=float(res["inputs"]["adverse_fill"]), contracts_frame=int(res["inputs"]["contracts"]),
         availability_lag_min=int(res["inputs"]["availability_lag_min"]),

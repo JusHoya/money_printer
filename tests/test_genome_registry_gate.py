@@ -181,7 +181,11 @@ def _paper_bot(tmp_path, monkeypatch, family=FAMILY_V2):
     spec = P.build_spec(
         G.SEEDS["nofilter_no"], family=family, config_sha256="c" * 64,
         frame_search_sha256="f" * 64, calibration_dir=cal,
-        calibration_sha256=P.calibration_dir_sha256(cal), fee_type="quadratic",
+        calibration_sha256=P.calibration_dir_sha256(cal),
+        # This fixture exercises the REGISTRY gate, so it declares the provider the bot
+        # actually builds (frozen) and the calibration-kind guard stays out of the way.
+        calibration_kind="frozen",
+        fee_type="quadratic",
         fee_regime_sha256=load_regime().sha256, mode="paper", registry_status="PROPOSED",
         source="seed",
     )
@@ -241,7 +245,8 @@ class TestPaperGateEndToEnd:
         spec = P.build_spec(
             G.SEEDS["nofilter_no"], family=FAMILY_V2, config_sha256="c" * 64,
             frame_search_sha256="f" * 64, calibration_dir=cal,
-            calibration_sha256=P.calibration_dir_sha256(cal), fee_type="quadratic",
+            calibration_sha256=P.calibration_dir_sha256(cal), calibration_kind="frozen",
+            fee_type="quadratic",
             fee_regime_sha256=load_regime().sha256, mode="shadow", registry_status="CLOSED",
             source="seed",
         )
