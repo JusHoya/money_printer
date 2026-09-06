@@ -71,8 +71,10 @@ floor -- that is data-gated (Phase F5), not a code gap. To add one:
 ## 4. The promotion path, end to end
 
 Every step is a command whose refusals are the gate. Names are the PRD's
-(FR-F4.1/F4.2); `holdout` and `score` are being implemented concurrently --
-this page describes their **contract**, not their internals.
+(FR-F4.1/F4.2); the invocations below are the real ones (`python
+scripts/factory.py holdout --help` / `score --help` at `6b8fffb`), and this
+page describes their **contract** -- `src/factory/holdout.py` holds the
+internals.
 
 ### 4.1 PROPOSED
 
@@ -82,7 +84,10 @@ the F2 verdict. Nothing below is reachable for a CLOSED family.
 ### 4.2 Holdout-B unseal (once per family, <= 3 finalists)
 
 ```bash
-python scripts/factory.py holdout --finalists --unseal RATIFIED-<date>
+# --finalists takes a FILE: JSON {"family": ..., "finalists": [genome_id, ...]} (<= 3)
+# --unseal is REQUIRED and must match a 'RATIFIED <date>' line in docs/REVIVAL_2026_09.md
+python scripts/factory.py holdout --finalists reports/factory/finalists.json --unseal RATIFIED-<YYYY-MM-DD>
+python scripts/factory.py holdout --audit          # truth-filter drop fraction only: no unseal, no labels
 ```
 
 Scores the finalists **once** on `data/ladders_holdout` (2026-07-26..08-31),
@@ -95,7 +100,8 @@ them is not clean (HANDOFF 2026-09-05 correction; owner decision 9).
 ### 4.3 R3 score (once per genome per root)
 
 ```bash
-python scripts/factory.py score --genome <id> --ladders data/ladders_2026-09
+# --unseal is REQUIRED here too (every look at a sealed root is an unseal-log line)
+python scripts/factory.py score --genome <id> --ladders data/ladders_2026-09 --unseal RATIFIED-<YYYY-MM-DD> [--as-of YYYY-MM-DD]
 ```
 
 Prints the **result sha256 before the numbers**, appends the R3 checks to
@@ -120,19 +126,26 @@ be closed -- `GenomeStrategy` refuses paper on a `kind` mismatch.
 ### 4.5 Register the gate, commit, stamp (FR-F4.2)
 
 ```bash
-python scripts/factory.py register-gate <id>            # template + spec -> configs/factory/gate_registration.json
-git add configs/factory/gate_registration.json && git commit -m "gate: register <id> (FR-F4.2)"
-git log --diff-filter=A --format=%cI -- configs/factory/gate_registration.json
-python scripts/factory.py register-gate --fill-commit-time   # fills registration_commit_utc from that command
-git add configs/factory/gate_registration.json && git commit -m "gate: registration commit time"
+python scripts/factory.py register-gate <id>            # template + spec -> configs/factory/gate_registration_<id>.json
+git add configs/factory/gate_registration_<id>.json && git commit -m "gate: register <id> (FR-F4.2)"
+git log --diff-filter=A --format=%cI -- configs/factory/gate_registration_<id>.json
+python scripts/factory.py register-gate --fill-commit-time <id>   # fills registration_commit_utc from that command
+git add configs/factory/gate_registration_<id>.json && git commit -m "gate: registration commit time"
 ```
 
-The registration names the **paper** spec's hash (derived from the shadow spec
-with `mode=paper` and the family's current status), so it can be committed
-before the paper spec is written. `--fill-commit-time` refuses while the file
-is untracked or carries uncommitted edits: the stamp is the commit that added
-it, never a typed date. A registration is re-issued (`--force`, re-commit,
-re-stamp), never edited.
+**One registration file per genome, added to git exactly once.** The file
+names the **paper** spec's hash (derived from the shadow spec with
+`mode=paper` and the family's current status), so it can be committed before
+the paper spec is written. `--fill-commit-time` refuses while the file is
+untracked or carries uncommitted edits: the stamp is the commit that added it,
+never a typed date. There is no `--force`: overwriting a registration is a
+*modification* to git, and `git log --diff-filter=A` would keep the old
+add-date. To re-issue one: `git rm configs/factory/gate_registration_<id>.json
+&& git commit -m "gate: withdraw registration"`, then `register-gate <id>`
+again -- a fresh add commit, a fresh stamp. The generated file carries no
+`_doc` block (only `_doc_ref` pointing at the template's), because the
+template's own `_about` text contains the placeholder token and would trip the
+gate's placeholder check forever.
 
 ### 4.6 Paper promote
 
@@ -140,11 +153,14 @@ re-stamp), never edited.
 python scripts/factory.py promote <id> --from-seed <name> --mode paper
 ```
 
-Refuses unless the family is PROPOSED/RATIFIED **and** `gate_registration.json`
-exists, names this genome / `Genome <id8>` / the spec's `adverse_fill`, and has
-`registration_commit_utc` filled -- then, after parity, refuses if the spec it
-is about to write hashes to anything but the registered `spec_hash`. Commit the
-spec: that plus the registration is the **promotion commit**.
+Refuses unless the family is PROPOSED/RATIFIED **and**
+`gate_registration_<id>.json` exists, names this genome / `Genome <id8>` / the
+spec's `adverse_fill`, and carries a `registration_commit_utc` that
+**reconciles with git** exactly as `gate.py` reconciles it (equal to the
+committer date of the commit that added the file; a typed or unverifiable
+value refuses) -- then, after parity, refuses if the spec it is about to write
+hashes to anything but the registered `spec_hash`. Commit the spec: that plus
+the registration is the **promotion commit**.
 
 ### 4.7 maia deploy (ON maia)
 
@@ -187,12 +203,28 @@ now carries. Verify: `python scripts/check_maia_emit_cadence.py`, and
   Hermes watch `hermes_plugin/scripts/mp_factory_reconcile.sh` posts only on
   DISCREPANCY/REFUSED or an overdue week.
 
-  **Frame caveat (2026-09-06):** the deployed spec `0c4b20502f2daf65` records
-  `frame_search_sha256 bfcf94654a3a...`, the dev-box frame; alcyone holds
-  `weather_2026-07-25_0fdf39ea506b` (the gen-0/F2 run's frame). The wrapper
-  resolves the spec's frame by sha and **warns** when it must fall back. Copy
-  the `bfcf` frame dir to alcyone (or re-promote on the lab frame) before the
-  weekly report can claim the promoted spec's lab trade set.
+  **Frame (2026-09-06): copy it BEFORE installing the timer.** The deployed
+  spec `0c4b20502f2daf65` records `frame_search_sha256 bfcf94654a3a...`, the
+  dev-box frame (`W:/.../data/factory/frames/weather_2026-07-25_bfcf94654a3a`);
+  alcyone holds only `weather_2026-07-25_0fdf39ea506b` (the gen-0/F2 run's
+  frame). The wrapper resolves the frame by the spec's sha and, when it is
+  absent, **exits 5 `FRAME_MISSING <sha>` with no fallback** -- a report
+  against another frame would not be the promoted spec's lab trade set, and a
+  wrong report is worse than none. Copy the `bfcf` frame dir to alcyone (or
+  re-promote on the lab frame) first.
+
+  **Name resolution.** `maia.local` is mDNS and does **not** resolve inside the
+  lab container (docker's `127.0.0.11` stub does not forward mDNS; `getent
+  hosts maia.local` is rc=2 in-container while the host answers). The wrapper
+  resolves the name on the host (`getent` / `avahi-resolve`, or
+  `MP_SANDBOX_IP`), passes it in with `--add-host maia.local:<ip>`, and exits
+  4 `HOST_UNRESOLVED` when the host cannot resolve it. Every exit writes
+  `~/.local/state/money_printer/factory_reconcile/last_run.json`, which the
+  Hermes watch reads so a failed Monday run is reported that day.
+
+  **Install:** `bash deploy/spark/install_factory_reconcile.sh` needs root
+  (`sudo` for the unit copy / `daemon-reload` / `enable --now`) and **starts
+  the timer**; it prints the frame and name-resolution preflight first.
 
 ### 4.9 The board
 
@@ -201,20 +233,29 @@ python scripts/factory.py board --paper-url http://maia.local:8050
 python scripts/factory.py board --paper-state exchange_state.json --paper-journal trade_journal.jsonl --genome <id> --mode paper
 ```
 
-The PAPER row: `<mode> k/n_min` (settled `target_date`s, the FR-5.2 unit),
+The PAPER block has **its own header** (its cells are not the family table's
+quantities): `<mode> k/n_min` (settled `target_date`s, the FR-5.2 unit;
+admission and unit key are `gate.py`'s own functions, so pre-`target_date`
+journal rows take the ticker's event-date label exactly as the gate does),
 sandbox c/contract from `closed_trades` (never equity; fees recomputed at the
-taker rate when the ledger is unavailable and the row says so), the factory's
-prediction for the same genome (pooled OOS for a pick, date-clustered
-search-frame realized for a seed), and the honest note
-`shadow run: 0 units (instrumentation, not gate evidence)` while nothing
-settles.
+taker rate when the ledger is unavailable and the row says so), and **two
+factory numbers with unambiguous labels, neither called a prediction**: the
+**family pooled OOS** (the PRD headline -- the run's picks over the anchored
+campaigns, +0.0308 [-0.090, +0.142] over 29 dates for family #1; none of
+those picks is the deployed genome) and the deployed **genome's in-sample**
+realized on the search frame (the seed's own selection data, +0.0723 for
+`fr31a_taker`). While nothing settles the note reads `shadow run: 0 units
+(instrumentation, not gate evidence)`. The header line names the family's
+**current** registry status (latest transition), not the status frozen into
+the gen-0 summary.
 
 ### 4.10 The gate (after >= 50 settled `target_date`s of PAPER)
 
 ```bash
-python scripts/gate.py --registration configs/factory/gate_registration.json \
+python scripts/gate.py --registration configs/factory/gate_registration_<id>.json \
     --journal <journal> --state <exchange_state.json> [--fill-config data/fill_config.jsonl]
-python scripts/factory.py gate -- --journal ... --state ...     # same, --registration defaulted
+python scripts/factory.py gate -- --journal ... --state ...     # same; --registration defaulted when exactly one
+                                                                # gate_registration_*.json exists (or GENOME_STRATEGY_ID names it)
 ```
 
 Writes `reports/factory/gate_<genome_id>.json` by default (`--out` still
@@ -259,8 +300,8 @@ section 9 and Phase F4.
 |---|---|
 | board with the live PAPER row | `python scripts/factory.py board --paper-url http://maia.local:8050` |
 | settle-within-3-days evidence | `python scripts/check_settlement_latency.py --url http://maia.local:8050` |
-| register the gate | `python scripts/factory.py register-gate <id>` then commit, then `--fill-commit-time`, then commit |
-| paper promote | `python scripts/factory.py promote <id> --from-seed <name> --mode paper` |
-| weekly reconcile by hand (alcyone) | `bash deploy/spark/factory_reconcile.sh` (`MP_RECONCILE_DRY_RUN=1` to plan) |
-| gate verdict file | `python scripts/gate.py --registration configs/factory/gate_registration.json --journal ... --state ...` -> `reports/factory/gate_<id>.json` |
+| register the gate | `python scripts/factory.py register-gate <id>` then commit, then `register-gate --fill-commit-time <id>`, then commit (one `gate_registration_<id>.json` per genome; re-issue = `git rm` + commit + register again) |
+| paper promote | `python scripts/factory.py promote <id> --from-seed <name> --mode paper` (refuses unless the registration's stamp reconciles with git) |
+| weekly reconcile by hand (alcyone) | `bash deploy/spark/factory_reconcile.sh` (`MP_RECONCILE_DRY_RUN=1` to plan; exit 4 HOST_UNRESOLVED / 5 FRAME_MISSING are loud refusals) |
+| gate verdict file | `python scripts/gate.py --registration configs/factory/gate_registration_<id>.json --journal ... --state ...` -> `reports/factory/gate_<id>.json` |
 | live-capital grep | `python -m pytest tests/test_factory_no_live_capital.py -q` |

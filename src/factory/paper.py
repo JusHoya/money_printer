@@ -10,19 +10,25 @@ What the row carries, and where each number comes from
 * **mode** -- ``shadow`` | ``paper``: the deployed genome's execution mode
   (``/api/genome`` ``modes.genome`` over HTTP, or ``--mode`` for a file run).
 * **settled target_dates** ``k`` -- the FR-5.2 grouping unit: distinct
-  ``target_date`` among the genome strategy's *settled* fills (``close_reason
-  EXPIRATION``, ``exit_price in {0, 1}``, ``settlement_outcome`` recorded --
-  the same admission ``scripts/gate.py`` applies).
+  ``target_date`` among the genome strategy's *settled* fills. Admission and
+  the unit key are ``scripts/gate.py``'s OWN functions (``_is_settled``,
+  ``_target_date`` -- loaded as a module, not copied), so a journal row that
+  predates the ``target_date`` field takes the ticker's event-date label
+  exactly as the gate does (red team 2026-09-06, 4d: 6 of maia's 9 live rows
+  were being dropped here while the gate counted them).
 * **sandbox c/contract** -- ``sum(pnl - entry_fee) / sum(quantity)`` over those
   fills. ``pnl`` and ``entry_fee`` come from ``closed_trades`` (the exchange's
   ledger) joined on ``(symbol, entry_time, strategy_name)``; a journal row the
   ledger no longer holds gets the taker fee recomputed at its price and
   quantity, exactly as the gate does. **Never equity**: the UTC-midnight reset
   double-subtracts, and ``portfolio.realized_pnl`` is a per-cycle fragment.
-* **prediction** -- the factory's number for the same genome: a family pick's
-  pooled-OOS mean (``summary.json`` ``pooled_oos``), or a gen-0 seed's
-  date-clustered search-frame realized (``search_full.realized``), labelled by
-  source so the two are never confused.
+* **two factory numbers, never called a prediction** (red team 2026-09-06, 4a):
+  the **family pooled OOS** -- the PRD's headline for the family, i.e. the
+  run's picks over the anchored campaigns (``summary.json`` ``pooled_oos``:
+  +0.0308 [-0.090, +0.142] over 29 dates for family #1; none of those picks is
+  the deployed genome) -- and the deployed **genome's in-sample** realized on
+  the search frame (``gen0`` ``seeds[<name>].search_full``, the data the
+  hand-specified seed was selected on). Both carry their own label and source.
 * **n_min progress** ``k/50`` -- ``thresholds.n_min`` from
   ``gate_registration.json`` when it exists, else the template's.
 * **KILLED** -- when the registry's current status for the family is ``HALT``,
@@ -186,17 +192,39 @@ def _join_key(row: Mapping[str, Any]) -> Tuple[str, Optional[str], str]:
     )
 
 
+_GATE_MODULE = None
+
+
+def gate_module():
+    """``scripts/gate.py`` loaded as a module, once -- the SAME admission and unit-key code the gate runs.
+
+    The gate is a script, not a package, so it is loaded by path exactly as
+    ``scripts/factory_paper_reconcile.py`` loads it. Sharing beats copying: a
+    row this board counts is a row the gate would count, and vice versa.
+    """
+    global _GATE_MODULE
+    if _GATE_MODULE is None:
+        import importlib.util
+
+        path = REPO_ROOT / "scripts" / "gate.py"
+        spec = importlib.util.spec_from_file_location("mp_gate_for_paper", str(path))
+        if spec is None or spec.loader is None:  # pragma: no cover - the script ships with the repo
+            raise PaperInputError(f"cannot load {path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _GATE_MODULE = mod
+    return _GATE_MODULE
+
+
 def is_settled(row: Mapping[str, Any]) -> bool:
-    """The gate's admission: closed by settlement with a recorded binary outcome."""
-    if str(row.get("close_reason") or "").upper() != "EXPIRATION":
-        return False
-    try:
-        exit_price = float(row.get("exit_price"))
-    except (TypeError, ValueError):
-        return False
-    if exit_price not in (0.0, 1.0):
-        return False
-    return str(row.get("settlement_outcome") or "").lower() in SETTLED_OUTCOMES
+    """The gate's admission (``gate._is_settled``): closed by settlement with a recorded binary outcome."""
+    ok, _reason = gate_module()._is_settled(row)
+    return bool(ok)
+
+
+def unit_key(row: Mapping[str, Any]) -> Optional[str]:
+    """The gate's unit key (``gate._target_date``): the row's ``target_date``, else the ticker's event-date label."""
+    return gate_module()._target_date(row)
 
 
 def taker_fee_for(symbol: str, entry_price: float, quantity: float) -> float:
@@ -251,7 +279,7 @@ def settled_fills(
         if entry_fee is None:
             entry_fee = taker_fee_for(symbol, entry_price, quantity)
             fee_source = "recomputed_taker"
-        target_date = row.get("target_date")
+        target_date = unit_key(row)  # gate.py's rule: recorded target_date, else the ticker's event-date label
         out.append({
             "symbol": symbol,
             "target_date": str(target_date) if target_date else None,
@@ -307,26 +335,55 @@ def _seed_genome_id(seed: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
-def prediction_for(
+_EMPTY_NUMBER: Dict[str, Any] = {"c_per_contract": None, "lo": None, "hi": None, "dates": None, "trades": None, "source": None}
+
+
+def family_pooled_oos(family_summary: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """The family's pooled OOS (the PRD headline: the run's picks over the anchored campaigns).
+
+    This is a property of the FAMILY's picks, whoever is deployed -- for family #1
+    +0.0308 [-0.0900, +0.1417] over 29 dates / 49 trades, and none of the four
+    picks is the deployed genome. It is the honest out-of-sample number the board
+    can show; it is not a per-genome prediction.
+    """
+    pooled = (family_summary or {}).get("pooled_oos") or {}
+    if pooled.get("mean") is None:
+        return dict(_EMPTY_NUMBER)
+    picks = (family_summary or {}).get("picks") or {}
+    ids = sorted({str(p.get("genome_id"))[:8] for p in picks.values() if isinstance(p, dict) and p.get("genome_id")})
+    return {
+        "c_per_contract": pooled.get("mean"),
+        "lo": pooled.get("boot_lo"),
+        "hi": pooled.get("boot_hi"),
+        "dates": pooled.get("n_dates"),
+        "trades": pooled.get("trades"),
+        "source": f"picks {', '.join(ids) or '?'} of {(family_summary or {}).get('run_id', '?')}",
+    }
+
+
+def genome_in_sample(
     genome_id: str,
     *,
     family_summary: Optional[Mapping[str, Any]] = None,
     gen0_summary: Optional[Mapping[str, Any]] = None,
-    spec_doc: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """``{c_per_contract, lo, hi, dates, trades, source}`` for ``genome_id``; source ``None`` when unknown."""
-    empty = {"c_per_contract": None, "lo": None, "hi": None, "dates": None, "trades": None, "source": None}
+    """The deployed genome's OWN in-sample realized on the search frame -- selection data, not a forecast.
+
+    A family pick reports its in-sample block from the run summary; a gen-0 seed
+    its ``search_full`` (the whole 2026-05-18..07-25 frame the rule was written
+    against). Labelled ``in-sample`` wherever it is shown.
+    """
     picks = (family_summary or {}).get("picks") or {}
     for camp, pick in picks.items():
         if isinstance(pick, dict) and str(pick.get("genome_id") or "") == genome_id:
-            pooled = (family_summary or {}).get("pooled_oos") or {}
+            row = pick.get("in_sample") or {}
             return {
-                "c_per_contract": pooled.get("mean"),
-                "lo": pooled.get("boot_lo"),
-                "hi": pooled.get("boot_hi"),
-                "dates": pooled.get("n_dates"),
-                "trades": pooled.get("trades"),
-                "source": f"pooled OOS, pick {camp} of {(family_summary or {}).get('run_id', '?')}",
+                "c_per_contract": row.get("realized"),
+                "lo": row.get("boot_lo"),
+                "hi": row.get("boot_hi"),
+                "dates": row.get("dates"),
+                "trades": row.get("trades"),
+                "source": f"in-sample of pick {camp}, {(family_summary or {}).get('run_id', '?')}",
             }
     seeds = (gen0_summary or {}).get("seeds") or {}
     for name, seed in seeds.items():
@@ -343,9 +400,23 @@ def prediction_for(
                 "hi": row.get("boot_hi"),
                 "dates": row.get("dates"),
                 "trades": row.get("trades"),
-                "source": f"search frame (date-clustered), seed {name} of {(gen0_summary or {}).get('run_id', '?')}",
+                "source": f"in-sample: seed {name} search_full, {(gen0_summary or {}).get('run_id', '?')}",
             }
-    return empty
+    return dict(_EMPTY_NUMBER)
+
+
+def factory_numbers_for(
+    genome_id: str,
+    *,
+    family_summary: Optional[Mapping[str, Any]] = None,
+    gen0_summary: Optional[Mapping[str, Any]] = None,
+    spec_doc: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """``{"family_pooled_oos": ..., "genome_in_sample": ...}`` -- both labelled, neither a prediction."""
+    return {
+        "family_pooled_oos": family_pooled_oos(family_summary),
+        "genome_in_sample": genome_in_sample(genome_id, family_summary=family_summary, gen0_summary=gen0_summary),
+    }
 
 
 def _seed_genome_id_by_name(name: str) -> Optional[str]:
@@ -401,7 +472,7 @@ def build_paper_row(
     family: Optional[str],
     mode: Optional[str],
     sandbox: Mapping[str, Any],
-    prediction: Mapping[str, Any],
+    factory_numbers: Mapping[str, Mapping[str, Any]],
     registry_status: Optional[str],
     n_min: int = DEFAULT_N_MIN,
     gate_verdict: Optional[Mapping[str, Any]] = None,
@@ -439,11 +510,10 @@ def build_paper_row(
         "contracts": sandbox.get("contracts"),
         "net_pnl": sandbox.get("net_pnl"),
         "sandbox_c_per_contract": sandbox.get("c_per_contract"),
-        "prediction_c_per_contract": prediction.get("c_per_contract"),
-        "prediction_lo": prediction.get("lo"),
-        "prediction_hi": prediction.get("hi"),
-        "prediction_source": prediction.get("source"),
-        "note": "; ".join(notes) if notes else "sandbox closed_trades vs factory prediction",
+        # two labelled factory numbers; neither is a prediction (red team 2026-09-06, 4a)
+        "family_pooled_oos": dict(factory_numbers.get("family_pooled_oos") or _EMPTY_NUMBER),
+        "genome_in_sample": dict(factory_numbers.get("genome_in_sample") or _EMPTY_NUMBER),
+        "note": "; ".join(notes) if notes else "sandbox closed_trades beside the factory's numbers",
     }
 
 
@@ -465,9 +535,9 @@ def paper_row_from_inputs(
     name = strategy_name or f"Genome {genome_id[:8]}"
     fills = settled_fills(inputs.get("journal_rows") or [], inputs.get("closed_trades") or [], strategy_name=name)
     summary = sandbox_summary(fills)
-    pred = prediction_for(genome_id, family_summary=family_summary, gen0_summary=gen0_summary, spec_doc=spec_doc)
+    numbers = factory_numbers_for(genome_id, family_summary=family_summary, gen0_summary=gen0_summary, spec_doc=spec_doc)
     row = build_paper_row(
-        genome_id=genome_id, family=family, mode=mode, sandbox=summary, prediction=pred,
+        genome_id=genome_id, family=family, mode=mode, sandbox=summary, factory_numbers=numbers,
         registry_status=registry_status, n_min=n_min, gate_verdict=gate_verdict, strategy_name=name,
         not_obtained=list(inputs.get("not_obtained") or []),
     )
@@ -481,15 +551,19 @@ __all__ = [
     "SHADOW_NOTE",
     "PaperInputError",
     "build_paper_row",
+    "factory_numbers_for",
+    "family_pooled_oos",
+    "gate_module",
     "gate_verdict_path",
+    "genome_in_sample",
     "is_settled",
     "killed_reason",
     "load_sandbox_files",
     "load_sandbox_http",
     "n_min_from_registration",
     "paper_row_from_inputs",
-    "prediction_for",
     "sandbox_summary",
     "settled_fills",
     "taker_fee_for",
+    "unit_key",
 ]

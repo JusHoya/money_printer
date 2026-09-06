@@ -1,17 +1,29 @@
 {
   "contracts": 0.0,
   "family": "weather/gfs_mex/taker/v1",
+  "family_pooled_oos": {
+    "c_per_contract": 0.03083620689655171,
+    "dates": 29,
+    "hi": 0.14174899425287352,
+    "lo": -0.09004051724137933,
+    "source": "picks 03a59661, 4b5acfa1, 7d857b00, 7f1bc923 of run_2026-09-03b",
+    "trades": 49
+  },
   "fills": [],
   "genome_id": "0c4b20502f2daf65",
+  "genome_in_sample": {
+    "c_per_contract": 0.07228684210526316,
+    "dates": 57,
+    "hi": 0.12250373903508772,
+    "lo": 0.014537079678362567,
+    "source": "in-sample: seed fr31a_taker search_full, gen0_2026-09-03",
+    "trades": 130
+  },
   "killed": null,
   "mode": "shadow",
   "n_min": 50,
   "net_pnl": 0.0,
   "note": "shadow run: 0 units (instrumentation, not gate evidence); not obtained: closed_trades (/api/closed_trades absent on this sandbox image: entry fees are recomputed at the taker rate from the journal)",
-  "prediction_c_per_contract": 0.07228684210526316,
-  "prediction_hi": 0.12250373903508772,
-  "prediction_lo": 0.014537079678362567,
-  "prediction_source": "search frame (date-clustered), seed fr31a_taker of gen0_2026-09-03",
   "sandbox_c_per_contract": null,
   "settled_target_dates": 0,
   "settled_trades": 0,

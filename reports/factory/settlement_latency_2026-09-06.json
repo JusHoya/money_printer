@@ -6,7 +6,7 @@
   "notes": [
     "open positions read from /api/status because /api/closed_trades is absent on this sandbox image"
   ],
-  "now_utc": "2026-09-06T18:13:02.060234+00:00",
+  "now_utc": "2026-09-06T19:16:33.523536+00:00",
   "open_positions_checked": 4,
   "overdue_open": [],
   "per_strategy": {
@@ -166,6 +166,8 @@
       "within_bound": true
     }
   ],
+  "reference_instant": "sandbox settlement-day close (weather_settlement.settlement_close_for); not Kalshi close_time (+1 h) nor Kalshi expiration_time (~+6 d)",
+  "settled_by": "engine in-process EXPIRATION check for every measured row; reconcile_weather.py not involved in any measured row and its daily timer is not evidenced over HTTP",
   "skipped": [],
   "source": {
     "base_url": "http://maia.local:8050",

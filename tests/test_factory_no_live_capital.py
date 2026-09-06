@@ -43,6 +43,7 @@ reference to the object that decides position size.
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 from pathlib import Path
@@ -137,6 +138,97 @@ def test_no_factory_module_imports_the_capital_path(path: Path):
             elif not names or not set(names) <= allowed:
                 bad.append(f"{rel}: imports {sorted(names) or '*'} from src.core.risk_manager; allowed {sorted(allowed)}")
     assert not bad, "\n".join(bad)
+
+
+# ---------------------------------------------------------------------------
+# TRANSITIVE imports (red team 2026-09-06, item 6): the AST check above sees only what a
+# factory module names itself. `import src.factory.holdout` ALSO loads
+# src.data.kalshi_provider -- through src.data.kalshi_history, which imports
+# KalshiProvider at module level -- and the provider is the one class that can
+# place a real order. Every src.* module a factory import pulls in is listed here,
+# per module, as an explicit allowlist (measured 2026-09-06 with the scan below;
+# package __init__ modules such as `src.core` are not listed, they carry no code).
+#
+# The list is the contract: a new transitive module fails this test until it is
+# named here WITH a reason. Two entries deserve reading:
+#   * holdout: `src.data.kalshi_provider` is deliberately NOT allowed, so this test
+#     FAILS at 6b8fffb and passes once the HOLDOUT agent makes kalshi_history's
+#     provider import lazy (its `_load_ladders_unchecked` reads CSVs and needs no
+#     provider).
+#   * sizing: `from src.core.risk_manager import MIN_WIN_SAMPLES` drags risk_manager's
+#     own module-level graph in -- including src.core.matching_engine, the simulated
+#     exchange. That is the declared lab-only exception (test_factory_isolation.py
+#     LAB_ONLY: "It imports src.core"); it is allowed here BY NAME so it cannot grow
+#     silently, and the direct-import test above still forbids naming the exchange.
+# ---------------------------------------------------------------------------
+_CORE_FEE = {"src.core.fee_calculator"}
+TRANSITIVE_ALLOWED = {
+    "src.factory.controls": _CORE_FEE,
+    "src.factory.features": _CORE_FEE,
+    "src.factory.fees": _CORE_FEE,
+    "src.factory.frame": _CORE_FEE,
+    "src.factory.gen0": _CORE_FEE,
+    "src.factory.null": _CORE_FEE,
+    "src.factory.holdout": {
+        "src.backtest.sealed_roots",   # the seal (SealedDataError) the holdout must honour
+        "src.core.bracket_payoff",     # settles_yes for the truth filter
+        "src.core.interfaces",         # MarketData dataclass via kalshi_history
+        "src.data.kalshi_history",     # _load_ladders_unchecked (CSV reader) -- provider must be lazy
+        "src.utils.logger",
+        # NOT allowed: src.data.kalshi_provider (loaded today via kalshi_history:104)
+    },
+    "src.factory.sizing": {
+        "src.core.bracket_payoff", "src.core.fee_calculator", "src.core.matching_engine",
+        "src.core.risk_manager", "src.core.weather_settlement", "src.data.gas_settlement",
+        "src.data.iem_cli_provider", "src.utils.logger",
+    },
+}
+_PACKAGE_INITS = {"src", "src.core", "src.data", "src.utils", "src.backtest", "src.ml", "src.strategies", "src.bots", "src.web"}
+
+_TRANSITIVE_SCAN = r"""
+import json, sys
+name = sys.argv[1]
+before = set(sys.modules)
+__import__(name)
+loaded = sorted(m for m in sys.modules if m.startswith("src.") and m not in before
+                and not m.startswith("src.factory") and sys.modules[m] is not None)
+print("TRANSITIVE=" + json.dumps(loaded))
+"""
+
+
+def _factory_module_names():
+    names = []
+    for p in _factory_files():
+        if p.name == "__init__.py":
+            continue
+        names.append(".".join(p.relative_to(ROOT).with_suffix("").parts))  # src.factory.lanes.weather etc.
+    return sorted(names)
+
+
+@pytest.mark.parametrize("module", _factory_module_names())
+def test_transitive_imports_are_allowlisted_per_module(module: str):
+    import subprocess
+    import sys
+
+    env = dict(os.environ, PYTHONPATH=str(ROOT))
+    env.pop("PYTHONSTARTUP", None)
+    proc = subprocess.run([sys.executable, "-c", _TRANSITIVE_SCAN, module], cwd=str(ROOT),
+                          capture_output=True, text=True, timeout=180, env=env)
+    if proc.returncode != 0:
+        tail = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "?"
+        if "ModuleNotFoundError" in tail and ".factory" not in tail:
+            pytest.skip(f"{module} needs a lab dependency this box lacks: {tail}")
+        pytest.fail(f"{module} failed to import:\n{proc.stderr[-2000:]}")
+    line = next(l for l in proc.stdout.splitlines() if l.startswith("TRANSITIVE="))
+    loaded = {m for m in json.loads(line[len("TRANSITIVE="):]) if m not in _PACKAGE_INITS}
+    allowed = TRANSITIVE_ALLOWED.get(module, set())
+    forbidden_hits = sorted(m for m in loaded if any(m == f or m.startswith(f + ".") for f in FORBIDDEN_IMPORTS))
+    extra = sorted(loaded - allowed)
+    assert not extra, (
+        f"{module} transitively loads src modules not in its allowlist: {extra}"
+        + (f" (of which the capital path: {forbidden_hits})" if forbidden_hits else "")
+        + f"\nfull transitive set: {sorted(loaded)}"
+    )
 
 
 def test_factory_package_never_names_the_exchange_or_provider_as_a_string():
