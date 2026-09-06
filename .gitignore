@@ -145,3 +145,10 @@ reports/factory/*/seed_date_pnl.json
 # bench.json, completion.txt.
 reports/factory/*/resources.log
 reports/factory/*/frames/
+
+# Fill-realism collection scratch (2026-09-06). measure_fill_realism.py --cache
+# accumulates the raw maia tape here while it polls; a multi-hour daytime run is
+# ~10 MB of mostly non-KXHIGH rows. The STUDY is the artifact worth keeping, and
+# the convention for its tape is a trimmed copy committed beside the report under
+# reports/factory/fill_realism_<date>_tape.csv -- not the raw scratch file.
+data/fill_realism/
