@@ -36,7 +36,14 @@ _THIS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = _THIS_DIR.parents[1]
 CONFIG_DIR = REPO_ROOT / "configs" / "factory"
 TEMPLATE_PATH = CONFIG_DIR / "gate_registration.template.json"
-REGISTRATION_PATH = CONFIG_DIR / "gate_registration.json"
+#: Registrations are PER GENOME: ``configs/factory/gate_registration_<genome_id>.json``.
+#: One file per genome means each is ADDED to git exactly once, so ``git log
+#: --diff-filter=A`` names one instant; a shared ``gate_registration.json`` re-issued
+#: for a second genome would be a *modification* in git's eyes and inherit the first
+#: genome's add-date (red team 2026-09-06, BROKEN-B).
+REGISTRATION_FMT = "gate_registration_{genome_id}.json"
+#: The pre-F4 shared path, kept only so callers can name it in messages.
+LEGACY_REGISTRATION_PATH = CONFIG_DIR / "gate_registration.json"
 SCHEMA_VERSION = 1
 #: ``Strategy.name`` the sandbox writes into the journal for a promoted genome
 #: (``GenomeStrategy.name`` = ``f"Genome {genome_id[:8]}"``; maia shows "Genome 0c4b2050").
@@ -50,6 +57,23 @@ class RegistrationError(RuntimeError):
 
 def strategy_name_for(genome_id: str) -> str:
     return STRATEGY_NAME_FMT.format(id8=str(genome_id)[:8])
+
+
+def registration_path(genome_id: str, directory: Union[str, os.PathLike] = CONFIG_DIR) -> Path:
+    """``configs/factory/gate_registration_<genome_id>.json``."""
+    return Path(directory) / REGISTRATION_FMT.format(genome_id=str(genome_id))
+
+
+def registration_relpath(genome_id: str) -> str:
+    return f"configs/factory/{REGISTRATION_FMT.format(genome_id=str(genome_id))}"
+
+
+def _relpath_str(path: Union[str, os.PathLike]) -> str:
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return p.as_posix()
 
 
 def _read_json(path: Union[str, os.PathLike]) -> Dict[str, Any]:
@@ -76,7 +100,7 @@ def write_registration(doc: Mapping[str, Any], path: Union[str, os.PathLike]) ->
     return p
 
 
-def load_registration(path: Union[str, os.PathLike] = REGISTRATION_PATH) -> Dict[str, Any]:
+def load_registration(path: Union[str, os.PathLike]) -> Dict[str, Any]:
     p = Path(path)
     if not p.exists():
         raise RegistrationError(
@@ -119,9 +143,22 @@ def build_registration(
 ) -> Dict[str, Any]:
     """The template with every REPLACE_ME filled from ``spec_doc``; ``registration_commit_utc`` stays null."""
     tpl = dict(template) if template is not None else _read_json(template_path)
+    tpl_version = tpl.get("schema_version")
+    if tpl_version != SCHEMA_VERSION:
+        # A template whose meaning moved must not be silently rewritten to the version
+        # this code knows: its fields may not mean what gate.py reads.
+        raise RegistrationError(
+            f"template schema_version {tpl_version!r} != {SCHEMA_VERSION}; refusing to build a "
+            "registration from a template this code does not understand"
+        )
     gid = str(spec_doc["genome_id"])
     fee = spec_doc.get("fee") or {}
-    out = dict(tpl)
+    # ``_doc`` is the template's field documentation, and its ``_about`` sentence says
+    # "fill every REPLACE_ME" -- verbatim, that token tripped gate.py's placeholder
+    # check on every generated file (red team 2026-09-06, BROKEN-A). The generated
+    # registration carries no ``_doc`` block at all, only a pointer to the template's.
+    out: Dict[str, Any] = {"_doc_ref": f"field documentation: {_relpath_str(template_path)} (_doc block)"}
+    out.update({k: v for k, v in tpl.items() if not str(k).startswith("_")})
     out["schema_version"] = SCHEMA_VERSION
     out["genome_id"] = gid
     out["strategy_name"] = strategy_name_for(gid)
@@ -131,6 +168,10 @@ def build_registration(
     out["contracts_frame"] = int(spec_doc["contracts_frame"])
     out["fee_type"] = str(fee.get("type") or out.get("fee_type") or "taker")
     out["registration_commit_utc"] = None
+    out["registered_before_first_trade"] = (
+        f"This file must be committed before the first paper trade of {out['strategy_name']!r}; verify "
+        f"with `git log --diff-filter=A -- {registration_relpath(gid)}` against the first journal row."
+    )
     leftovers = [k for k, v in out.items() if isinstance(v, str) and "REPLACE_ME" in v]
     if leftovers:
         raise RegistrationError(f"template fields still unfilled: {leftovers}")
@@ -181,10 +222,35 @@ def check_registration(
         problems.append(f"fee_type {reg.get('fee_type')!r} != spec fee.type {fee_type!r}")
     if require_commit_time and not reg.get("registration_commit_utc"):
         problems.append(
-            "registration_commit_utc is null: commit gate_registration.json, then run "
-            "`python scripts/factory.py register-gate --fill-commit-time` and commit again"
+            f"registration_commit_utc is null: commit {registration_relpath(gid)}, then run "
+            f"`python scripts/factory.py register-gate --fill-commit-time {gid}` and commit again"
         )
     return problems
+
+
+def reconcile_commit_time(reg: Mapping[str, Any], path: Union[str, os.PathLike]) -> List[str]:
+    """Problems with ``registration_commit_utc`` against git, the way ``gate.py`` reconciles it.
+
+    A typed value cannot establish that the registration preceded the run it
+    binds (gate.py ``_first_trade_after``): the value must EQUAL the committer
+    date of the commit that added the file. ``[]`` = verified. Git being unable
+    to answer (untracked, no repo) is a problem here -- ``promote --mode paper``
+    is not a dry run.
+    """
+    declared = reg.get("registration_commit_utc")
+    if not declared:
+        return ["registration_commit_utc is null"]
+    stamp, note = git_added_commit_utc(path)
+    if stamp is None:
+        return [f"registration_commit_utc {declared!r} cannot be verified against git: {note}"]
+    if str(declared) != stamp:
+        return [
+            f"registration_commit_utc {declared!r} does not reconcile with git, which says the file was "
+            f"added at {stamp!r} ({note})"
+        ]
+    if git_file_state(path) == "modified":
+        return ["the registration carries uncommitted edits; commit them (the stamp describes the file as committed)"]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +292,7 @@ def git_file_state(path: Union[str, os.PathLike]) -> str:
     return "modified" if status.stdout.strip() else "committed"
 
 
-def fill_commit_time(path: Union[str, os.PathLike] = REGISTRATION_PATH) -> str:
+def fill_commit_time(path: Union[str, os.PathLike]) -> str:
     """Stamp ``registration_commit_utc`` from git and write the file back; refuse if not committed as-is.
 
     Refuses (``RegistrationError``) when the file is untracked, carries edits
@@ -260,10 +326,35 @@ def fill_commit_time(path: Union[str, os.PathLike] = REGISTRATION_PATH) -> str:
     return stamp
 
 
+def reissue_problems(path: Union[str, os.PathLike]) -> List[str]:
+    """Why a registration may NOT be written at ``path`` right now; ``[]`` = free to write.
+
+    A registration is added to git exactly once. If the file already exists, or
+    is still tracked in HEAD, writing it again is a *modification* and ``git log
+    --diff-filter=A`` keeps the OLD add-date -- the gate would then vouch for the
+    wrong instant. The only re-issue path is: ``git rm`` the old file, commit that
+    removal, then register again, which is a fresh add commit.
+    """
+    p = Path(path)
+    rel = _relpath_str(p)
+    if p.exists():
+        return [
+            f"{rel} exists; a registration is re-issued, never edited in place. To re-issue: "
+            f"`git rm {rel} && git commit -m 'gate: withdraw registration'`, then run register-gate again"
+        ]
+    if p.parent.is_dir() and git_file_state(p) in ("committed", "modified"):
+        return [
+            f"{rel} is deleted in the working tree but still tracked in HEAD; commit the removal first "
+            f"(`git rm {rel} && git commit -m 'gate: withdraw registration'`) so the next write is a NEW add"
+        ]
+    return []
+
+
 __all__ = [
     "CONFIG_DIR",
     "GIT_ADDED_COMMAND",
-    "REGISTRATION_PATH",
+    "LEGACY_REGISTRATION_PATH",
+    "REGISTRATION_FMT",
     "SCHEMA_VERSION",
     "TEMPLATE_PATH",
     "RegistrationError",
@@ -274,6 +365,10 @@ __all__ = [
     "git_file_state",
     "load_registration",
     "paper_spec_hash",
+    "reconcile_commit_time",
+    "registration_path",
+    "registration_relpath",
+    "reissue_problems",
     "strategy_name_for",
     "write_registration",
 ]

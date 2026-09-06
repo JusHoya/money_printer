@@ -832,7 +832,12 @@ def load_registration(path: str) -> Dict[str, Any]:
     for key in ("n_min", "alpha"):
         if key not in reg["thresholds"]:
             raise GateError(f"{path}: thresholds lacks {key!r}")
-    if "REPLACE_ME" in json.dumps(reg):
+    # Placeholders are checked on the DATA fields only. ``_doc``-style keys are the
+    # template's own documentation, and its ``_about`` sentence says "fill every
+    # REPLACE_ME" -- a registration that preserved that block verbatim was refused
+    # here for the rest of its life (red team 2026-09-06, BROKEN-A).
+    data_only = {k: v for k, v in reg.items() if not str(k).startswith("_")}
+    if "REPLACE_ME" in json.dumps(data_only):
         raise GateError(f"{path}: registration still carries REPLACE_ME placeholders")
     return reg
 

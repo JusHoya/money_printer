@@ -5,7 +5,8 @@
     python scripts/factory.py gen0 [--frames DIR] [--out reports/factory/gen0_<date>] [--workers N] [--bench]
     python scripts/factory.py board [--paper-url http://maia.local:8050 | --paper-state S --paper-journal J] [--genome ID]
     python scripts/factory.py coverage | status
-    python scripts/factory.py register-gate <id> | register-gate --fill-commit-time     (F4, FR-F4.2)
+    python scripts/factory.py register-gate <id> | register-gate --fill-commit-time <id>   (F4, FR-F4.2;
+                              one configs/factory/gate_registration_<id>.json per genome, added to git once)
     python scripts/factory.py gate [-- gate.py args]                                    (-> scripts/gate.py)
     python scripts/factory.py run [--config Y] [--frames DIR] [--run-id ID] [--workers N] [--population N]
                                   [--generations N] [--master-seed S] [--campaigns A,B,C,ALL69]
@@ -500,10 +501,9 @@ def _paper_row_for_board(args: argparse.Namespace, latest: Optional[Dict[str, An
     registry_status = reg.status(str(family)) if family else None
     family_summary = report_mod._load_json(REPORTS_ROOT / latest["family_summary"]) if latest and latest.get("family_summary") else None
     gen0_summary = summary if summary and summary.get("seeds") else None
-    n_min = PAPER.n_min_from_registration(
-        REPO_ROOT / "configs" / "factory" / "gate_registration.json",
-        REPO_ROOT / "configs" / "factory" / "gate_registration.template.json",
-    )
+    from src.factory import registration as REG
+
+    n_min = PAPER.n_min_from_registration(REG.registration_path(gid), REG.TEMPLATE_PATH)
     gate_verdict = report_mod._load_json(PAPER.gate_verdict_path(gid, REPORTS_ROOT))
     return PAPER.paper_row_from_inputs(
         inputs, genome_id=gid, family=family, mode=mode, registry_status=registry_status,
@@ -528,7 +528,13 @@ def cmd_board(args: argparse.Namespace) -> int:
         out = Path(args.paper_json)
         out.parent.mkdir(parents=True, exist_ok=True)
         report_mod.write_json(out, {k: v for k, v in paper.items()})
-    print(report_mod.render_board(summary, coverage, paper), end="")
+    # The header names the family's CURRENT status (latest registry transition), not the
+    # status frozen into the gen-0 summary's registry_line (red team 2026-09-06, item 4c).
+    from src.factory.registry import Registry
+
+    family = (summary or {}).get("family") or (latest or {}).get("family")
+    registry_status = Registry(REPORTS_ROOT / "registry.jsonl", repo_root=REPO_ROOT).status(str(family)) if family else None
+    print(report_mod.render_board(summary, coverage, paper, registry_status=registry_status), end="")
     return 0
 
 
@@ -811,7 +817,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
         # before the (slow) replay parity.
         from src.factory import registration as REG
 
-        reg_path = Path(args.registration) if getattr(args, "registration", None) else REG.REGISTRATION_PATH
+        reg_path = Path(args.registration) if getattr(args, "registration", None) else REG.registration_path(gid)
         try:
             registration = REG.load_registration(reg_path)
         except REG.RegistrationError as exc:
@@ -823,10 +829,14 @@ def cmd_promote(args: argparse.Namespace) -> int:
                 expected_spec_hash=str(registration.get("spec_hash") or ""),
             )
         ]
+        # The stamp must RECONCILE with git the way gate.py reconciles it -- a non-null
+        # value that git does not vouch for licenses nothing (red team 2026-09-06, BROKEN-B).
+        problems += REG.reconcile_commit_time(registration, reg_path)
         if problems:
             _die(f"--mode paper refused: {reg_path} does not license {gid}: " + "; ".join(problems))
         print(f"promote: gate registration {reg_path.name} names {gid} "
-              f"(spec_hash {str(registration['spec_hash'])[:12]}, registered {registration['registration_commit_utc']})")
+              f"(spec_hash {str(registration['spec_hash'])[:12]}, registered {registration['registration_commit_utc']}, "
+              "verified against git)")
 
     frames_dir = Path(args.frames) if args.frames else _latest_frames_dir(str(config.get("lane", "weather")))
     if frames_dir is None or not frames_dir.exists():
@@ -931,21 +941,9 @@ def cmd_register_gate(args: argparse.Namespace) -> int:
     from src.factory import registration as REG
     from src.factory.registry import Registry
 
-    reg_path = Path(args.registration) if args.registration else REG.REGISTRATION_PATH
-    if args.fill_commit_time:
-        if args.id:
-            _die("register-gate: --fill-commit-time takes no genome id")
-        try:
-            stamp = REG.fill_commit_time(reg_path)
-        except REG.RegistrationError as exc:
-            _die(f"register-gate: {exc}")
-        print(f"register-gate: {reg_path} registration_commit_utc = {stamp}")
-        print("register-gate: commit this edit too -- `git add "
-              f"{_relpath_posix(reg_path)} && git commit -m 'gate: registration commit time'`")
-        return 0
-    if not args.id:
-        _die("register-gate needs a genome id (or --fill-commit-time)")
     spec_dir = Path(args.spec_dir) if args.spec_dir else PROMOTED_DIR
+    if not args.id:
+        _die("register-gate needs a genome id (also with --fill-commit-time: the registration is per genome)")
     try:
         spec = P.load_promoted(str(args.id), str(spec_dir))
     except P.PromotedSpecError as exc:
@@ -953,6 +951,16 @@ def cmd_register_gate(args: argparse.Namespace) -> int:
         if len(cands) != 1:
             _die(f"register-gate: {exc}")
         spec = P.load_promoted(str(cands[0]))
+    reg_path = Path(args.registration) if args.registration else REG.registration_path(spec.genome_id)
+    rel = _relpath_posix(reg_path)
+    if args.fill_commit_time:
+        try:
+            stamp = REG.fill_commit_time(reg_path)
+        except REG.RegistrationError as exc:
+            _die(f"register-gate: {exc}")
+        print(f"register-gate: {rel} registration_commit_utc = {stamp}")
+        print(f"register-gate: commit this edit too -- `git add {rel} && git commit -m 'gate: registration commit time'`")
+        return 0
     if spec.fee.type == "maker":
         _die(f"register-gate: {spec.genome_id} is a MAKER genome; it can never be paper-promoted, so it has no gate")
     reg = Registry(REPORTS_ROOT / "registry.jsonl", repo_root=REPO_ROOT)
@@ -961,18 +969,24 @@ def cmd_register_gate(args: argparse.Namespace) -> int:
         _die(f"register-gate: family {spec.family} is {status}, not one of {P.PAPER_ALLOWED_STATUSES}; a paper "
              "spec cannot exist for it, so a registration would name a spec_hash no promotion can produce. "
              "(--allow-closed writes it anyway for a dry run; promote --mode paper still refuses.)")
-    if reg_path.exists() and not args.force:
-        _die(f"register-gate: {reg_path} exists; a registration is re-issued, never edited in place -- "
-             "pass --force to overwrite (and re-commit + re-fill the commit time)")
-    doc = REG.build_registration(spec.to_doc(), registry_status=status)
+    # One registration file per genome, ADDED to git exactly once. There is no --force:
+    # overwriting is a modification and `git log --diff-filter=A` would keep the old
+    # add-date (red team 2026-09-06, BROKEN-B). Re-issue = git rm + commit, then register.
+    problems = REG.reissue_problems(reg_path)
+    if problems:
+        _die("register-gate: " + "; ".join(problems))
+    try:
+        doc = REG.build_registration(spec.to_doc(), registry_status=status)
+    except REG.RegistrationError as exc:
+        _die(f"register-gate: {exc}")
     REG.write_registration(doc, reg_path)
-    rel = _relpath_posix(reg_path)
     print(f"register-gate: wrote {rel} for {spec.genome_id} (strategy_name {doc['strategy_name']!r}, "
           f"paper spec_hash {doc['spec_hash'][:12]}, registry {status}, adverse_fill {doc['adverse_fill']})")
     print("register-gate: registration_commit_utc is null. Next:")
     print(f"  git add {rel} && git commit -m 'gate: register {spec.genome_id} (FR-F4.2)'")
     print(f"  {REG.GIT_ADDED_COMMAND.format(path=rel)}")
-    print("  python scripts/factory.py register-gate --fill-commit-time   # fills it from that command, refuses if uncommitted")
+    print(f"  python scripts/factory.py register-gate --fill-commit-time {spec.genome_id}   "
+          "# fills it from that command, refuses if uncommitted")
     print(f"  git add {rel} && git commit -m 'gate: registration commit time'")
     return 0
 
@@ -991,11 +1005,21 @@ def cmd_gate(args: argparse.Namespace) -> int:
         sys.path.insert(0, scripts_dir)
     import gate as gate_mod  # noqa: E402
 
+    from src.factory import registration as REG
+
     argv = list(args.gate_args or [])
     if argv[:1] == ["--"]:
         argv = argv[1:]
     if "--registration" not in argv:
-        argv = ["--registration", str(REPO_ROOT / "configs" / "factory" / "gate_registration.json")] + argv
+        # registrations are per genome: exactly one on disk resolves the default
+        regs = sorted(REG.CONFIG_DIR.glob(REG.REGISTRATION_FMT.format(genome_id="*")))
+        gid = (os.getenv("GENOME_STRATEGY_ID") or "").strip()
+        if gid and REG.registration_path(gid).exists():
+            regs = [REG.registration_path(gid)]
+        if len(regs) != 1:
+            _die("factory gate: pass --registration configs/factory/gate_registration_<genome_id>.json "
+                 f"({len(regs)} registration file(s) on disk; GENOME_STRATEGY_ID unset or unmatched)")
+        argv = ["--registration", str(regs[0])] + argv
     return int(gate_mod.main(argv))
 # ===========================================================================
 # end F3 STRATEGY block
@@ -1202,7 +1226,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "offline trades RiskManager.calculate_kelly_size would give a non-zero "
                          "size at cold start (default 0.75; values below it are refused)")
     pm.add_argument("--registration", default=None,
-                    help="gate_registration.json to check for --mode paper (default configs/factory/gate_registration.json)")
+                    help="registration to check for --mode paper (default configs/factory/gate_registration_<genome_id>.json)")
     pm.set_defaults(func=cmd_promote)
     # ---- end F3 STRATEGY block ---------------------------------------------
 
@@ -1232,10 +1256,11 @@ def build_parser() -> argparse.ArgumentParser:
                                               "or --fill-commit-time to stamp it from git (FR-F4.2)")
     rg.add_argument("id", nargs="?", default=None, help="genome id of a promoted spec on disk (>= 8-char prefix accepted)")
     rg.add_argument("--fill-commit-time", action="store_true",
-                    help="fill registration_commit_utc from `git log --diff-filter=A --format=%%cI`; refuses if the file is not committed as-is")
-    rg.add_argument("--registration", default=None, help="path (default configs/factory/gate_registration.json)")
+                    help="fill registration_commit_utc of gate_registration_<id>.json from `git log --diff-filter=A "
+                         "--format=%%cI`; refuses if the file is not committed as-is")
+    rg.add_argument("--registration", default=None,
+                    help="path override (default configs/factory/gate_registration_<genome_id>.json -- one file per genome, added once)")
     rg.add_argument("--spec-dir", default=None, help=f"where promoted specs live (default {PROMOTED_DIR})")
-    rg.add_argument("--force", action="store_true", help="overwrite an existing registration (re-issue)")
     rg.add_argument("--allow-closed", action="store_true", help="dry run: write a registration for a family that is not PROPOSED/RATIFIED")
     rg.set_defaults(func=cmd_register_gate)
 

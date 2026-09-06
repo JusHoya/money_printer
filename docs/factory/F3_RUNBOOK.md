@@ -593,10 +593,13 @@ genome — that is the parity evidence for the F3 exit. All of these read `close
 and the journal, never equity. Any state/journal written by an image older than 724d93c
 must go through `scripts/repair_no_settlement_pnl.py --apply` first (§1.1); the gate
 refuses otherwise. Before the first paper trade, copy
-`configs/factory/gate_registration.template.json` to `gate_registration.json`, commit it,
-then fill `registration_commit_utc` from
-`git log --diff-filter=A --format=%cI -- configs/factory/gate_registration.json` and
-commit again -- the gate fails while it is null.
+`configs/factory/gate_registration.template.json` to
+`gate_registration_<genome_id>.json` (F4: `python scripts/factory.py register-gate <id>`
+does this -- one file per genome, added to git once), commit it, then fill
+`registration_commit_utc` from
+`git log --diff-filter=A --format=%cI -- configs/factory/gate_registration_<genome_id>.json`
+(`register-gate --fill-commit-time <id>`) and commit again -- the gate fails while it is
+null. See `docs/FACTORY.md` section 4.5.
 
 **Realistic fills (FR-5.2, updated 2026-09-05).** The exchange state still does not record
 the flag, but the run can now record it for itself. The sandbox reads `MP_REALISTIC_FILLS`

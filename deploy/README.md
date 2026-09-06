@@ -322,6 +322,18 @@ F4 adds no maia service. What it adds:
   and say so.
 - **dev box**: `python scripts/factory.py board --paper-url http://maia.local:8050`
   (PAPER row), `python scripts/check_settlement_latency.py --url http://maia.local:8050`
-  (settle-within-3-days evidence per strategy), `python scripts/factory.py
-  register-gate <id>` / `--fill-commit-time` (FR-F4.2 registration, committed before
-  the first paper trade), `python scripts/gate.py ...` → `reports/factory/gate_<id>.json`.
+  (settle-within-3-days evidence per strategy — the reference instant is the
+  sandbox's own settlement-day close; every measured row settled in-process at the
+  engine's EXPIRATION check, and `reconcile_weather.py`'s daily timer is NOT
+  evidenced over HTTP), `python scripts/factory.py register-gate <id>` /
+  `register-gate --fill-commit-time <id>` (FR-F4.2: one
+  `configs/factory/gate_registration_<id>.json` per genome, added to git once,
+  committed before the first paper trade), `python scripts/gate.py ...` →
+  `reports/factory/gate_<id>.json`.
+- **alcyone preconditions (2026-09-06):** the promoted spec's frozen search frame
+  must be on the box (`0c4b20502f2daf65` → the `bfcf94654a3a` frame, which is on the
+  dev box, not the `0fdf39ea506b` frame alcyone has) or the weekly run exits 5
+  `FRAME_MISSING` with no fallback; `maia.local` is resolved on the host and injected
+  into the lab container with `--add-host` (mDNS does not resolve inside it; exit 4
+  `HOST_UNRESOLVED` otherwise); `install_factory_reconcile.sh` needs root and starts
+  the timer.

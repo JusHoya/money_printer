@@ -360,55 +360,97 @@ def _paper_cell_value(v: Any) -> str:
     return v if isinstance(v, str) else _fmt(v)
 
 
-def _paper_row(paper: Optional[Dict[str, Any]]) -> List[str]:
-    """The PAPER board row (F4 exit criterion 4/5; built by ``src.factory.paper``).
+#: The PAPER block has its OWN header (red team 2026-09-06, item 4b): its cells are not
+#: the family table's quantities, so they must not sit under the family table's names.
+PAPER_COLUMNS = (
+    "PAPER", "status", "family", "genome (mode)",
+    "sandbox realized c/contract (closed_trades, never equity)",
+    "settled target_dates (k/n_min)", "settled fills",
+    "family pooled OOS c/contract (the run's picks; PRD headline)",
+    "genome in-sample c/contract (search frame; NOT a prediction)",
+    "note",
+)
 
-    Columns reuse the family table's slots: ``pooled OOS lo..hi`` carries the
-    sandbox's realized c/contract (from ``closed_trades``, never equity),
-    ``dates`` the settled ``target_date`` count (the FR-5.2 unit), ``trades`` the
-    settled fills, ``vs fr31a`` the factory's prediction for the same genome, and
-    ``status`` either ``<mode> k/n_min`` or ``KILLED:<reason>`` -- the same
-    ``KILLED:`` marker ``_row_cell`` uses for a constraint-killed seed, so a
-    reader of either table meets one vocabulary.
+
+def _interval(lo: Any, hi: Any) -> str:
+    return f" [{_fmt(lo)}, {_fmt(hi)}]" if (lo is not None and hi is not None) else ""
+
+
+def _paper_row(paper: Optional[Dict[str, Any]]) -> List[str]:
+    """The PAPER row under :data:`PAPER_COLUMNS` (F4 exit criterion 4/5; built by ``src.factory.paper``).
+
+    Two factory numbers sit beside the sandbox's, with unambiguous labels: the
+    **family pooled OOS** (the PRD's headline -- the run's picks over the anchored
+    campaigns; none of those picks is the deployed genome) and the deployed
+    **genome's in-sample** realized on the search frame (the hand-specified seed's
+    own selection data). Neither is called a prediction. ``status`` is
+    ``<mode> k/n_min`` or ``KILLED:<reason>`` -- the same ``KILLED:`` marker
+    ``_row_cell`` uses for a constraint-killed seed.
     """
     if not paper:
-        return ["PAPER", "n/a (F3)", DASH, DASH, "n/a (F3)", "n/a (F3)", "n/a (F3)", DASH, DASH, DASH,
-                "n/a (F3)", DASH, DASH, "sandbox closed_trades vs factory prediction"]
+        return ["PAPER", "n/a (F3)", DASH, DASH, "n/a (F3)", "n/a (F3)", "n/a (F3)", DASH, DASH,
+                "sandbox closed_trades beside the factory's numbers"]
     p = paper
     gid = str(p.get("genome_id") or DASH)
     killed = p.get("killed")
     status = str(p.get("status") or DASH)
     if killed and not status.startswith("KILLED"):
         status = f"KILLED:{killed}"
-    pick = f"`{gid[:8]}` {p.get('strategy_name') or ('Genome ' + gid[:8])}" if gid != DASH else DASH
+    genome = f"`{gid[:8]}` {p.get('strategy_name') or ('Genome ' + gid[:8])}" if gid != DASH else DASH
     if p.get("mode"):
-        pick += f" ({p['mode']})"
+        genome += f" ({p['mode']})"
     n_settled = int(p.get("settled_trades") or 0)
     c = p.get("sandbox_c_per_contract")
     sandbox = (
-        f"sandbox {_paper_cell_value(c)}/c ({n_settled} fills)" if c is not None
-        else f"sandbox {DASH} ({n_settled} settled fills)"
+        f"{_paper_cell_value(c)}/c ({n_settled} fills)" if c is not None
+        else f"{DASH} ({n_settled} settled fills)"
     )
-    pred = p.get("prediction_c_per_contract")
-    if pred is None:
-        prediction = f"pred {DASH}"
+    fam = p.get("family_pooled_oos") or {}
+    if fam.get("c_per_contract") is None:
+        family_cell = f"{DASH} (no family run summary)"
     else:
-        prediction = f"pred {_paper_cell_value(pred)}/c"
-        if p.get("prediction_lo") is not None and p.get("prediction_hi") is not None:
-            prediction += f" [{_fmt(p['prediction_lo'])}, {_fmt(p['prediction_hi'])}]"
-        if p.get("prediction_source"):
-            prediction += f" ({p['prediction_source']})"
+        family_cell = (f"{_paper_cell_value(fam['c_per_contract'])}/c{_interval(fam.get('lo'), fam.get('hi'))} "
+                       f"n={_fmt(fam.get('dates'))}d/{_fmt(fam.get('trades'))}t"
+                       + (f" ({fam['source']})" if fam.get("source") else ""))
+    gis = p.get("genome_in_sample") or {}
+    if gis.get("c_per_contract") is None:
+        genome_cell = f"{DASH} (genome not in the gen-0 seeds or the run's picks)"
+    else:
+        genome_cell = (f"{_paper_cell_value(gis['c_per_contract'])}/c{_interval(gis.get('lo'), gis.get('hi'))} "
+                       f"n={_fmt(gis.get('dates'))}d/{_fmt(gis.get('trades'))}t"
+                       + (f" ({gis['source']})" if gis.get("source") else ""))
     k = p.get("settled_target_dates")
     n_min = p.get("n_min")
-    dates = f"{_fmt(k)}/{n_min} target_dates" if (k is not None and n_min) else _fmt(k)
+    dates = f"{_fmt(k)}/{n_min}" if (k is not None and n_min) else _fmt(k)
     return [
-        "PAPER", status, str(p.get("family") or DASH), pick, sandbox, dates,
-        _fmt(n_settled), DASH, DASH, DASH, prediction, DASH, DASH,
-        str(p.get("note") or "sandbox closed_trades vs factory prediction"),
+        "PAPER", status, str(p.get("family") or DASH), genome, sandbox, dates, _fmt(n_settled),
+        family_cell, genome_cell, str(p.get("note") or "sandbox closed_trades beside the factory's numbers"),
     ]
 
 
-def render_board(summary: Optional[Dict[str, Any]], coverage: Optional[Dict[str, Any]], paper: Optional[Dict[str, Any]] = None) -> str:
+def render_paper_block(paper: Optional[Dict[str, Any]]) -> List[str]:
+    """The PAPER table (own header + one row) as board lines."""
+    return [
+        "| " + " | ".join(PAPER_COLUMNS) + " |",
+        "|" + "---|" * len(PAPER_COLUMNS),
+        "| " + " | ".join(str(c) for c in _paper_row(paper)) + " |",
+    ]
+
+
+def render_board(
+    summary: Optional[Dict[str, Any]],
+    coverage: Optional[Dict[str, Any]],
+    paper: Optional[Dict[str, Any]] = None,
+    *,
+    registry_status: Optional[str] = None,
+) -> str:
+    """The lane table plus the PAPER block (own header).
+
+    ``registry_status`` is the family's CURRENT status (the registry's latest
+    transition, ``Registry.status``); when given it replaces the status frozen
+    into the summary's ``registry_line`` (which for the gen-0 summary still reads
+    OPEN for a family that was CLOSED on 2026-09-04 -- red team 2026-09-06, 4c).
+    """
     summary = summary or {}
     seeds = summary.get("seeds") or {}
     lanes = _coverage_lanes(coverage)
@@ -450,15 +492,17 @@ def render_board(summary: Optional[Dict[str, Any]], coverage: Optional[Dict[str,
             ])
         else:
             rows.append([lane, _lane_status(info), DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, _lane_units(info)])
-    rows.append(_paper_row(paper))
-
     out = ["# Factory board", ""]
-    out.append(f"run `{summary.get('run_id', DASH)}` ({summary.get('kind', DASH)}) -- registry {(_g(summary, 'registry_line', 'status') or 'UNREGISTERED')}")
+    status_word = registry_status or _g(summary, "registry_line", "status") or "UNREGISTERED"
+    status_src = "registry latest transition" if registry_status else "summary registry_line at run time"
+    out.append(f"run `{summary.get('run_id', DASH)}` ({summary.get('kind', DASH)}) -- registry {status_word} ({status_src})")
     out.append("")
     out.append("| " + " | ".join(BOARD_COLUMNS) + " |")
     out.append("|" + "---|" * len(BOARD_COLUMNS))
     for r in rows:
         out.append("| " + " | ".join(str(c) for c in r) + " |")
+    out.append("")
+    out.extend(render_paper_block(paper))
     out.append("")
     pc = parity_check(summary) if summary else {"matches_1e9": None}
     m = pc.get("matches_1e9")

@@ -13,16 +13,19 @@ For every journal row closed by settlement (``close_reason == EXPIRATION`` with
 ``settlement_outcome`` recorded, the gate's own admission) on a ``KXHIGH*``
 market::
 
-    market_close_utc = src.core.weather_settlement.settlement_close_for(symbol):
-                       local midnight AFTER the event date at the settlement
-                       station (~04:00Z NY/MIA, 05:00Z CHI, 07:00Z LAX in
-                       summer) -- the runtime's one definition of a weather
-                       contract's expiry, the instant the exchange stamps as
-                       expiration_time (a fixed-offset table is the fallback
-                       when src.core is not importable)
-    settled_utc      = the row's exit_time (the sandbox clock is UTC; a naive
-                       stamp is read as UTC)
-    gap              = settled_utc - market_close_utc
+    reference_utc = src.core.weather_settlement.settlement_close_for(symbol):
+                    the SANDBOX'S OWN settlement-day close -- local midnight
+                    after the event date at the settlement station (~04:00Z
+                    NY/MIA, 05:00Z CHI, 07:00Z LAX in summer). It is the instant
+                    the SimulatedExchange stamps on its weather positions and
+                    checks EXPIRATION against. It is NOT a Kalshi instant:
+                    Kalshi's market `close_time` is one hour later (05:00Z /
+                    06:00Z / 08:00Z) and Kalshi's `expiration_time` is ~6 days
+                    later still; neither is used here. (A fixed-offset table is
+                    the fallback when src.core is not importable.)
+    settled_utc   = the row's exit_time (the sandbox clock is UTC; a naive
+                    stamp is read as UTC)
+    gap           = settled_utc - reference_utc
 
 A row without ``target_date`` (journal rows older than the field) takes the
 ticker's own event-date label (``settlement_date_for``), which is the same
@@ -44,19 +47,22 @@ line ``NO EVIDENCE (0 settled; shadow books nothing)`` rather than folding it
 into a pass. The registered deviation in PRD_STRATEGY_FACTORY Phase F4 says
 exactly that the shadow run accrues nothing toward the gate.
 
-WHAT THIS IS EVIDENCE OF
-------------------------
-The settlement rows carry ``settlement_high`` / ``settlement_rule`` /
-``settlement_outcome`` / ``settlement_error``: the sandbox settled the position
-against the station's CLI high through ``src.core.weather_settlement`` at
-expiration. ``scripts/reconcile_weather.py`` (the daily 13:30Z
-``mp-reconcile-weather.timer`` on maia) is the *cross-check* of those rows
-against IEM CLI and Kalshi's published result; it is read-only and writes its
-report under ``data/``, which no HTTP route serves, so its own run log is NOT
-visible from here. What IS visible is its subject: every settled row's
-settlement fields and the time the settlement landed. Read the PASS as "the
-sandbox's settlements land within the bound", not as "the reconcile timer
-fired" -- confirm the timer on maia with ``systemctl list-timers mp-reconcile-weather.timer``.
+WHAT THIS IS EVIDENCE OF -- AND WHAT IT IS NOT
+----------------------------------------------
+Every measured row was settled IN-PROCESS by the engine's EXPIRATION check
+(``SimulatedExchange`` closing the position at its stamped close against the
+station's CLI high through ``src.core.weather_settlement``); the rows carry
+``settlement_high`` / ``settlement_rule`` / ``settlement_outcome`` /
+``settlement_error`` from that path, and five of maia's six V2 settlements land
+within seconds of the close for exactly that reason. **``scripts/reconcile_weather.py``
+was not involved in any measured row.** It is the daily (13:30Z
+``mp-reconcile-weather.timer`` on maia) READ-ONLY cross-check of those rows
+against IEM CLI and Kalshi's published result; it never writes the journal or
+the state, and its report lands under ``data/``, which no HTTP route serves --
+so **its timer cannot be evidenced over HTTP at all**, and this script does not
+claim to. Read the PASS as "the sandbox's own settlements land within the bound
+of the sandbox's own close", nothing more; confirm the timer on maia with
+``systemctl list-timers mp-reconcile-weather.timer``.
 
 USAGE
 -----
@@ -90,10 +96,12 @@ DEFAULT_MAX_DAYS = 3.0
 HTTP_CAP = 500
 MARKET_FAMILY = "KXHIGH"
 #: FALLBACK ONLY (used when ``src.core.weather_settlement`` cannot be imported):
-#: (hour, minute) UTC on target_date + 1 at which the city's KXHIGH markets close --
+#: (hour, minute) UTC on target_date + 1 of the SANDBOX'S settlement-day close --
 #: local midnight after the event date in summer time (04:00Z NY/MIA, 05:00Z CHI,
-#: 07:00Z LAX), which is what the exchange stamps as ``expiration_time`` and where
-#: maia's settlement rows land (04:00:01Z, 05:00:10Z, 07:00:00Z on 2026-09-05/06).
+#: 07:00Z LAX), i.e. ``settlement_close_for``, where maia's in-process settlements
+#: land (04:00:01Z, 05:00:10Z, 07:00:00Z on 2026-09-05/06). Kalshi's own market
+#: ``close_time`` is an hour later and Kalshi's ``expiration_time`` ~6 days later;
+#: neither is the reference here.
 CITY_CLOSE_UTC: Dict[str, Tuple[int, int]] = {"NY": (4, 0), "MIA": (4, 0), "CHI": (5, 0), "LAX": (7, 0)}
 EXIT_PASS, EXIT_FAIL, EXIT_USAGE, EXIT_NO_DATA = 0, 1, 2, 3
 
@@ -362,6 +370,10 @@ def measure(
     return {
         "max_days": float(max_days),
         "now_utc": now.isoformat(),
+        "reference_instant": "sandbox settlement-day close (weather_settlement.settlement_close_for); "
+                             "not Kalshi close_time (+1 h) nor Kalshi expiration_time (~+6 d)",
+        "settled_by": "engine in-process EXPIRATION check for every measured row; reconcile_weather.py not "
+                      "involved in any measured row and its daily timer is not evidenced over HTTP",
         "verdict": overall,
         "measured": measured,
         "failing": n_fail,
@@ -400,9 +412,13 @@ def render_text(rep: Mapping[str, Any], *, source: Mapping[str, Any], notes: Seq
         out.append(f"    skipped {s['symbol']} ({s['strategy']}): {s['reason']}")
     for n in notes:
         out.append(f"  note: {n}")
-    out.append("  evidence: settlement_outcome/settlement_high on each row = the sandbox's in-process CLI settlement; "
-               "reconcile_weather.py (daily 13:30Z timer on maia) cross-checks them and leaves no HTTP trace -- "
-               "confirm the timer on maia with `systemctl list-timers mp-reconcile-weather.timer`")
+    out.append("  reference instant: the SANDBOX's own settlement-day close (weather_settlement.settlement_close_for -- "
+               "what the SimulatedExchange stamps and checks EXPIRATION against); Kalshi's close_time is 1 h later and "
+               "Kalshi's expiration_time ~6 d later, neither is used")
+    out.append("  settled by: the engine's in-process EXPIRATION check for EVERY measured row; reconcile_weather.py was "
+               "NOT involved in any measured row -- it is the read-only daily cross-check (13:30Z timer on maia) and "
+               "its run cannot be evidenced over HTTP; confirm it on maia with "
+               "`systemctl list-timers mp-reconcile-weather.timer`")
     return "\n".join(out)
 
 
