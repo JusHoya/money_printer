@@ -79,7 +79,29 @@ def isolated_win_rates(tmp_path, monkeypatch):
 
 @pytest.fixture
 def vm_fixtures(tmp_path):
-    """Copies of the REAL VM state files (id-1582 shell + poisoned rates)."""
+    """Copies of the REAL VM state files (id-1582 shell + poisoned rates).
+
+    ``review_2026_07_24/`` is gitignored and, per CLAUDE.md, "no longer on disk" --
+    its conclusions survive in PRD/HANDOFF/reports, its 22-agent working data does
+    not. So on any fresh checkout these five tests raise FileNotFoundError out of
+    the fixture, which reads as five broken tests rather than five tests whose
+    inputs were deliberately retired. They have been erroring at HEAD for that
+    reason alone.
+
+    Skip with the actual reason instead. The synthetic-input tests in this file
+    still cover the same purge/expiry logic; what is lost when the directory is
+    absent is only the regression against the REAL poisoned VM bytes, and saying
+    so out loud is better than a stack trace that implies a defect.
+    """
+    missing = [
+        name for name in ("exchange_state.json", "strategy_win_rates.json")
+        if not os.path.exists(os.path.join(VM_DATA, name))
+    ]
+    if missing:
+        pytest.skip(
+            f"real VM fixtures absent ({', '.join(missing)} under review_2026_07_24/"
+            "vm_data/data/): that directory is gitignored and retired, see CLAUDE.md"
+        )
     state = tmp_path / "exchange_state.json"
     rates = tmp_path / "strategy_win_rates.json"
     shutil.copy2(os.path.join(VM_DATA, "exchange_state.json"), state)
