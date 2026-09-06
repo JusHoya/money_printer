@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pathlib
 import sys
 from pathlib import Path
 
@@ -398,19 +399,31 @@ class TestSandboxDeploymentServesTheRegistry:
         # some other tree's registry (or nothing). Greppable with no false positives, so
         # this scans scripts AND docs -- a copy-pasteable command in a runbook is an
         # invocation as much as a script line is.
+        # The skip filter must be RELATIVE to the repo root. Matching on absolute
+        # path.parts made this vacuous inside a worktree under .claude/worktrees/ --
+        # it scanned 0 of 454 files and passed asserting nothing -- while failing at
+        # the real checkout, where it flagged its OWN source lines. Both halves were
+        # wrong in the same way (F4 remediation round 2).
+        this_file = pathlib.Path(__file__).resolve()
         offenders = []
+        scanned = 0
         for path in REPO_ROOT.rglob("*"):
             if path.suffix not in {".sh", ".md", ".yml", ".yaml", ".py"} or not path.is_file():
                 continue
-            if any(part in {".git", ".claude", "node_modules", ".venv"} for part in path.parts):
+            rel = path.relative_to(REPO_ROOT)
+            if any(part in {".git", ".claude", "node_modules", ".venv"} for part in rel.parts):
                 continue
+            if path.resolve() == this_file:
+                continue  # this test names the flag in order to forbid it
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
+            scanned += 1
             for n, line in enumerate(text.splitlines(), 1):
                 if "--project-directory" in line and "docker" in text:
-                    offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{n}: {line.strip()}")
+                    offenders.append(rel.as_posix() + ":" + str(n) + ": " + line.strip())
+        assert scanned > 50, "scanned only %d files -- the skip filter is too broad" % scanned
         assert not offenders, "compose project directory re-based:\n" + "\n".join(offenders)
 
     def test_the_operator_messages_name_a_string_that_actually_greps_in_the_compose_file(
