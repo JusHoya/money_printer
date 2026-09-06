@@ -299,8 +299,28 @@ class TestRootLoggerConfig:
         root = logging.getLogger()
         # The MoneyPrinter file handler must appear on root EXACTLY once
         # (foreign FileHandlers from the test harness may also be present).
-        shared = [h for h in mp_logger.handlers if isinstance(h, logging.FileHandler)]
-        assert len(shared) == 1
+        #
+        # "may also be present" was the intent; `isinstance(h, logging.FileHandler)`
+        # was the code, and the two disagreed. pytest's own logging plugin attaches
+        # a `_pytest.logging._FileHandler` -- a FileHandler SUBCLASS pointed at the
+        # null device (the Windows nul device, /dev/null elsewhere) -- so the filter
+        # caught the harness's handler alongside ours and this has been red at HEAD
+        # for a reason that has nothing to do with the product. Verified in a clean
+        # process: mp_logger has exactly one FileHandler after two
+        # configure_root_logging() calls, so the runtime is not double-writing.
+        #
+        # Identify OUR handler by the file it writes, which is what the assertion
+        # was always about.
+        active = get_active_log_path()
+        assert active is not None, "MoneyPrinter logger lost its file handler"
+        shared = [
+            h for h in mp_logger.handlers
+            if isinstance(h, logging.FileHandler)
+            and Path(getattr(h, "baseFilename", "")).resolve() == Path(active).resolve()
+        ]
+        assert len(shared) == 1, [
+            (type(h).__name__, getattr(h, "baseFilename", None)) for h in mp_logger.handlers
+        ]
         # The instance is SHARED with the MoneyPrinter logger, not a copy —
         # two handles on the same file would interleave/duplicate writes.
         assert root.handlers.count(shared[0]) == 1
