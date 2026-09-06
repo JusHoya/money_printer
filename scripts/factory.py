@@ -8,7 +8,9 @@
                                   [--generations N] [--master-seed S] [--campaigns A,B,C,ALL69]
                                   [--blocked-folds|--no-blocked-folds] [--out DIR]
     python scripts/factory.py resume <run_id> [--workers N] [--out DIR]
-    python scripts/factory.py controls|report|holdout|score|promote   -> exit 2 (F2 STATS / F4)
+    python scripts/factory.py holdout --finalists FILE --unseal RATIFIED-<date> [--ladders data/ladders_holdout]
+    python scripts/factory.py holdout --audit [--ladders ROOT]        (manifest counts only; no unseal)
+    python scripts/factory.py score --genome ID --unseal RATIFIED-<date> [--ladders data/ladders_2026-09] [--as-of D]
 
 Runs inside the ``factory`` compose service on alcyone (network_mode: none;
 ``/app`` read-only except ``data/factory`` and ``reports/factory``):
@@ -60,7 +62,7 @@ FEE_REGIME = REPO_ROOT / "configs" / "fees" / "fee_regime.csv"
 FRAMES_ROOT = REPO_ROOT / "data" / "factory" / "frames"
 RUNS_ROOT = REPO_ROOT / "data" / "factory" / "runs"
 REPORTS_ROOT = REPO_ROOT / "reports" / "factory"
-NOT_IMPLEMENTED = ("holdout", "score")  # run/resume: F2 EVOLVE; controls/report: F2 STATS; promote: F3 STRATEGY (below)
+NOT_IMPLEMENTED: tuple = ()  # every subcommand exists since F4 (holdout/score: src/factory/holdout.py)
 PROMOTED_DIR = REPO_ROOT / "configs" / "factory" / "promoted"
 
 
@@ -823,6 +825,94 @@ def cmd_promote(args: argparse.Namespace) -> int:
 # ===========================================================================
 
 
+# ===========================================================================
+# F4 HOLDOUT block: holdout / score (src/factory/holdout.py)
+# ===========================================================================
+def _holdout_paths(args: argparse.Namespace):
+    from src.factory import holdout as H
+
+    return H.HoldoutPaths(
+        repo_root=REPO_ROOT,
+        unseal_log=Path(args.unseal_log) if getattr(args, "unseal_log", None) else H.DEFAULT_UNSEAL_LOG,
+        revival_doc=Path(args.revival_doc) if getattr(args, "revival_doc", None) else H.DEFAULT_REVIVAL_DOC,
+        registry=Path(args.registry) if getattr(args, "registry", None) else REPORTS_ROOT / "registry.jsonl",
+        promoted_dir=Path(args.promoted_dir) if getattr(args, "promoted_dir", None) else PROMOTED_DIR,
+        reports_dir=Path(args.out_dir) if getattr(args, "out_dir", None) else REPORTS_ROOT,
+        family_config=Path(args.config) if getattr(args, "config", None) else DEFAULT_FAMILY_CONFIG,
+    )
+
+
+def _sealed_exit(exc: Exception) -> int:
+    from src.factory import holdout as H
+
+    if isinstance(exc, H.UnsealRefused):
+        print(f"factory: REFUSED: {exc}", file=sys.stderr)
+        return H.EXIT_REFUSED
+    print(f"factory: ABORT (the unseal line is already on disk; the look is spent): {exc}", file=sys.stderr)
+    return H.EXIT_REFUSED
+
+
+def cmd_holdout(args: argparse.Namespace) -> int:
+    """Score <= 3 finalists on sealed holdout-B under ``--unseal RATIFIED-<date>`` (FR-F4.1).
+
+    ``--audit`` reads ONLY ``manifest.json`` counts (truth-filter drop
+    fraction against the < 10 % exit criterion) and writes nothing -- no
+    unseal line, no CSV opened, no label printed.
+    """
+    from src.factory import holdout as H
+
+    root = Path(args.ladders) if args.ladders else H.DEFAULT_HOLDOUT_ROOT
+    if args.audit:
+        try:
+            print(H.render_audit(H.audit_root(root, REPO_ROOT)))
+        except H.UnsealRefused as exc:
+            return _sealed_exit(exc)
+        return 0
+    if not args.finalists:
+        _die("holdout needs --finalists FILE (or --audit)", 2)
+    try:
+        outcome = H.run_holdout(
+            finalists_path=Path(args.finalists), unseal_tag=args.unseal, root=root, paths=_holdout_paths(args),
+            n_boot=int(args.n_boot),
+        )
+    except (H.UnsealRefused, H.HoldoutAbort) as exc:
+        return _sealed_exit(exc)
+    print(f"holdout: verdicts {outcome.verdicts} (result_sha256 {outcome.result_sha256})")
+    return int(outcome.exit_code)
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    """R3 on the Sept-Oct root: result sha256 BEFORE the numbers; RATIFIED or HALT #3 appended (FR-F4.1)."""
+    from src.factory import holdout as H
+
+    root = Path(args.ladders) if args.ladders else H.DEFAULT_R3_ROOT
+    try:
+        outcome = H.run_score(
+            genome_id=str(args.genome), unseal_tag=args.unseal, root=root, as_of=args.as_of,
+            paths=_holdout_paths(args), n_boot=int(args.n_boot),
+        )
+    except (H.UnsealRefused, H.HoldoutAbort) as exc:
+        return _sealed_exit(exc)
+    print(f"score: verdicts {outcome.verdicts} (result_sha256 {outcome.result_sha256})")
+    return int(outcome.exit_code)
+
+
+def _add_sealed_common(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("--unseal", default=None, metavar="RATIFIED-YYYY-MM-DD",
+                    help="REQUIRED: must match a 'RATIFIED <date>' line in docs/REVIVAL_2026_09.md")
+    sp.add_argument("--config", default=None,
+                    help=f"family YAML (default {DEFAULT_FAMILY_CONFIG.name}); its sha must equal the registry line's")
+    sp.add_argument("--promoted-dir", default=None, help=f"default {PROMOTED_DIR}")
+    sp.add_argument("--registry", default=None, help="default reports/factory/registry.jsonl")
+    sp.add_argument("--unseal-log", default=None, help="default reports/factory/unseal_log.jsonl (append-only)")
+    sp.add_argument("--revival-doc", default=None, help="default docs/REVIVAL_2026_09.md")
+    sp.add_argument("--out-dir", default=None, help=f"report dir (default {REPORTS_ROOT})")
+    sp.add_argument("--n-boot", type=int, default=4000)
+# ===========================================================================
+# end F4 HOLDOUT block
+# ===========================================================================
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -929,8 +1019,28 @@ def build_parser() -> argparse.ArgumentParser:
     pm.set_defaults(func=cmd_promote)
     # ---- end F3 STRATEGY block ---------------------------------------------
 
-    for name in NOT_IMPLEMENTED:
-        ni = sub.add_parser(name, help="F4 — not implemented yet")
+    # ---- F4 HOLDOUT block: holdout / score ------------------------------------
+    ho = sub.add_parser("holdout", help="score <= 3 finalists on sealed holdout-B under --unseal RATIFIED-<date> "
+                                        "(Holm; unseal_log.jsonl; once per family per root) | --audit: manifest counts only")
+    ho.add_argument("--finalists", default=None, help='JSON {"family": ..., "finalists": [genome_id, ...]} (<= 3)')
+    ho.add_argument("--ladders", default=None, help="sealed root (default data/ladders_holdout)")
+    ho.add_argument("--audit", action="store_true",
+                    help="truth-filter drop fraction from manifest.json counts only; no unseal, no CSV, no labels")
+    _add_sealed_common(ho)
+    ho.set_defaults(func=cmd_holdout)
+
+    sc = sub.add_parser("score", help="R3 on the Sept-Oct root: prints result sha256 BEFORE the numbers; "
+                                      "appends RATIFIED or HALT #3 with the R3 checks to the registry")
+    sc.add_argument("--genome", required=True, help="genome_id with a promoted spec under configs/factory/promoted/")
+    sc.add_argument("--ladders", default=None, help="sealed root (default data/ladders_2026-09)")
+    sc.add_argument("--as-of", dest="as_of", default=None,
+                    help="score target_dates <= this date (YYYY-MM-DD); recorded in the unseal line")
+    _add_sealed_common(sc)
+    sc.set_defaults(func=cmd_score)
+    # ---- end F4 HOLDOUT block ---------------------------------------------------
+
+    for name in NOT_IMPLEMENTED:  # empty since F4; kept so main()'s lenient parse stays uniform
+        ni = sub.add_parser(name, help="not implemented yet")
         ni.set_defaults(func=cmd_not_implemented)
     return p
 

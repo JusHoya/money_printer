@@ -119,14 +119,55 @@ def build_opportunities(
     ``availability_lag_min`` applies the section 4.2 item 3 vintage rule at
     the join (module docstring).
     """
+    import src.backtest.ev_analysis as ev
+
+    root = ladder_root or DEFAULT_LADDER_ROOT
+    ladders = ev.load_search_ladders(root)
+    return build_opportunities_from_ladders(
+        ladders,
+        source,
+        root=root,
+        forecast_archive_dir=forecast_archive_dir,
+        truth_dir=truth_dir,
+        embargo_days=embargo_days,
+        contracts=contracts,
+        adverse_fill=adverse_fill,
+        availability_lag_min=availability_lag_min,
+        cities=cities,
+    )
+
+
+def build_opportunities_from_ladders(
+    ladders: Any,
+    source: Any = None,
+    *,
+    root: str,
+    forecast_archive_dir: Optional[str] = None,
+    truth_dir: Optional[str] = None,
+    embargo_days: int = 1,
+    contracts: int = 20,
+    adverse_fill: float = 0.01,
+    availability_lag_min: int = 0,
+    cities: Tuple[str, ...] = CITIES,
+):
+    """The evaluator chain from an already-loaded ladder tape (same code as above).
+
+    ``build_opportunities`` is this function behind ``ev.load_search_ladders``;
+    F4's ``holdout.py`` calls it directly with a tape it opened under an
+    unseal record. This is NOT a sealed-root bypass on its own:
+    ``ev.build_opportunity_frame`` still refuses a tape stamped with a sealed
+    origin or dated past the development set unless the holdout path has
+    stamped its sanctioned-evaluation attr on it (``sealed_roots`` defines the
+    attr; only ``holdout.py`` may set it -- ``tests/test_factory_holdout.py``
+    greps for the symbol). ``root`` is recorded in ``opp.attrs["ladder_root"]``
+    for provenance hashing.
+    """
     import pandas as pd
 
     import src.backtest.ev_analysis as ev
 
     logging.getLogger("src.calibration.probability_engine").setLevel(logging.ERROR)
     src = _source_for(ev, source, forecast_archive_dir)
-    root = ladder_root or DEFAULT_LADDER_ROOT
-    ladders = ev.load_search_ladders(root)
     if ladders.empty:
         raise ev.EVAnalysisError(f"no ladders under {root}")
     archive = ev.load_forecast_archive(src)
@@ -168,7 +209,7 @@ def build_opportunities(
                 for c in cities
             },
             "calibration_dir": src.calibration_dir,
-            "ladder_root": ladders.attrs.get("ladder_root", os.path.abspath(root)),
+            "ladder_root": ladders.attrs.get("ladder_root") or os.path.abspath(root),
             "ev_config": dataclasses.asdict(cfg),
             "embargo_days": int(embargo_days),
             "availability_lag_min": lag,
@@ -280,5 +321,6 @@ __all__ = [
     "HOLDOUT_B_RETENTION_ETA",
     "WeatherLane",
     "build_opportunities",
+    "build_opportunities_from_ladders",
     "count_target_dates",
 ]

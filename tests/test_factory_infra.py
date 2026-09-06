@@ -462,10 +462,13 @@ class TestCliAndDeploy:
         for sub in ("freeze-frame", "gen0", "board", "coverage", "status", "run", "holdout"):
             assert sub in r.stdout
 
-    def test_stubs_exit_2(self):
+    def test_bare_holdout_exits_2_without_touching_anything(self):
+        # F4 implemented `holdout`/`score` (src/factory/holdout.py); a bare call still exits 2,
+        # now because it has no finalists file, and it writes no unseal line.
         r = subprocess.run([sys.executable, str(REPO / "scripts" / "factory.py"), "holdout"],
                            capture_output=True, text=True, cwd=str(REPO), timeout=120)
-        assert r.returncode == 2 and "not implemented" in r.stderr
+        assert r.returncode == 2 and "needs --finalists" in r.stderr
+        assert not (REPO / "reports" / "factory" / "unseal_log.jsonl").exists()
 
     def test_compose_factory_services(self):
         doc = yaml.safe_load((REPO / "deploy" / "spark" / "docker-compose.lab.yml").read_text(encoding="utf-8"))
