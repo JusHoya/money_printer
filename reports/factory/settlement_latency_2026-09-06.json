@@ -1,0 +1,176 @@
+{
+  "failing": 0,
+  "genome_strategy": "Genome 0c4b2050",
+  "max_days": 3.0,
+  "measured": 9,
+  "notes": [
+    "open positions read from /api/status because /api/closed_trades is absent on this sandbox image"
+  ],
+  "now_utc": "2026-09-06T18:13:02.060234+00:00",
+  "open_positions_checked": 4,
+  "overdue_open": [],
+  "per_strategy": {
+    "Genome 0c4b2050": {
+      "is_genome": true,
+      "max_gap_days": null,
+      "mean_gap_days": null,
+      "overdue_open": 0,
+      "settled": 0,
+      "verdict": "NO EVIDENCE (0 settled; shadow books nothing)",
+      "within_bound": 0
+    },
+    "ML Weather": {
+      "is_genome": false,
+      "max_gap_days": 0.7838,
+      "mean_gap_days": 0.7421333333333333,
+      "overdue_open": 0,
+      "settled": 3,
+      "verdict": "PASS",
+      "within_bound": 3
+    },
+    "Meteorologist V2": {
+      "is_genome": false,
+      "max_gap_days": 0.1985,
+      "mean_gap_days": 0.0331,
+      "overdue_open": 0,
+      "settled": 6,
+      "verdict": "PASS",
+      "within_bound": 6
+    }
+  },
+  "positions": [
+    {
+      "anomaly": null,
+      "exit_price": 0.0,
+      "gap_days": 0.7838,
+      "market_close_utc": "2026-09-02T04:00:00+00:00",
+      "settled_utc": "2026-09-02T22:48:38.444531+00:00",
+      "settlement_error": null,
+      "settlement_high": 82.0,
+      "settlement_outcome": "yes",
+      "strategy": "ML Weather",
+      "symbol": "KXHIGHNY-26SEP01-T83",
+      "target_date": "2026-09-01",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 0.0,
+      "gap_days": 0.6588,
+      "market_close_utc": "2026-09-02T07:00:00+00:00",
+      "settled_utc": "2026-09-02T22:48:38.450353+00:00",
+      "settlement_error": null,
+      "settlement_high": 76.0,
+      "settlement_outcome": "yes",
+      "strategy": "ML Weather",
+      "symbol": "KXHIGHLAX-26SEP01-B76.5",
+      "target_date": "2026-09-01",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 0.0,
+      "gap_days": 0.7838,
+      "market_close_utc": "2026-09-02T04:00:00+00:00",
+      "settled_utc": "2026-09-02T22:48:38.462256+00:00",
+      "settlement_error": null,
+      "settlement_high": 89.0,
+      "settlement_outcome": "yes",
+      "strategy": "ML Weather",
+      "symbol": "KXHIGHMIA-26SEP01-B89.5",
+      "target_date": "2026-09-01",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 1.0,
+      "gap_days": 0.0,
+      "market_close_utc": "2026-09-04T04:00:00+00:00",
+      "settled_utc": "2026-09-04T04:00:02.062565+00:00",
+      "settlement_error": null,
+      "settlement_high": 83.0,
+      "settlement_outcome": "no",
+      "strategy": "Meteorologist V2",
+      "symbol": "KXHIGHNY-26SEP03-T83",
+      "target_date": "2026-09-03",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 1.0,
+      "gap_days": 0.0,
+      "market_close_utc": "2026-09-04T05:00:00+00:00",
+      "settled_utc": "2026-09-04T05:00:00.467570+00:00",
+      "settlement_error": null,
+      "settlement_high": 92.0,
+      "settlement_outcome": "yes",
+      "strategy": "Meteorologist V2",
+      "symbol": "KXHIGHCHI-26SEP03-B92.5",
+      "target_date": "2026-09-03",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 0.0,
+      "gap_days": 0.0,
+      "market_close_utc": "2026-09-05T07:00:00+00:00",
+      "settled_utc": "2026-09-05T07:00:00.465316+00:00",
+      "settlement_error": null,
+      "settlement_high": 78.0,
+      "settlement_outcome": "yes",
+      "strategy": "Meteorologist V2",
+      "symbol": "KXHIGHLAX-26SEP04-B77.5",
+      "target_date": "2026-09-04",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 1.0,
+      "gap_days": 0.0,
+      "market_close_utc": "2026-09-06T04:00:00+00:00",
+      "settled_utc": "2026-09-06T04:00:01.417170+00:00",
+      "settlement_error": null,
+      "settlement_high": 79.0,
+      "settlement_outcome": "no",
+      "strategy": "Meteorologist V2",
+      "symbol": "KXHIGHNY-26SEP05-T79",
+      "target_date": "2026-09-05",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 0.0,
+      "gap_days": 0.0001,
+      "market_close_utc": "2026-09-06T05:00:00+00:00",
+      "settled_utc": "2026-09-06T05:00:10.782776+00:00",
+      "settlement_error": null,
+      "settlement_high": 83.0,
+      "settlement_outcome": "yes",
+      "strategy": "Meteorologist V2",
+      "symbol": "KXHIGHCHI-26SEP05-B83.5",
+      "target_date": "2026-09-05",
+      "within_bound": true
+    },
+    {
+      "anomaly": null,
+      "exit_price": 0.0,
+      "gap_days": 0.1985,
+      "market_close_utc": "2026-09-06T04:00:00+00:00",
+      "settled_utc": "2026-09-06T08:45:46.103296+00:00",
+      "settlement_error": null,
+      "settlement_high": 92.0,
+      "settlement_outcome": "no",
+      "strategy": "Meteorologist V2",
+      "symbol": "KXHIGHMIA-26SEP05-B90.5",
+      "target_date": "2026-09-05",
+      "within_bound": true
+    }
+  ],
+  "skipped": [],
+  "source": {
+    "base_url": "http://maia.local:8050",
+    "mode": "http",
+    "positions_from": "/api/status (fallback; /api/closed_trades absent on this image)"
+  },
+  "verdict": "PASS"
+}

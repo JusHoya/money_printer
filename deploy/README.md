@@ -300,3 +300,28 @@ over `GET /api/logs/tail` — no ssh), the dev-box dry run
 records the NO-side settlement sign defect the dry run found in
 `matching_engine._close_position` (protected in F3; must be fixed before F4's
 first paper trade).
+
+## Factory (F4) — gate registration, weekly reconcile, PAPER row
+
+**Runbook: `docs/FACTORY.md`** (registry discipline, controls, adding a lane,
+the promotion path end to end, the KILL path, the standing owner decisions).
+F4 adds no maia service. What it adds:
+
+- **alcyone**: `mp-factory-reconcile.timer` (weekly, Monday 14:30 UTC — after
+  maia's daily 13:30Z `mp-reconcile-weather.timer`) runs
+  `deploy/spark/factory_reconcile.sh` → `scripts/factory_paper_reconcile.py`
+  inside the `lab` compose service, reading maia over the read-only HTTP API
+  (`/api/journal`, `/api/closed_trades`, `/api/logs/tail`). It lives on the lab
+  because the genome's lab trade set needs the frozen search frame
+  (`data/factory/frames/*_<frame_search_sha256[:12]>`, gitignored). Install:
+  `bash deploy/spark/install_factory_reconcile.sh`; Hermes anomaly line:
+  `hermes_plugin/scripts/mp_factory_reconcile.sh` (silent unless blocking/overdue).
+- **maia image**: `GET /api/closed_trades` (side-effect free; the `closed_trades`
+  ledger with `entry_fee`, plus open positions) — lands with the next
+  `compose up -d --build`; until then readers recompute taker fees from the journal
+  and say so.
+- **dev box**: `python scripts/factory.py board --paper-url http://maia.local:8050`
+  (PAPER row), `python scripts/check_settlement_latency.py --url http://maia.local:8050`
+  (settle-within-3-days evidence per strategy), `python scripts/factory.py
+  register-gate <id>` / `--fill-commit-time` (FR-F4.2 registration, committed before
+  the first paper trade), `python scripts/gate.py ...` → `reports/factory/gate_<id>.json`.
