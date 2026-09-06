@@ -1011,13 +1011,18 @@ def _holdout_paths(args: argparse.Namespace):
 
 
 def _sealed_exit(exc: Exception) -> int:
+    """Refusal -> EXIT_REFUSED (nothing written). Anything after the unseal line -> EXIT_ABORT, naming the spent line."""
     from src.factory import holdout as H
 
     if isinstance(exc, H.UnsealRefused):
         print(f"factory: REFUSED: {exc}", file=sys.stderr)
         return H.EXIT_REFUSED
-    print(f"factory: ABORT (the unseal line is already on disk; the look is spent): {exc}", file=sys.stderr)
-    return H.EXIT_REFUSED
+    rec = getattr(exc, "record", None)
+    where = (f"unseal line {rec.line_no} ({rec.command}, {rec.family}, root {rec.root})" if rec is not None
+             else "an unseal line")
+    print(f"factory: ABORT -- {where} is already on disk; the look is SPENT and will not be re-granted: "
+          f"{type(exc).__name__ if not isinstance(exc, H.HoldoutAbort) else 'HoldoutAbort'}: {exc}", file=sys.stderr)
+    return H.EXIT_ABORT
 
 
 def cmd_holdout(args: argparse.Namespace) -> int:
@@ -1043,7 +1048,7 @@ def cmd_holdout(args: argparse.Namespace) -> int:
             finalists_path=Path(args.finalists), unseal_tag=args.unseal, root=root, paths=_holdout_paths(args),
             n_boot=int(args.n_boot),
         )
-    except (H.UnsealRefused, H.HoldoutAbort) as exc:
+    except Exception as exc:  # noqa: BLE001 -- post-unseal failures must name the spent line, never traceback out
         return _sealed_exit(exc)
     print(f"holdout: verdicts {outcome.verdicts} (result_sha256 {outcome.result_sha256})")
     return int(outcome.exit_code)
@@ -1055,11 +1060,15 @@ def cmd_score(args: argparse.Namespace) -> int:
 
     root = Path(args.ladders) if args.ladders else H.DEFAULT_R3_ROOT
     try:
-        outcome = H.run_score(
-            genome_id=str(args.genome), unseal_tag=args.unseal, root=root, as_of=args.as_of,
-            paths=_holdout_paths(args), n_boot=int(args.n_boot),
-        )
-    except (H.UnsealRefused, H.HoldoutAbort) as exc:
+        if getattr(args, "r5_check", False):
+            outcome = H.run_r5_check(genome_id=str(args.genome), unseal_tag=args.unseal, root=root,
+                                     paths=_holdout_paths(args))
+        else:
+            outcome = H.run_score(
+                genome_id=str(args.genome), unseal_tag=args.unseal, root=root, as_of=args.as_of,
+                paths=_holdout_paths(args), n_boot=int(args.n_boot),
+            )
+    except Exception as exc:  # noqa: BLE001 -- post-unseal failures must name the spent line, never traceback out
         return _sealed_exit(exc)
     print(f"score: verdicts {outcome.verdicts} (result_sha256 {outcome.result_sha256})")
     return int(outcome.exit_code)
@@ -1213,6 +1222,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--ladders", default=None, help="sealed root (default data/ladders_2026-09)")
     sc.add_argument("--as-of", dest="as_of", default=None,
                     help="score target_dates <= this date (YYYY-MM-DD); recorded in the unseal line")
+    sc.add_argument("--r5-check", dest="r5_check", action="store_true",
+                    help="re-evaluate ONLY REVIVAL criterion 6 (cold-season month) on dates after the recorded "
+                         "--as-of of this RATIFIED genome's R3 score; criteria 1-5 are never recomputed; once only")
     _add_sealed_common(sc)
     sc.set_defaults(func=cmd_score)
     # ---- end F4 HOLDOUT block ---------------------------------------------------
