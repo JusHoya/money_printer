@@ -629,7 +629,20 @@ Still open for F4, completely:
    **The 0.336 itself is untouched.** Serving walk-forward payloads live, or re-establishing
    parity under the frozen provider, is still owed and is still what unblocks paper. Do not
    read the guard as the blocker being lifted: it is the tripwire, not the fix.
-2. **Fill realism measures the wrong hours.** Both runs cover 02Z/03Z; the genome's 130
+2. **Fill realism measures the wrong hours.** ~~Both runs cover 02Z/03Z~~ — **the hours
+   half of this is CLOSED (2026-09-06).** `reports/factory/fill_realism_2026-09-06.*`
+   covers 14Z/15Z/16Z — the genome's heaviest hour (15Z, 34.6 %) and its third (16Z,
+   16.2 %) — with 132 decision polls and n = 156, against 48 and 72 before. **p90 = 0.00,
+   p95 0.01, max 0.02: `adverse_fill = 0.01` stands, measured rather than assumed.** The
+   daytime tail is fatter than 02Z's (which had max 0.01 and nothing above a cent) but not
+   at the percentile the rule reads. **What remains open is the 20-second window**, which
+   has n = 0 again because maia's per-market poll gap is p50 34.9 s / p90 80.3 s — that is
+   the poll loop, not the collection window, so the p90 is still a *next-poll* upper bound
+   and no longer run will change it. Two traps found the hard way, both now guarded and
+   documented in F3_RUNBOOK §4.6: a **zero ask is an empty book** (that alone read
+   p90 = 0.06 and would have forced a re-score of family #1), and a **long-lived collector
+   pins its analysis code at launch** — analyse from the tape afterwards. Original text:
+   Both runs cover 02Z/03Z; the genome's 130
    offline trades contain none there (15Z 34.6 %, 04Z 27.7 %, 16Z 16.2 %). The declared
    20-s primary window has n=0 in both runs — maia's per-market cadence is p50 35 s — so
    `adverse_fill = 0.01` is assumed, not measured. A daytime collector is owed.

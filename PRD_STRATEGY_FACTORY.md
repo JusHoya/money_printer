@@ -461,6 +461,37 @@ and planted edge, yielding the first pooled OOS number — accepted whatever its
     next-poll number at a ~35-40 s median lag, not a 20-second one. `adverse_fill = 0.01`
     is therefore *assumed*, not measured, for the hours that matter; a daytime collector
     over 15Z/16Z is owed before F4 treats it as evidence.
+  - **The daytime collector ran 2026-09-06. The HOURS objection is CLOSED; the
+    20-second one is not, and cannot be.**
+    `reports/factory/fill_realism_2026-09-06.{json,md}` plus the trimmed tape cover the
+    **14:00Z, 15:00Z and 16:00Z** boundaries — 15Z is the genome's heaviest hour at
+    34.6 %, 16Z its third at 16.2 %. 819 polls, 0 errors, **132 decision polls** across
+    48 markets, **n = 156** next-poll samples, against 48 and 72 from the single 02Z
+    boundary the criterion previously rested on. Result: **p90 = 0.00**, p95 0.01, max
+    0.02, 1.9 % of samples above a cent — **`adverse_fill = 0.01` stands, now measured on
+    the hours the genome actually trades.** The daytime tail is genuinely fatter than the
+    overnight one (02Z had max 0.01 and nothing above a cent), but not at the percentile
+    the rule reads, so this confirms rather than re-scores.
+    **Still true and structural:** the declared 20-second primary window has n = 0 again
+    (poll gap p50 34.9 s / p90 80.3 s), so the p90 remains a *next-poll* upper bound at a
+    ~37 s median lag. That is a property of the sandbox's city-rotating poll loop, not of
+    the collection window; no longer collector fixes it. Either the declared window
+    changes with a registration, or the number keeps being read as the conservative bound
+    it is.
+    **A near-miss worth recording (rule 6).** The first pass at this report said
+    **p90 = 0.06** and, by this criterion's own words, would have forced the registry to
+    raise `adverse_fill` sixfold and re-score family #1. Artifact: `_parse_price` returns
+    0.0 for a *missing* ask, so a next-day ladder at ask 0.00 / volume 0 scored its book
+    OPENING as adverse drift of the entire ask (`KXHIGHLAX-26SEP07-T83`, 14:00:13
+    ask 0.00 vol 0 → 14:00:59 ask 0.78 vol 58, booked +0.78). `genome_strategy.py:822`
+    already had the rule — *"a zero ask is not a quote"* — and `measure_fill_realism` did
+    not. It does now, and the 2026-09-05 report reproduces byte-identically under it,
+    because at 02Z the next-day books were already open: **the defect was invisible in
+    exactly the hours that had been measured and appeared in exactly the hours that
+    mattered.** Then the collector's own end-of-run analysis still printed p90 = 0.01,
+    from the pre-fix module it had loaded at launch three hours earlier; the committed
+    report is a re-run at HEAD. A long-lived collector pins its analysis code at start —
+    analyse from the tape afterwards, never from the collecting process.
 
 ### Phase F4 — Sealed holdouts, R3, promotion, paper run (after ratification)
 **Objective:** score the proposed genome exactly once per virgin root, promote through git,
