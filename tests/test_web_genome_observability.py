@@ -41,14 +41,24 @@ GENOME_ID = "0c4b20502f2daf65"
 # ---------------------------------------------------------------------------
 
 
+class FakeCalibrationRef:
+    """``src.factory.promoted.CalibrationRef``'s read surface."""
+
+    def __init__(self, kind="walk_forward"):
+        self.dir = "data/calibration"
+        self.sha256 = "2" * 64
+        self.kind = kind
+
+
 class FakeSpec:
     """``src.factory.promoted.PromotedSpec``'s read surface."""
 
-    def __init__(self, mode="shadow", registry_status="CLOSED"):
+    def __init__(self, mode="shadow", registry_status="CLOSED", calibration_kind="walk_forward"):
         self.genome_id = GENOME_ID
         self.family = "family_1"
         self.mode = mode
         self.registry_status = registry_status
+        self.calibration = FakeCalibrationRef(calibration_kind)
 
 
 class FakeGenomeStrategy:
@@ -73,6 +83,9 @@ class FakeGenomeStrategy:
         }
         self._raises = raises
         self.state_dict_calls = 0
+        # what GenomeStrategy's construction guard records (weather_bot builds "frozen")
+        self.calibration_kind = "frozen"
+        self.calibration_kind_ok = self.spec.calibration.kind == self.calibration_kind
 
     def state_dict(self):
         self.state_dict_calls += 1
@@ -555,3 +568,30 @@ def test_state_manager_imports_no_factory_module():
         if m.startswith("src.factory") or m.startswith("src.strategies")
     ]
     assert not forbidden, f"state_manager must reach the genome by duck typing: {forbidden}"
+
+
+class TestCalibrationProviderVisibility:
+    """A shadow-mode provider mismatch only WARNS, and the warning scrolls out of the
+    ~10-minute log-tail window. If the standing condition is not on /api/genome it is
+    invisible to anyone checking whether the running genome prices the frame's p_yes.
+    See PRD_STRATEGY_FACTORY.md, the F3 registered deviation on FR-F3.4."""
+
+    def test_mismatch_is_visible_on_the_genome_block(self, orch):
+        orch.bots[0] = _make_bot("Weather", {"genome": FakeGenomeStrategy()}, shadow=True)
+        g = _sm(orch).snapshot()["genome"]
+        assert g["calibration_kind_spec"] == "walk_forward"
+        assert g["calibration_kind_live"] == "frozen"
+        assert g["calibration_kind_ok"] is False
+
+    def test_agreement_reads_as_ok(self, orch):
+        strategy = FakeGenomeStrategy(spec=FakeSpec(calibration_kind="frozen"))
+        orch.bots[0] = _make_bot("Weather", {"genome": strategy}, shadow=True)
+        g = _sm(orch).snapshot()["genome"]
+        assert g["calibration_kind_spec"] == g["calibration_kind_live"] == "frozen"
+        assert g["calibration_kind_ok"] is True
+
+    def test_no_genome_reports_none_not_ok(self, orch):
+        """Absence must not read as agreement."""
+        g = _sm(orch).snapshot()["genome"]
+        assert g["calibration_kind_ok"] is None
+        assert g["calibration_kind_spec"] is None

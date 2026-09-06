@@ -310,6 +310,15 @@ class StateManager:
             "stats": {},
             "state": None,
             "state_error": None,
+            # Which calibration provider replay parity was proven under vs the one
+            # actually constructed. In shadow mode a mismatch only WARNS (nothing
+            # reaches the exchange), and the warning scrolls out of the ~10-minute
+            # /api/logs/tail window -- so the standing condition has to be readable
+            # here or it is effectively invisible. See PRD_STRATEGY_FACTORY.md, the
+            # F3 registered deviation on FR-F3.4.
+            "calibration_kind_spec": None,
+            "calibration_kind_live": None,
+            "calibration_kind_ok": None,
             "error": None,
         }
         try:
@@ -341,6 +350,8 @@ class StateManager:
             block["family"] = _as_str(getattr(spec, "family", None))
             block["spec_mode"] = _as_str(getattr(spec, "mode", None))
             block["registry_status"] = _as_str(getattr(spec, "registry_status", None))
+            cal = getattr(spec, "calibration", None)
+            block["calibration_kind_spec"] = _as_str(getattr(cal, "kind", None))
         except Exception as exc:  # noqa: BLE001
             block["error"] = f"{type(exc).__name__}: {exc}"
         if block["execution_mode"] is None and block["spec_mode"]:
@@ -358,6 +369,12 @@ class StateManager:
 
         block["present"] = True
         block["strategy"] = _as_str(getattr(strategy, "name", None))
+        try:
+            block["calibration_kind_live"] = _as_str(getattr(strategy, "calibration_kind", None))
+            ok = getattr(strategy, "calibration_kind_ok", None)
+            block["calibration_kind_ok"] = ok if isinstance(ok, bool) else None
+        except Exception as exc:  # noqa: BLE001
+            block["error"] = f"{type(exc).__name__}: {exc}"
         block["state_path"] = _as_str(getattr(strategy, "state_path", None))
         block["stats"] = self._genome_stats(strategy)
         state, state_error = self._genome_state(strategy)
