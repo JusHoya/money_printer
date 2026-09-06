@@ -157,3 +157,95 @@ def test_a_corrupt_state_file_does_not_refuse_the_genome_for_the_deploy(monkeypa
     assert "genome" in bot.strategies, "a corrupt state file must not cost the deploy its genome"
     assert bot.strategies["genome"].state_recovered_from
     assert any("STARTING FROM AN EMPTY STATE" in r.getMessage() for r in mp_caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# F4 blocker (2026-09-06): the bot builds the calibration provider the spec names
+# ---------------------------------------------------------------------------
+def _respec(tmp_path, kind):
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    from src.factory import promoted
+
+    doc = json.load(open(src, encoding="utf-8"))
+    if kind is None:
+        doc["calibration"].pop("kind", None)
+    else:
+        doc["calibration"]["kind"] = kind
+    doc["spec_hash"] = promoted.spec_hash_of(doc)
+    path = tmp_path / f"{SEED_SPEC}.json"
+    path.write_text(json.dumps(doc, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_bot_builds_the_walk_forward_provider_the_committed_spec_names(monkeypatch, mp_caplog, tmp_path):
+    """The blocker: parity was proven under walk-forward, the bot built frozen. Now it builds
+    what the spec says, the guard sees a match, and the MISMATCH line is gone."""
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    monkeypatch.setenv("GENOME_STRATEGY_ID", SEED_SPEC)
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+    from src.strategies.genome_strategy import WalkForwardCalibrationProvider
+
+    bot = WeatherBot()
+    assert bot.genome_refused_reason is None and "genome" in bot.strategies
+    strat = bot.strategies["genome"]
+    assert bot.genome_spec.calibration.kind == "walk_forward"
+    assert isinstance(strat.calibration_provider, WalkForwardCalibrationProvider)
+    assert strat.calibration_kind == "walk_forward" and strat.calibration_kind_ok is True
+    assert strat.calibration_provider.sha256 == bot.genome_spec.calibration.sha256
+    msgs = [r.getMessage() for r in mp_caplog.records]
+    assert not any("CALIBRATION PROVIDER MISMATCH" in m for m in msgs)
+    assert any("GenomeStrategy calibration provider for" in m and '"kind": "walk_forward"' in m for m in msgs)
+
+
+def test_bot_builds_frozen_only_for_a_spec_that_says_frozen(monkeypatch, mp_caplog, tmp_path):
+    monkeypatch.setenv("GENOME_STRATEGY_ID", _respec(tmp_path, "frozen"))
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+    from src.strategies.genome_strategy import FrozenCalibrationProvider
+
+    bot = WeatherBot()
+    assert bot.genome_refused_reason is None and "genome" in bot.strategies
+    strat = bot.strategies["genome"]
+    assert isinstance(strat.calibration_provider, FrozenCalibrationProvider)
+    assert strat.calibration_kind == "frozen" and strat.calibration_kind_ok is True
+
+
+def test_bot_keeps_frozen_and_the_warning_for_an_unproven_spec(monkeypatch, mp_caplog, tmp_path):
+    monkeypatch.setenv("GENOME_STRATEGY_ID", _respec(tmp_path, None))
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+    from src.strategies.genome_strategy import FrozenCalibrationProvider
+
+    bot = WeatherBot()
+    assert "genome" in bot.strategies  # shadow: warn and continue, exactly as before
+    strat = bot.strategies["genome"]
+    assert isinstance(strat.calibration_provider, FrozenCalibrationProvider)
+    assert strat.calibration_kind_ok is False
+    assert any("CALIBRATION PROVIDER MISMATCH" in r.getMessage() for r in mp_caplog.records)
+
+
+def test_missing_walk_forward_archives_refuse_the_genome_and_name_the_deploy_step(monkeypatch, mp_caplog, tmp_path):
+    """The maia failure mode: data/calibration is in the bind but the archives are not."""
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    import src.strategies.genome_strategy as gs
+
+    monkeypatch.setattr(gs, "_REPO_ROOT", str(tmp_path / "no_archives"))  # default archive paths -> absent
+    monkeypatch.setenv("GENOME_STRATEGY_ID", SEED_SPEC)
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    bot = WeatherBot()  # must not raise
+    assert "genome" not in bot.strategies
+    assert bot.genome_refused_reason and "deploy_f3_shadow.sh step 2b" in bot.genome_refused_reason
+    assert any("GenomeStrategy REFUSED" in r.getMessage() for r in mp_caplog.records)

@@ -1,3 +1,4 @@
+import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -45,8 +46,12 @@ ML_WEATHER_ENABLED = False
 # the waterfall FIRST when ``GENOME_STRATEGY_ID`` names a spec under
 # ``configs/factory/promoted/``. The bot injects the clock
 # (``datetime.now(ET)`` -- the strategy itself never reads a wall clock), the
-# live forecast-vintage provider and the frozen calibration; the strategy
-# refuses to construct on a fee-type / calibration-hash mismatch.
+# live forecast-vintage provider and the calibration provider the spec's
+# ``calibration.kind`` names (``build_calibration_provider``: walk-forward,
+# refitted live from the archived series exactly as the frame was, for every
+# committed spec; the committed frozen payloads only for a spec that says
+# ``frozen``); the strategy refuses to construct on a fee-type /
+# calibration-hash / calibration-kind mismatch.
 # ``GENOME_STRATEGY_MODE=shadow`` (or ``spec.mode == "shadow"``) means the
 # bot logs the ``[Signal] EMIT`` line exactly as for any strategy and then
 # exactly one ``REJECT ... reason=GENOME_SHADOW`` line WITHOUT handing the
@@ -264,7 +269,7 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
         from src.factory import fees as fees_mod
         from src.factory.promoted import REPO_ROOT as _REPO_ROOT
         from src.factory.promoted import load_promoted
-        from src.strategies.genome_strategy import FrozenCalibrationProvider, GenomeStrategy
+        from src.strategies.genome_strategy import GenomeStrategy
 
         spec = load_promoted(genome_id)
         env_mode = (os.getenv(GENOME_STRATEGY_MODE_ENV) or "").strip().lower()
@@ -396,7 +401,14 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             cache_dir=cache_dir,
             forecast_source=spec.forecast_source,
         )
-        calibration = FrozenCalibrationProvider(cal_dir, source=spec.forecast_source)
+        calibration = self.build_calibration_provider(spec, cal_dir)
+        logger.info(
+            "[Weather] GenomeStrategy calibration provider for %s: %s",
+            spec.genome_id,
+            json.dumps(calibration.describe(), sort_keys=True)
+            if hasattr(calibration, "describe")
+            else f"kind={getattr(calibration, 'kind', None)!r} sha={str(getattr(calibration, 'sha256', ''))[:12]}",
+        )
         strategy = GenomeStrategy(
             spec,
             clock=self._genome_clock,
@@ -416,6 +428,29 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             strategy.name, spec.genome_id, spec.mode, spec.registry_status, self.genome_shadow,
         )
         return strategy
+
+    @staticmethod
+    def build_calibration_provider(spec, cal_dir: str):
+        """The calibration provider this bot prices a promoted genome with.
+
+        ONE function, called by ``_build_genome_strategy`` above, by
+        ``scripts/genome_dry_run.py`` and by ``scripts/factory_replay_parity.py
+        --calibration live`` -- so what replay parity measures is the provider the
+        sandbox actually constructs, not a stand-in. Delegates to
+        ``genome_strategy.build_calibration_provider``: the provider whose ``kind``
+        equals ``spec.calibration.kind`` (walk-forward, refitted from the archived
+        forecast series + CLI truth exactly as the frame was, for every committed
+        spec; the committed frozen payloads only for a spec that says ``frozen``).
+
+        The archives the walk-forward provider reads (``data/forecast_archive/
+        forecast_series_<source>.csv``, ``data/weather_truth/cli_daily_high_*.csv``)
+        are tracked in git but NOT in the sandbox image; ``deploy/pi/deploy_f3_shadow.sh``
+        step 2b copies them into the /srv data bind, and the provider refuses with a
+        message naming that step when they are missing.
+        """
+        from src.strategies.genome_strategy import build_calibration_provider
+
+        return build_calibration_provider(spec, cal_dir)
 
     @staticmethod
     def _registry_status(family: str):

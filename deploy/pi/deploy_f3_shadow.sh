@@ -12,7 +12,9 @@
 # What it does, in order:
 #   1. git pull --ff-only (refuses on a non-fast-forward, like deploy/README.md says)
 #   2. creates /srv/money_printer/data/forecast_cache owned by uid 1000 (compose bind)
-#      and copies data/calibration/*.json into the /srv data bind
+#      and copies data/calibration/*.json PLUS the walk-forward archives the bot's
+#      calibration provider refits from (data/forecast_archive/forecast_series_<source>.csv
+#      and data/weather_truth/cli_daily_high_K{NYC,MDW,LAX,MIA}.csv) into the /srv data bind
 #   3. upserts GENOME_STRATEGY_ID in /srv/money_printer/.env and NEUTRALISES any
 #      GENOME_STRATEGY_MODE line there -- that line is dead config (see §MODE below)
 #   4. builds the image
@@ -335,7 +337,7 @@ log "2/7 forecast cache bind"
 sudo mkdir -p "$STATE_ROOT/data/forecast_cache"
 sudo chown 1000:1000 "$STATE_ROOT/data/forecast_cache"
 
-log "2b/7 frozen calibration payloads into the data bind"
+log "2b/7 calibration payloads AND the walk-forward archives into the data bind"
 # The image excludes data/ (.dockerignore) and the /srv/money_printer/data bind shadows
 # /app/data, so the spec's calibration dir (data/calibration, tracked in git) must be
 # copied into the bind or GenomeStrategy cannot be built (maia 2026-09-05 crash-loop).
@@ -343,6 +345,28 @@ sudo mkdir -p "$STATE_ROOT/data/calibration"
 sudo cp -f "$ROOT"/data/calibration/*.json "$STATE_ROOT/data/calibration/"
 sudo chown -R 1000:1000 "$STATE_ROOT/data/calibration"
 echo "  $(ls "$STATE_ROOT/data/calibration" | wc -l) calibration files in $STATE_ROOT/data/calibration"
+# 2026-09-06 (F4 blocker, PRD_STRATEGY_FACTORY.md section 8 / F3_RUNBOOK.md section 4.5):
+# every committed spec records calibration.kind = walk_forward, and the bot now builds
+# WalkForwardCalibrationProvider for it -- the frame's per-target-date refit, computed
+# live from the archived forecast series + CLI truth. Those two archives are tracked in
+# git and, like data/calibration, are NOT in the image; without them the genome is
+# REFUSED at load with a message naming this step. The sha256 lines are what to compare
+# against the frame provenance (forecast_csv.sha256 / truth_files[city].sha256) and the
+# `GenomeStrategy calibration provider` log line: same file, same fit, same p_yes.
+FORECAST_SRC=$(python3 -c "import json;print(json.load(open('$SPEC'))['forecast_source'])" 2>/dev/null || echo gfs_mex)
+FCSV="$ROOT/data/forecast_archive/forecast_series_${FORECAST_SRC}.csv"
+[[ -f "$FCSV" ]] || die "walk-forward archive missing from the checkout: $FCSV"
+sudo mkdir -p "$STATE_ROOT/data/forecast_archive" "$STATE_ROOT/data/weather_truth"
+sudo cp -f "$FCSV" "$STATE_ROOT/data/forecast_archive/"
+for st in KNYC KMDW KLAX KMIA; do
+  T="$ROOT/data/weather_truth/cli_daily_high_${st}.csv"
+  [[ -f "$T" ]] || die "CLI truth missing from the checkout: $T"
+  sudo cp -f "$T" "$STATE_ROOT/data/weather_truth/"
+done
+sudo chown -R 1000:1000 "$STATE_ROOT/data/forecast_archive" "$STATE_ROOT/data/weather_truth"
+echo "  walk-forward archives in the bind (sha256 = what the provider will report):"
+sha256sum "$STATE_ROOT/data/forecast_archive/forecast_series_${FORECAST_SRC}.csv" \
+          "$STATE_ROOT"/data/weather_truth/cli_daily_high_K{NYC,MDW,LAX,MIA}.csv | sed 's/^/    /'
 
 log "3/7 runtime env ($ENV_FILE)"
 sudo touch "$ENV_FILE"

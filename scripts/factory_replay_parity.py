@@ -3,7 +3,7 @@
 
     python scripts/factory_replay_parity.py [--frames DIR] [--ladders ROOT] [--genomes seeds,picks]
                                             [--run-id run_2026-09-03b] [--only NAME[,NAME]] [--out PATH]
-                                            [--strict] [--calibration walk_forward|frozen]
+                                            [--strict] [--calibration walk_forward|frozen|live]
 
 For every genome (the gen-0 ``genome.SEEDS`` and the F2 picks A/B/C/ALL69 of
 ``reports/factory/<run_id>/summary.json``) a fresh ``GenomeStrategy`` is
@@ -35,6 +35,18 @@ control run of the same genome, same frame, same ladders
 providers read the SAME directory and report the SAME ``sha256``, which is why the
 spec now carries ``calibration.kind`` and the strategy's construction guard refuses
 paper mode on a mismatch.
+
+``--calibration live`` (2026-09-06, the F4 blocker's closure) serves whatever
+``src/bots/weather_bot.py`` ACTUALLY constructs for the spec -- through the bot's
+own ``WeatherBot.build_calibration_provider``, not a re-implementation. Since the
+bot now builds ``WalkForwardCalibrationProvider`` for every spec whose
+``calibration.kind`` is ``walk_forward`` (all six committed specs), the served
+provider refits the frame's per-target-date calibration live from the same two
+archives; the run aborts unless the provider's archive shas equal the frame
+provenance's pins and its embargo equals the frame's. The report is
+``kind: "replay_parity"`` if and only if the served provider's kind equals the
+kind the frame was proven under (``ev_config.calibration_mode``), otherwise
+``replay_parity_diagnostic``; the default filename suffix is ``_live``.
 
 The emitted set ``(market_ticker, ts_utc, contract_side, limit_price)`` is
 diffed against ``fitness.score(F, genome.to_mask(g, F), constraints=False)
@@ -146,6 +158,18 @@ def verify_truth_files(prov: Dict[str, Any]) -> Dict[str, str]:
             raise ParityAbort(f"truth {ent['path']} sha {got[:12]} != provenance {ent['sha256'][:12]}")
         out[city] = got
     return out
+
+
+def _committed_spec_kind(genome_id: str) -> Optional[str]:
+    """``calibration.kind`` of the COMMITTED promoted spec for ``genome_id`` (None when none exists).
+
+    Informational for ``--calibration live``: the replay builds its own spec from the
+    frame, so this records what the spec the sandbox would actually load says.
+    """
+    try:
+        return P.load_promoted(genome_id).calibration.kind
+    except Exception:  # noqa: BLE001 -- no committed spec is a normal state for seeds/picks
+        return None
 
 
 def calibration_identity(prov: Dict[str, Any]) -> Tuple[str, str]:
@@ -304,7 +328,7 @@ def city_calls(days: Dict[Tuple[str, str], DayLadder]) -> List[Tuple[int, str, L
 # ---------------------------------------------------------------------------
 # replay-side providers
 # ---------------------------------------------------------------------------
-CALIBRATION_KINDS = ("walk_forward", "frozen")
+CALIBRATION_KINDS = ("walk_forward", "frozen", "live")
 
 
 class WalkForwardCalibrationProvider:
@@ -355,6 +379,47 @@ class _FrozenProviderProbe:
         self.sha256 = self._inner.sha256
         self.payload_hashes: Dict[str, str] = {}
         self.failures: Dict[str, str] = {}
+
+    def payload_for(self, city: str, target_date: str):
+        key = f"{city}|{target_date}"
+        try:
+            payload = self._inner.payload_for(city, target_date)
+        except Exception as exc:
+            self.failures[key] = str(exc)[:160]
+            raise
+        self.payload_hashes[key] = str(payload.get("content_hash"))
+        return payload
+
+
+class _LiveProviderProbe:
+    """Whatever ``WeatherBot.build_calibration_provider(spec, dir)`` returns, wrapped only to record.
+
+    THE provider the sandbox constructs for this spec, built by the bot's own builder
+    (not a stand-in, not a re-implementation). Same ``payload_hashes`` / ``failures``
+    bookkeeping as the other two probes; ``kind`` and ``sha256`` are the inner
+    provider's, and ``describe()`` (archive shas, embargo, coverage) is what the report
+    records so a reader can check it against the frame provenance.
+    """
+
+    def __init__(self, spec: Any, directory: str) -> None:
+        from src.bots.weather_bot import WeatherBot
+
+        self._inner = WeatherBot.build_calibration_provider(spec, directory)
+        self.kind = getattr(self._inner, "kind", None)
+        self.sha256 = getattr(self._inner, "sha256", None)
+        self.directory = directory
+        self.payload_hashes: Dict[str, str] = {}
+        self.failures: Dict[str, str] = {}
+
+    def describe(self) -> Dict[str, Any]:
+        if hasattr(self._inner, "describe"):
+            d = dict(self._inner.describe())
+            for k in ("forecast_csv", "truth_dir"):
+                if isinstance(d.get(k), str):
+                    p = Path(d[k])
+                    d[k] = p.relative_to(REPO_ROOT).as_posix() if str(p).startswith(str(REPO_ROOT)) else str(p)
+            return d
+        return {"kind": self.kind, "calibration_dir_sha256": self.sha256}
 
     def payload_for(self, city: str, target_date: str):
         key = f"{city}|{target_date}"
@@ -628,10 +693,18 @@ def _run_parity(
     lag = int(prov_search.get("availability_lag_min", 240))
     fee_type_frame = str(fee_regime.lookup("KXHIGH", int(fs.search.visible["ts_utc"][0])).fee_type)
 
+    # The kind the frame was PROVEN under (its own calibrator): what a served provider
+    # must match for the run to be parity evidence rather than a diagnostic.
+    frame_kind = str(ev_cfg.get("calibration_mode") or "walk_forward")
+    # The kind stamped on the spec each genome is replayed under. `live` builds the
+    # provider FROM the spec, so the spec must say what the frame says -- that is the
+    # whole question: does the bot, handed a committed spec, build the frame's provider?
+    spec_kind = frame_kind if calibration_kind == "live" else calibration_kind
+
     # per-source replay providers (built lazily; gefs only if a gefs genome is under test)
     providers: Dict[str, Tuple[Any, Any, Dict[str, Any]]] = {}
 
-    def _providers(source: str):
+    def _providers(source: str, spec: Any):
         if source in providers:
             return providers[source]
         F = frames[source]
@@ -642,17 +715,36 @@ def _run_parity(
         truth = verify_truth_files(prov)
         src_obj = {s.name: s for s in ev.CANDIDATE_SOURCES}[source]
         if calibration_kind == "frozen":
-            # Exactly what src/bots/weather_bot.py builds for the deployed genome: the
-            # committed payloads under the spec's calibration dir, one per city, no
-            # per-target-date walk-forward refit. Same directory, same dir sha -- which
-            # is the whole point: the identity the spec carries cannot tell them apart.
+            # The committed payloads under the spec's calibration dir, one per city, no
+            # per-target-date walk-forward refit -- what weather_bot built until 2026-09-06
+            # and still builds for a spec that says `frozen`. Same directory, same dir
+            # sha -- which is the whole point: the identity the spec carries cannot tell
+            # them apart.
             cal = _FrozenProviderProbe(str(_abs(cal_dir)), source=source)
+        elif calibration_kind == "live":
+            # THE provider src/bots/weather_bot.py constructs for this spec, via the
+            # bot's own builder. Its archives must be the frame's pinned files and its
+            # embargo the frame's, or the replay could not reproduce the frame for
+            # reasons unrelated to the strategy.
+            cal = _LiveProviderProbe(spec, str(_abs(cal_dir)))
+            d = cal.describe()
+            want_f = (prov.get("forecast_csv") or {}).get("sha256")
+            if d.get("forecast_sha256") is not None and d.get("forecast_sha256") != want_f:
+                raise ParityAbort(
+                    f"live provider forecast archive sha {str(d.get('forecast_sha256'))[:12]} != frame "
+                    f"provenance {str(want_f)[:12]}"
+                )
+            for city, sha in (d.get("truth_sha256") or {}).items():
+                if truth.get(city) is not None and sha != truth[city]:
+                    raise ParityAbort(f"live provider truth sha for {city} {sha[:12]} != frame provenance {truth[city][:12]}")
+            if d.get("embargo_days") is not None and int(d["embargo_days"]) != embargo:
+                raise ParityAbort(f"live provider embargo_days {d['embargo_days']} != frame provenance {embargo}")
         else:
             wf = ev.WalkForwardCalibrator(src_obj, tuple(C.CITY_LABELS), embargo_days=embargo)
             cal = WalkForwardCalibrationProvider(wf, cal_sha)
         if cal.sha256 != cal_sha:
             raise ParityAbort(
-                f"calibration dir sha {cal.sha256[:12]} != frame provenance {cal_sha[:12]}"
+                f"calibration dir sha {str(cal.sha256)[:12]} != frame provenance {cal_sha[:12]}"
             )
         vp = ForecastVintageProvider.from_archive_csv(str(fcsv), lag_min=int(prov.get("availability_lag_min", lag)),
                                                      forecast_source=source)
@@ -660,6 +752,8 @@ def _run_parity(
                 "availability_lag_min": int(prov.get("availability_lag_min", lag)), "frame_sha256": prov.get("frame_sha256"),
                 "adverse_fill": float(prov.get("adverse_fill", 0.01)), "contracts": int(prov.get("contracts", 20)),
                 "sigma_cap": None if prov.get("sigma_cap") is None else float(prov.get("sigma_cap"))}
+        if hasattr(cal, "describe"):
+            info["calibration_provider"] = cal.describe()
         providers[source] = (vp, cal, info)
         return providers[source]
 
@@ -670,33 +764,44 @@ def _run_parity(
     results: Dict[str, Any] = {}
     for name, (src_label, g) in gens.items():
         source = g.source
-        vp, cal, info = _providers(source)
         F = frames[source]
+        if F is None:
+            raise ParityAbort(f"no {source} frame in {frames_dir}")
+        lag_src = int(F.provenance.get("availability_lag_min", lag))
         spec = P.build_spec(
             g, family=family or str(prov_search.get("family") or "weather/gfs_mex/taker/v1"),
             config_sha256=config_sha256 or "", frame_search_sha256=str(prov_search.get("frame_sha256")),
             calibration_dir=str(_abs(cal_dir)), calibration_sha256=cal_sha,
-            calibration_kind=calibration_kind, fee_type=fee_type_frame,
+            calibration_kind=spec_kind, fee_type=fee_type_frame,
             fee_regime_sha256=fee_regime.sha256, adverse_fill=float(prov_search.get("adverse_fill", 0.01)),
-            contracts_frame=int(prov_search.get("contracts", 20)), availability_lag_min=info["availability_lag_min"],
+            contracts_frame=int(prov_search.get("contracts", 20)), availability_lag_min=lag_src,
             sigma_cap=float(prov_search.get("sigma_cap") or 4.0), mode=mode, registry_status=registry_status,
             source=src_label,
         )
+        vp, cal, info = _providers(source, spec)
         r = replay_genome(name, g, F=F, days=days, spec=spec, forecast_provider=vp, calibration_provider=cal,
                           fee_regime=fee_regime, prob_cache=prob_cache, log=log)
         r["spec_source"] = src_label
         r["inputs"] = info
         r["calibration_kind"] = cal.kind
+        r["spec_calibration_kind"] = spec.calibration.kind
+        r["calibration_kind_matches_frame"] = bool(cal.kind == frame_kind)
         r["calibration_payloads"] = len(cal.payload_hashes)
         r["calibration_failures"] = dict(sorted(cal.failures.items()))
+        if calibration_kind == "live":
+            r["committed_spec_calibration_kind"] = _committed_spec_kind(spec.genome_id)
         results[name] = r
+    served_is_frames = all(r["calibration_kind_matches_frame"] for r in results.values())
 
     gating = [r for r in results.values() if not r["maker_fill_unknowable"]]
     total_disc = sum(r["n_discrepancies"] for r in results.values())
     gating_disc = sum(r["n_discrepancies"] for r in gating)
     p_ok = all(r["p_yes_within_tol"] for r in results.values())
     doc = {
-        "kind": "replay_parity" if calibration_kind == "walk_forward" else "replay_parity_diagnostic",
+        # Parity EVIDENCE only when the served provider is the kind the frame was proven
+        # under: the frame's own calibrator (walk_forward), or a live-built provider of
+        # that same kind. Anything else is a diagnostic of a transfer gap.
+        "kind": "replay_parity" if served_is_frames else "replay_parity_diagnostic",
         "frames_dir": frames_dir.name,
         "search_sha256": prov_search.get("frame_sha256"),
         "gefs_twin_sha256": (fs.gefs_twin.provenance or {}).get("frame_sha256") if fs.gefs_twin is not None else None,
@@ -705,7 +810,12 @@ def _run_parity(
         "n_markets_ladder": n_ladder_markets,
         "n_markets_search_frame": int(fs.search.n_markets),
         "n_snapshots": n_snapshots,
-        "calibration": {"dir": cal_dir, "sha256": cal_sha, "replay_kind": calibration_kind},
+        "calibration": {
+            "dir": cal_dir, "sha256": cal_sha, "replay_kind": calibration_kind,
+            "frame_kind": frame_kind, "spec_kind": spec_kind,
+            "served_kinds": sorted({str(r["calibration_kind"]) for r in results.values()}),
+            "builder": "src.bots.weather_bot.WeatherBot.build_calibration_provider" if calibration_kind == "live" else None,
+        },
         "fee_regime_sha256": fee_regime.sha256,
         "fee_type": fee_type_frame,
         "p_yes_tol": P_YES_TOL,
@@ -749,9 +859,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--out", default=None, help="default reports/factory/replay_parity_<sha12>.json")
     ap.add_argument("--strict", action="store_true", help="maker genomes also gate the exit code")
     ap.add_argument("--calibration", default="walk_forward", choices=list(CALIBRATION_KINDS),
-                    help="which calibration provider to serve: walk_forward (the frame's, the FR-F3.4 "
-                         "gating run) or frozen (the one weather_bot builds live -- a DIAGNOSTIC of the "
-                         "transfer gap, never parity evidence)")
+                    help="which calibration provider to serve: walk_forward (the frame's own calibrator, "
+                         "the FR-F3.4 gating run); frozen (the committed payloads -- a DIAGNOSTIC of the "
+                         "transfer gap, never parity evidence); live (whatever WeatherBot."
+                         "build_calibration_provider constructs for the spec -- parity evidence iff its "
+                         "kind is the frame's)")
     args = ap.parse_args(argv)
 
     frames_dir = Path(args.frames) if args.frames else latest_frames_dir()

@@ -661,9 +661,12 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
 
     Returns ``(strategy, spec, info)``; raises :class:`DryRunError` when the
     modules are unavailable or the spec is refused.  Mirrors
-    ``WeatherBot._build_genome_strategy`` (same ``FrozenCalibrationProvider``,
-    same fee regime, same spec checks) except for the forecast provider, which
-    is ``ForecastVintageProvider.from_archive_csv`` over the pinned
+    ``WeatherBot._build_genome_strategy`` -- the calibration provider comes from
+    the bot's OWN ``WeatherBot.build_calibration_provider`` (the provider the
+    spec's ``calibration.kind`` names: walk-forward, refitted from the archived
+    series, for every committed spec), same fee regime, same spec checks --
+    except for the forecast provider, which is
+    ``ForecastVintageProvider.from_archive_csv`` over the pinned
     ``forecast_series_<source>.csv`` so no network is touched.
 
     ``mode="paper"`` on a *shadow* spec is a DRY-RUN-ONLY override: the spec is
@@ -672,17 +675,15 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
     written under ``configs/factory/promoted`` and the report records the
     override.  The maia sandbox never sees such a spec.
 
-    The paper override also relaxes the calibration-KIND guard, which otherwise
-    refuses paper mode outright: every committed spec records
-    ``calibration.kind = "walk_forward"`` (the provider replay parity was proven
-    under) while this harness, like the bot, builds the ``frozen`` one.  That
-    substitution is a real defect -- 60 discrepancies and 0.336 of ``p_yes`` for
-    0c4b20502f2daf65, see ``reports/factory/replay_parity_bfcf94654a3a_frozen.json``
-    -- and it is an open F4 blocker, not something this override fixes.  What the
-    override buys is the ability to keep exercising the fill/settlement plumbing
-    offline while the blocker is open; ``calibration_kind_override_for_dry_run``
-    in the report says the emitted set is NOT the frame's trade set.  The refusal
-    stands undiminished on the live paper path, which is where it matters.
+    Until 2026-09-06 the paper override ALSO had to relax the calibration-KIND
+    guard, because this harness (like the bot) built the ``frozen`` provider
+    while every committed spec records ``walk_forward`` -- the F4 blocker
+    (60 discrepancies / 0.336 of ``p_yes`` for 0c4b20502f2daf65,
+    ``reports/factory/replay_parity_bfcf94654a3a_frozen.json``).  The bot now
+    builds the provider the spec names, so the served kind equals the spec's and
+    no relaxation is needed; ``calibration_kind_override_for_dry_run`` stays in
+    the report as ``None`` (or names a mismatch if one is ever reintroduced, in
+    which case the emitted set is NOT the frame's trade set).
     """
     info: Dict[str, Any] = {"spec_path": _rel(spec_path)}
     try:
@@ -708,22 +709,12 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
         doc = spec.to_doc(with_hash=False)
         doc["mode"] = "paper"
         doc["registry_status"] = "PROPOSED"
-        # This harness builds FrozenCalibrationProvider below (deliberately: it mirrors
-        # the bot). Under a paper spec the kind guard is a refusal, so the override that
-        # created the paper spec has to carry the provider it will actually be handed --
-        # and say so in the report. See the docstring.
-        if doc["calibration"].get("kind") != "frozen":
-            info["calibration_kind_override_for_dry_run"] = {
-                "spec_kind": doc["calibration"].get("kind"),
-                "served_kind": "frozen",
-                "parity_evidence": "reports/factory/replay_parity_bfcf94654a3a_frozen.json",
-            }
-            doc["calibration"]["kind"] = "frozen"
         doc["spec_hash"] = P.spec_hash_of(doc)
         spec = P.from_doc(doc)
         info["paper_override_for_dry_run"] = True
 
     import src.backtest.ev_analysis as ev
+    from src.bots.weather_bot import WeatherBot
 
     src_obj = {c.name: c for c in ev.CANDIDATE_SOURCES}.get(spec.forecast_source)
     if src_obj is None:
@@ -737,7 +728,21 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
     cal_dir = spec.calibration.dir
     if not os.path.isabs(cal_dir):
         cal_dir = os.path.join(P.REPO_ROOT, cal_dir)
-    calibration = gs_mod.FrozenCalibrationProvider(cal_dir, source=spec.forecast_source)
+    # The bot's own builder -- not a stand-in -- so the dry run prices with exactly the
+    # provider the sandbox constructs for this spec (walk-forward for every committed one).
+    try:
+        calibration = WeatherBot.build_calibration_provider(spec, cal_dir)
+    except Exception as exc:  # noqa: BLE001 -- surface the bot's refusal reason verbatim
+        raise DryRunError(f"calibration provider could not be built: {type(exc).__name__}: {exc}")
+    served_kind = getattr(calibration, "kind", None)
+    if served_kind != spec.calibration.kind:
+        # Cannot happen through build_calibration_provider today; recorded rather than
+        # silently tolerated if it ever does (the emitted set would not be the frame's).
+        info["calibration_kind_override_for_dry_run"] = {
+            "spec_kind": spec.calibration.kind,
+            "served_kind": served_kind,
+            "parity_evidence": "reports/factory/replay_parity_bfcf94654a3a_frozen.json",
+        }
     try:
         strategy = gs_mod.GenomeStrategy(
             spec,
@@ -748,7 +753,20 @@ def build_genome_strategy(spec_path: str, clock: DryRunClock, vintages, lag_min:
         )
     except gs_mod.GenomeSpecMismatch as exc:
         raise DryRunError(f"GenomeStrategy refused the spec: {exc}")
-    info["constructed_via"] = "GenomeStrategy(replay ForecastVintageProvider, FrozenCalibrationProvider)"
+    info["constructed_via"] = (
+        f"GenomeStrategy(replay ForecastVintageProvider, "
+        f"WeatherBot.build_calibration_provider -> {type(calibration).__name__})"
+    )
+    info["calibration_provider"] = (
+        calibration.describe() if hasattr(calibration, "describe")
+        else {"kind": served_kind, "calibration_dir_sha256": getattr(calibration, "sha256", None)}
+    )
+    if isinstance(info["calibration_provider"], dict):
+        # timestamp-free and path-free report (a re-run is byte-identical)
+        info["calibration_provider"] = {
+            k: (_rel(v) if k in ("forecast_csv", "truth_dir") and isinstance(v, str) else v)
+            for k, v in info["calibration_provider"].items()
+        }
     info["forecast_csv"] = _rel(fcsv)
     info["strategy_name"] = strategy.name
     return strategy, spec, info

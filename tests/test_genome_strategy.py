@@ -610,10 +610,10 @@ class TestBotShadowMode:
 # ---------------------------------------------------------------------------
 # replay parity on the frozen frame (runs wherever the frame exists)
 #
-# Scope note: run_parity serves the FRAME's WalkForwardCalibrationProvider, not
-# the FrozenCalibrationProvider weather_bot.py builds. This proves the strategy
-# reproduces the frame under the frame's own calibration -- see the registered
-# deviation in PRD_STRATEGY_FACTORY.md Phase F3 for what it does not prove.
+# Scope note: the default run_parity serves the FRAME's own calibrator. Until
+# 2026-09-06 that was NOT what weather_bot.py built (the registered deviation in
+# PRD_STRATEGY_FACTORY.md Phase F3 / the F4 blocker); the second test below runs
+# parity under THE provider the bot constructs, through the bot's own builder.
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(
     not Path(FRAMES_DIR).exists(),
@@ -633,6 +633,28 @@ class TestReplayParity:
             assert r["n_discrepancies"] == 0 and r["n_offline"] == r["n_live"] > 0
             assert r["p_yes_max_abs_diff"] <= 1e-9 and r["column_mismatches"] == {}
             assert r["rows_frame_unvisited"] == 0
+        assert doc["ok"] and doc["ok_strict"]
+
+    def test_deployed_genome_replays_under_the_provider_the_bot_builds(self):
+        """The F4 blocker's closure: parity under WeatherBot.build_calibration_provider."""
+        pytest.importorskip("pandas")
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        import factory_replay_parity as rp
+
+        doc = rp.run_parity(Path(FRAMES_DIR), which="seeds", only=["fr31a_taker"], calibration_kind="live",
+                            log=lambda s: None)
+        assert doc["kind"] == "replay_parity"
+        assert doc["calibration"]["builder"] == "src.bots.weather_bot.WeatherBot.build_calibration_provider"
+        assert doc["calibration"]["served_kinds"] == ["walk_forward"] == [doc["calibration"]["frame_kind"]]
+        r = doc["genomes"]["fr31a_taker"]
+        assert r["genome_id"] == "0c4b20502f2daf65"
+        assert r["calibration_kind"] == "walk_forward" and r["calibration_kind_matches_frame"] is True
+        assert r["committed_spec_calibration_kind"] == "walk_forward"
+        assert r["n_discrepancies"] == 0 and r["n_offline"] == r["n_live"] == 130
+        assert r["p_yes_max_abs_diff"] == 0.0 and r["column_mismatches"] == {}
+        prov = r["inputs"]["calibration_provider"]
+        assert prov["forecast_sha256"] == r["inputs"]["forecast_csv"]["sha256"]
+        assert prov["truth_sha256"] == r["inputs"]["truth_sha256"]
         assert doc["ok"] and doc["ok_strict"]
 
 

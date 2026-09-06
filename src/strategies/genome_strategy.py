@@ -117,6 +117,7 @@ What the live poll cannot reproduce (documented, not fudged):
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import inspect
 import json
 import logging
@@ -126,6 +127,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, 
 
 import numpy as np
 
+from src.calibration import forecast_calibration as fcal
 from src.calibration.forecast_calibration import (
     bucket_for_lead,
     calibration_filename,
@@ -298,6 +300,240 @@ class FrozenCalibrationProvider:
             p = load_calibration(path)
             self._payloads[city] = p
         return p
+
+
+#: ``CITY -> IANA timezone`` written into every payload (``== ev_analysis.CITY_TZ``;
+#: pinned by ``tests/test_walk_forward_provider.py``). MIA is America/New_York on purpose.
+CITY_TZ: Dict[str, str] = {
+    "NY": "America/New_York",
+    "CHI": "America/Chicago",
+    "LAX": "America/Los_Angeles",
+    "MIA": "America/New_York",
+}
+
+#: The frame's no-lookahead rule: a payload for target_date T is fitted on paired days
+#: with ``target_date <= T - embargo_days``. 1 is the literal "strictly before" rule
+#: every committed frame was frozen with (``provenance.embargo_days``); the replay
+#: parity ``--calibration live`` run aborts if the frame under test says otherwise.
+WALK_FORWARD_EMBARGO_DAYS = 1
+#: FR-2.2's floor on day-of paired days below which a date is REFUSED rather than priced
+#: on a thin fit (``ev_analysis.WalkForwardCalibrator(min_paired_days=60)``).
+WALK_FORWARD_MIN_PAIRED_DAYS = 60
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class WalkForwardCalibrationProvider:
+    """The frame's walk-forward payloads, refitted live from the archived series (F4 blocker fix).
+
+    ``ev_analysis.WalkForwardCalibrator.calibration_as_of(city, T)`` -- the calibration
+    every frozen frame was built with and every replay-parity report was proven under --
+    reproduced here through the SAME ``forecast_calibration`` functions from the SAME two
+    archives, without importing the lab's pandas harness into the sandbox:
+
+    * the forecast series ``data/forecast_archive/forecast_series_<source>.csv`` and the
+      CLI truth ``data/weather_truth/cli_daily_high_<STATION>.csv`` are read ONCE at
+      construction (``fcal.load_forecast_series`` / ``fcal.load_truth``), paired per city
+      with ``fcal.pair_city``, and fingerprinted exactly as the calibrator does;
+    * ``payload_for(city, T)`` keeps the paired days with ``target_date <= T - embargo``,
+      refuses (``CalibrationError``, a RuntimeError -> a skip, never a crash) when fewer
+      than ``min_paired_days`` day-of days remain, and builds the payload with
+      ``fcal.build_city_calibration`` + ``fcal.finalize`` -- byte-for-byte the frame's
+      payload for that (city, T), ``content_hash`` included (pinned by
+      ``tests/test_walk_forward_provider.py`` against the real calibrator).
+
+    Why this and not the committed ``<CITY>_<source>_v1.json``: those payloads' month
+    blocks are fitted on the WHOLE month (n = 31/30/24 for 2026-05/06/07), so pricing a
+    May-18 ladder with them reads truth from May 19-31. The engine resolves
+    ``by_month_day_of`` first, so the frozen provider prices EVERY ladder day with an
+    in-sample month block, while the walk-forward fit at May-18 has 17 May days
+    (< MIN_BUCKET_N) and falls to the season / pooled day-of block. That is the whole
+    0.336 of ``p_yes``: sigma up to 2.2x wider and bias up to 3.2 F apart, on every
+    city-day (53545 of 54159 compared rows), not a bug and not a data-file difference
+    (the archives on disk hash to the frame's pins).
+
+    ``sha256`` is still the calibration-DIR identity the spec carries
+    (``promoted.calibration_dir_sha256``), so the construction guard's dir check is
+    unchanged; the ARCHIVE identities this provider actually prices from are exposed as
+    ``forecast_sha256`` / ``truth_sha256`` (whole-file sha256, the same numbers the frame
+    provenance pins under ``forecast_csv.sha256`` / ``truth_files[city].sha256``) and
+    logged by the bot at load. A payload for a date past the archive's end is the fit as
+    of the archive's last day -- still walk-forward (nothing after T-1 can be in it),
+    just not growing; ``coverage.last_target_date`` in the payload says how stale.
+    """
+
+    kind = "walk_forward"
+
+    def __init__(
+        self,
+        directory: str,
+        *,
+        source: str = "gfs_mex",
+        version: int = 1,
+        forecast_csv: Optional[str] = None,
+        truth_dir: Optional[str] = None,
+        cities: Sequence[str] = C.CITY_LABELS,
+        embargo_days: int = WALK_FORWARD_EMBARGO_DAYS,
+        min_paired_days: int = WALK_FORWARD_MIN_PAIRED_DAYS,
+    ) -> None:
+        self.directory = directory
+        self.source = str(source)
+        self.version = int(version)
+        self.sha256 = calibration_dir_sha256(directory)
+        self.cities = tuple(str(c).upper() for c in cities)
+        self.embargo_days = int(embargo_days)
+        self.min_paired_days = int(min_paired_days)
+        self.forecast_csv = forecast_csv or os.path.join(
+            _REPO_ROOT, "data", "forecast_archive", f"forecast_series_{self.source}.csv"
+        )
+        self.truth_dir = truth_dir or os.path.join(_REPO_ROOT, "data", "weather_truth")
+        from src.data.forecast_vintage_provider import CITY_STATION  # runtime module, no lab import
+
+        self._station = {c: CITY_STATION[c] for c in self.cities}
+        if not os.path.exists(self.forecast_csv):
+            raise fcal.CalibrationError(
+                f"walk-forward calibration needs the forecast archive {self.forecast_csv}; it is "
+                f"tracked in git but the sandbox image excludes data/, so it must be copied into "
+                f"the /srv data bind (deploy/pi/deploy_f3_shadow.sh step 2b)"
+            )
+        missing = [
+            fcal.truth_csv_path(st, self.truth_dir)
+            for st in self._station.values()
+            if not os.path.exists(fcal.truth_csv_path(st, self.truth_dir))
+        ]
+        if missing:
+            raise fcal.CalibrationError(
+                f"walk-forward calibration needs the CLI truth files {missing}; they are tracked "
+                f"in git but the sandbox image excludes data/, so they must be copied into the "
+                f"/srv data bind (deploy/pi/deploy_f3_shadow.sh step 2b)"
+            )
+        self.forecast_sha256 = _sha256_file(self.forecast_csv)
+        self.truth_sha256: Dict[str, str] = {}
+        self._paired: Dict[str, List[fcal.PairedDay]] = {}
+        self._drops: Dict[str, Mapping[str, int]] = {}
+        self._rows_for_city: Dict[str, int] = {}
+        self._truth_fingerprint: Dict[str, str] = {}
+        self._cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self._load()
+
+    # -- exactly ev_analysis.WalkForwardCalibrator._load ----------------------
+    def _load(self) -> None:
+        rows = fcal.load_forecast_series(self.forecast_csv)
+        self._forecast_fingerprint = fcal.content_fingerprint(
+            rows,
+            ("city", "station", "target_date", "init_time_utc", "lead_hours", "source",
+             "forecast_high_f", "spread_f"),
+        )
+        for city in self.cities:
+            station = self._station[city]
+            truth = fcal.load_truth(station, self.truth_dir)
+            self.truth_sha256[city] = _sha256_file(fcal.truth_csv_path(station, self.truth_dir))
+            city_rows = [r for r in rows if r["city"] == city]
+            paired, drops = fcal.pair_city(city_rows, station, truth)
+            self._paired[city] = paired
+            self._drops[city] = drops
+            self._rows_for_city[city] = len(city_rows)
+            self._truth_fingerprint[city] = fcal.content_fingerprint(
+                [{"station": station, "date": d, "high": h} for d, h in sorted(truth.items())],
+                ("station", "date", "high"),
+            )
+
+    def cutoff_for(self, target_date: str) -> str:
+        """Latest ``target_date`` of a paired day admissible when pricing ``target_date``."""
+        d = _dt.date.fromisoformat(str(target_date)[:10])
+        return (d - _dt.timedelta(days=self.embargo_days)).isoformat()
+
+    def archive_last_target_date(self, city: str) -> Optional[str]:
+        p = self._paired.get(str(city).upper()) or []
+        return max((x.target_date for x in p), default=None)
+
+    # -- exactly ev_analysis.WalkForwardCalibrator.calibration_as_of ----------
+    def payload_for(self, city: str, target_date: str) -> Mapping[str, Any]:
+        city = str(city).upper()
+        target_date = str(target_date)[:10]
+        key = (city, target_date)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        if city not in self._paired:
+            raise fcal.CalibrationError(f"{city}: not one of the calibrated cities {self.cities}")
+        cutoff = self.cutoff_for(target_date)
+        subset = [p for p in self._paired[city] if p.target_date <= cutoff]
+        day_of = {p.target_date for p in subset if bucket_for_lead(p.lead_hours) == fcal.DAY_OF_BUCKET}
+        if len(day_of) < self.min_paired_days:
+            raise fcal.CalibrationError(
+                f"{city} @ {target_date}: only {len(day_of)} day-of paired days available strictly "
+                f"before the cutoff {cutoff}; FR-2.2 requires >= {self.min_paired_days}. Refusing to "
+                f"price this date rather than fitting a thin calibration and calling it walk-forward."
+            )
+        payload = fcal.build_city_calibration(
+            city=city,
+            station=self._station[city],
+            timezone_name=CITY_TZ[city],
+            source=self.source,
+            version=self.version,
+            paired=subset,
+            drops=self._drops[city],
+            forecast_rows_for_city=self._rows_for_city[city],
+            forecast_fingerprint=self._forecast_fingerprint,
+            truth_fingerprint=self._truth_fingerprint[city],
+        )
+        payload = fcal.finalize(payload)
+        self._cache[key] = payload
+        return payload
+
+    def describe(self) -> Dict[str, Any]:
+        """What this provider prices from -- for the load log and the parity report."""
+        return {
+            "kind": self.kind,
+            "source": self.source,
+            "calibration_dir_sha256": self.sha256,
+            "forecast_csv": self.forecast_csv,
+            "forecast_sha256": self.forecast_sha256,
+            "truth_dir": self.truth_dir,
+            "truth_sha256": dict(sorted(self.truth_sha256.items())),
+            "embargo_days": self.embargo_days,
+            "min_paired_days": self.min_paired_days,
+            "archive_last_target_date": {c: self.archive_last_target_date(c) for c in self.cities},
+        }
+
+
+CALIBRATION_PROVIDER_KINDS = ("walk_forward", "frozen")
+
+
+def build_calibration_provider(
+    spec: PromotedSpec,
+    directory: str,
+    *,
+    forecast_csv: Optional[str] = None,
+    truth_dir: Optional[str] = None,
+) -> Any:
+    """The calibration provider ``spec.calibration.kind`` names -- what ``weather_bot`` builds.
+
+    ``walk_forward`` -> :class:`WalkForwardCalibrationProvider` (the provider every
+    committed spec's replay parity was proven under); ``frozen`` -> the committed
+    payloads. A spec that records NO kind was promoted before the field existed: it gets
+    the frozen provider it always got, and the construction guard then refuses paper /
+    warns shadow exactly as before. Any other value is a spec error, not a default.
+    """
+    kind = spec.calibration.kind
+    if kind == "walk_forward":
+        return WalkForwardCalibrationProvider(
+            directory, source=spec.forecast_source, forecast_csv=forecast_csv, truth_dir=truth_dir,
+        )
+    if kind == "frozen" or kind is None:
+        return FrozenCalibrationProvider(directory, source=spec.forecast_source)
+    raise GenomeSpecMismatch(
+        f"spec.calibration.kind={kind!r} names no calibration provider (known: {CALIBRATION_PROVIDER_KINDS})"
+    )
 
 
 def _epoch(dt: _dt.datetime) -> int:

@@ -395,19 +395,74 @@ curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=
 
 ## 4.5 Calibration-provider check (before any paper promotion)
 
-Replay parity is served the frame's **walk-forward** payloads; `weather_bot.py` builds the
-**frozen** ones. Both read the same directory and report the same `sha256`, so the
-directory hash cannot see the substitution -- but it is not cosmetic. Measure it:
+**Status 2026-09-06: the transfer gap is CLOSED in code; maia needs a redeploy (below).**
+
+### 4.5.1 What the gap was
+
+Replay parity is served the frame's **walk-forward** payloads
+(`ev_analysis.WalkForwardCalibrator.calibration_as_of(city, T)`: refit per target date on
+paired days with `target_date <= T - 1`); until 2026-09-06 `weather_bot.py` built the
+**frozen** `<CITY>_gfs_mex_v1.json` payloads. Both read the same directory and report the
+same `sha256`, so the directory hash cannot see the substitution -- and it is not cosmetic.
+Diagnosed, the 0.336 is calibration CONTENT, not a data-file difference, a regime, a window
+or a bug:
+
+* the frozen payloads' `by_month_day_of` blocks are fitted on the **whole** month
+  (n = 31 / 30 / 24 for 2026-05 / 06 / 07 -- May-18's block already contains May 19-31), and
+  the engine resolves `by_month_day_of` first, so the frozen provider prices **every** ladder
+  day with an in-sample month block;
+* the walk-forward fit at the same date has only the days before it (May-18: 17 May days,
+  under `MIN_BUCKET_N = 20`), so 43 of the 69 ladder dates per city fall to the season (23)
+  or the pooled `day_of` block (20); only the last ~10 days of each month resolve to the
+  same block under both, and even then with fewer days;
+* the result, per city over 2026-05-18..07-25: sigma up to **2.2x** apart (LAX 2.16, CHI
+  1.96, NY 1.58, MIA 1.48) and bias up to **3.2 F** apart (CHI 3.24, NY 2.37, MIA 1.11,
+  LAX 0.31) -- on 53,545 of 54,159 compared rows, all four cities, all three months;
+* the archives on disk hash to the frame's pins (`forecast_series_gfs_mex.csv` `2c836703...`,
+  truth `e54c7a3d/bf420368/7ffca75b/2d169e59...`), and the walk-forward fit **at 2026-07-25**
+  reproduces the frozen July block exactly (n = 24, same bias/sigma) -- the frozen artifact
+  is simply the fit as of its last day, applied to every earlier day.
+
+### 4.5.2 What changed
+
+* `src/strategies/genome_strategy.py` gained `WalkForwardCalibrationProvider`
+  (`kind = "walk_forward"`): the frame's `calibration_as_of` reproduced from the SAME two
+  archives through the SAME `forecast_calibration` functions -- stdlib only, no pandas
+  harness in the sandbox (`tests/test_walk_forward_provider.py` pins it payload-for-payload,
+  `content_hash` included, against the real calibrator; 276/276 city-days identical). Its
+  `sha256` is still the calibration-DIR identity the spec carries; the archives it prices
+  from are reported as `forecast_sha256` / `truth_sha256` (whole-file sha256 = the frame
+  provenance's `forecast_csv.sha256` / `truth_files[city].sha256`).
+* `build_calibration_provider(spec, dir)` returns the provider `spec.calibration.kind` names;
+  `WeatherBot.build_calibration_provider` is the bot's single entry to it, used by
+  `_build_genome_strategy`, by `scripts/genome_dry_run.py`, and by
+  `factory_replay_parity.py --calibration live`. A spec that says `frozen` (none committed)
+  still gets the frozen provider; a spec naming no kind gets frozen + the guard's refusal /
+  warning, exactly as before.
+* The bot logs one `GenomeStrategy calibration provider for <id>: {...}` line at load with
+  the kind, the archive shas and each city's `archive_last_target_date`.
+
+Measure it -- the gating evidence, the diagnostic, and its control, same command:
 
 ```bash
-# the diagnostic (the provider the bot actually builds) and its control, same command
+# parity under THE provider weather_bot.py constructs (via WeatherBot.build_calibration_provider)
+PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibration live \
+    --out reports/factory/replay_parity_bfcf94654a3a_0c4b20502f2daf65_live.json
+# the frozen diagnostic (still available; still 60 / 0.3357 -- nothing was papered over)
 PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibration frozen
-PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibration walk_forward     --out reports/factory/replay_parity_bfcf94654a3a_frozen_control.json
+# the frame's own calibrator, the FR-F3.4 control
+PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibration walk_forward \
+    --out reports/factory/replay_parity_bfcf94654a3a_frozen_control.json
 ```
 
-For `0c4b20502f2daf65` this is **60 discrepancies / p_yes off by 0.3357** against **0 / 0.0**
-on the control. The diagnostic writes `kind: "replay_parity_diagnostic"` under a `_frozen`
-filename; it is never FR-F3.4 evidence and never overwrites the gating report.
+For `0c4b20502f2daf65`: **live = 0 discrepancies / p_yes_max_abs_diff 0.0 / 130 = 130
+trades / 54,159 rows compared / `column_mismatches: {}` / `kind: "replay_parity"`**
+(`reports/factory/replay_parity_bfcf94654a3a_0c4b20502f2daf65_live.json`, whose
+`calibration.builder` names the bot's function and whose `inputs.calibration_provider`
+carries the archive shas). The frozen diagnostic still reads **60 / 0.3357** (`_frozen.json`,
+`kind: "replay_parity_diagnostic"`). A `--calibration live` run aborts if the provider's
+archive shas or embargo differ from the frame provenance, and is `replay_parity` only when
+the served kind equals the kind the frame was proven under.
 
 The spec records which provider proved it (`calibration.kind`, inside `spec_hash`) and
 `GenomeStrategy`'s construction guard reads it:
@@ -415,15 +470,46 @@ The spec records which provider proved it (`calibration.kind`, inside `spec_hash
 * `mode: paper` + mismatch, **or a spec naming no kind at all** -> `GenomeSpecMismatch`,
   the bot logs `GenomeStrategy REFUSED` and runs V2 only. Silence is not proof.
 * `mode: shadow` -> `CALIBRATION PROVIDER MISMATCH` on the runtime logger, run continues.
-  **The deployed shadow genome logs this line today** -- it is expected, and it is the
-  accurate description of the run, not a new fault.
+  **The shadow genome deployed 2026-09-05 logs this line until it is redeployed on this
+  code** -- until then it is the accurate description of that run.
 
-So a paper promotion cannot proceed until the gap is actually closed (serve walk-forward
-payloads live, or re-establish parity under the frozen provider). Grep for it on maia:
+### 4.5.3 What maia needs (operator, before the redeploy)
+
+The walk-forward provider reads two archives that are tracked in git but, like
+`data/calibration`, are NOT in the image (the `/srv/money_printer/data` bind shadows
+`/app/data`). `deploy/pi/deploy_f3_shadow.sh` step 2b now copies them into the bind and
+prints their sha256; without them the genome is **REFUSED at load** with a message naming
+that step (V2 keeps running -- the sandbox never crash-loops on it):
+
+| file (repo path, copied to `/srv/money_printer/data/...`) | sha256 the frame is pinned to |
+|---|---|
+| `data/forecast_archive/forecast_series_gfs_mex.csv` | `2c8367037cbf...` |
+| `data/weather_truth/cli_daily_high_KNYC.csv` | `e54c7a3db1bf...` |
+| `data/weather_truth/cli_daily_high_KMDW.csv` | `bf4203687d1e...` |
+| `data/weather_truth/cli_daily_high_KLAX.csv` | `7ffca75bb594...` |
+| `data/weather_truth/cli_daily_high_KMIA.csv` | `2d169e590df8...` |
+
+Re-running `bash deploy/pi/deploy_f3_shadow.sh 0c4b20502f2daf65` on a `:00` boundary is the
+whole procedure (it pulls, copies, rebuilds, relaunches). Then confirm on maia that the
+loaded genome prices with the walk-forward provider and the mismatch line is gone:
 
 ```bash
-curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=500'   | python -c "import json,sys; print(json.load(sys.stdin)['content'])"   | grep -E 'CALIBRATION PROVIDER MISMATCH|GenomeStrategy REFUSED'
+curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=500'   | python -c "import json,sys; print(json.load(sys.stdin)['content'])"   | grep -E 'GenomeStrategy calibration provider|CALIBRATION PROVIDER MISMATCH|GenomeStrategy REFUSED'
 ```
+
+Expected: one `GenomeStrategy calibration provider for 0c4b20502f2daf65: {... "kind":
+"walk_forward", "forecast_sha256": "2c8367037cbf..." ...}` line, and neither of the other
+two. `/api/status`'s genome block reports the same as `calibration_kind_live` /
+`calibration_kind_ok: true`.
+
+Two facts about the live payloads, so nobody is surprised by them: (1) a payload for a
+target date past the archive's end is the fit as of the archive's last paired day
+(`archive_last_target_date`, 2026-09-01 today) -- still walk-forward, nothing dated after
+T-1 can be in it, just not growing until the archives are re-synced; (2) syncing NEWER
+archives changes the payloads for dates the new rows touch (the frame's own rule -- the
+F0 backfill did exactly this to July 2026), so a re-sync is a data-provenance event: record
+the new shas against the `GenomeStrategy calibration provider` line, and re-run
+`--calibration live` before any paper promotion on the new files.
 
 ### 4.6 Collecting a fill-realism tape that means something
 
