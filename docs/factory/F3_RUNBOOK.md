@@ -448,7 +448,10 @@ that writes the journal, so it is not tamper-proof and cannot be.** A forger who
 *two* coherent, past-dated lines — a `start` and a later `stop` bracketing the record —
 produces a file shaped exactly like the one a genuine short run writes, and the gate cannot
 tell them apart; nothing short of a signature or an off-host witness could. What the bounds
-buy is that a forgery must now be a *coherent run history* rather than a single line, and
+buy is that a forgery must now be a *coherent run history* rather than a single line --
+a line appended under a genuine run's `run_id` can still shift that run's window, but by at
+most the capped grace (900 s) on either edge, and the shift raises `start_clamped` in the
+verdict -- and
 that the log's sha256 is printed in the verdict (`inputs.fill_config_log_sha256`) so the
 exact bytes that were scored can be re-hashed later. Read the condition as "the run that
 made these trades recorded this fill configuration", never as "these trades provably had

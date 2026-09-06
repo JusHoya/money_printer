@@ -292,7 +292,7 @@ The gate resolves the flag from three sources and reports which one answered:
                     record, or at its last stamp plus its declared heartbeat
                     grace (capped at ``FILL_CONFIG_MAX_GRACE_S``) when it
                     crashed; it opens at the claimed ``run_started_utc`` CLAMPED
-                    to no earlier than the run's first stamp minus that same
+                    to no earlier than the run's own START stamp minus that same
                     capped grace; a record whose ``observed_utc`` is in the
                     future is dropped, since it claims a live process stamped it
                     at a time nobody has reached; and a run evidences nothing at
@@ -321,7 +321,8 @@ that recorded ``realistic_fills=false`` FAILS, and an operator typing
 ``--realistic-fills true`` over it REFUSES instead of overriding it. And no
 SINGLE line can evidence a record: not by claiming a huge ``heartbeat_sec``
 (capped), not by claiming an ancient ``run_started_utc`` (clamped to its own
-first stamp minus that cap), not by stamping itself in the future (dropped), and
+own START stamp minus that cap -- NOT its first stamp, which any appended
+record could drag backwards), not by stamping itself in the future (dropped), and
 not at all, because a run must stamp a start AND a strictly later record before
 it covers anything.
 
@@ -2252,7 +2253,7 @@ def fill_config_runs(
     if now is None:
         now = datetime.now(timezone.utc)
     horizon = now + timedelta(seconds=FILL_CONFIG_FUTURE_TOLERANCE_S)
-    problems = {"malformed_records": 0, "future_dated_records": 0}
+    problems = {"malformed_records": 0, "future_dated_records": 0, "incoherent_records": 0}
     runs: Dict[str, Dict[str, Any]] = {}
     for row in records:
         run_id = row.get("run_id")
@@ -2267,6 +2268,14 @@ def fill_config_runs(
             problems["malformed_records"] += 1
             continue
         claimed_start = _as_utc(row.get("run_started_utc"))
+        if claimed_start is not None and observed < claimed_start:
+            # A live process cannot stamp a record before the run it says it
+            # belongs to began. Internally impossible, and it is the shape a
+            # back-dating forgery takes; an independent bound in the REFUSE
+            # direction costs an honest log nothing.
+            problems["incoherent_records"] = problems.get("incoherent_records", 0) + 1
+            problems["malformed_records"] += 1
+            continue
         raw_grace = row.get("heartbeat_sec")
         try:
             grace = float(raw_grace)
@@ -2317,14 +2326,26 @@ def fill_config_runs(
             window_end = max(run["stopped"], run["last_seen"])
         else:
             window_end = run["last_seen"] + grace
-        # An ancient claimed start cannot stretch the window backwards past the
-        # capped grace on the run's own first stamp.
-        floor = run["first_seen"] - grace
+        # The window OPENS at the run's own ``start`` STAMP -- not at its earliest
+        # record. Anchoring to ``first_seen`` was still forgeable with one line
+        # (F4 remediation round 2): ``first_seen`` is the earliest observed_utc of
+        # ANY record sharing the run_id, so appending a single past-dated
+        # heartbeat under a GENUINE run's run_id dragged first_seen backwards,
+        # dragged the floor with it, and stretched a real run's window over trades
+        # it was never alive for -- 19/60 covered -> 60/60, REFUSE -> PASS, with
+        # start_clamped False and no signal in the verdict. The start stamp cannot
+        # be moved that way: a later-appended record is not a start record, and an
+        # earlier one is internally impossible (dropped above).
+        # The claimed ``run_started_utc`` may still open the window slightly
+        # EARLIER than the stamp, bounded by the same capped grace, because a real
+        # start record is written within milliseconds of the instant it declares.
+        anchor = run["started_at"] if run["started_at"] is not None else run["first_seen"]
+        floor = anchor - grace
         claimed = run["claimed_start"]
         if claimed is None:
-            window_start = run["first_seen"]
+            window_start = anchor
         else:
-            window_start = max(min(claimed, run["first_seen"]), floor)
+            window_start = max(min(claimed, anchor), floor)
         run["window_start"] = window_start
         run["window_end"] = window_end
         run["start_clamped"] = bool(claimed is not None and claimed < window_start)

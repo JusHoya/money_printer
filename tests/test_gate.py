@@ -954,6 +954,69 @@ def test_one_forged_line_cannot_evidence_the_whole_record(tmp_path):
     assert v["refused"] is True and v["verdict"] == "FAIL"
 
 
+def test_a_line_appended_to_a_genuine_run_cannot_backdate_its_window(tmp_path):
+    """The 2026-09-06 forgery: anchoring the window to the run's FIRST record.
+
+    Bounding ``window_start`` by ``first_seen - grace`` looked safe, but
+    ``first_seen`` is the earliest ``observed_utc`` of ANY record sharing the
+    ``run_id`` -- and ``run_id`` is a bare grouping key anyone can reuse. So ONE
+    line appended under a GENUINE run's id, carrying a past ``observed_utc``,
+    dragged ``first_seen`` backwards, dragged the floor with it, and stretched a
+    real run's window over trades it was never alive for. Measured on the real
+    60-fill record: 19/60 covered and REFUSE became 60/60 and PASS, with
+    ``start_clamped`` False and no signal anywhere in the verdict.
+
+    The window now opens at the run's own ``start`` STAMP. A later-appended
+    record is not a start record, and one stamped before the run began is
+    incoherent and dropped -- so the anchor cannot be moved. What an appended
+    line CAN still do is shift the window by the capped grace, which is bounded,
+    flagged, and stated in the docs rather than claimed away.
+    """
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    genuine = {"record": "fill_config", "schema_version": 1, "run_id": "sandbox-run",
+               "run_started_utc": "2026-07-25T00:00:00+00:00", "heartbeat_sec": 300.0,
+               "realistic_fills": True}
+    path = tmp_path / "appended.jsonl"
+    path.write_text(
+        json.dumps({**genuine, "event": "start",
+                    "observed_utc": "2026-07-25T00:00:00+00:00"}, sort_keys=True) + "\n"
+        + json.dumps({**genuine, "event": "heartbeat",
+                      "observed_utc": "2026-07-25T00:05:00+00:00"}, sort_keys=True) + "\n"
+        # the forged line: same run_id, back-dated, claiming the run began then
+        + json.dumps({**genuine, "event": "heartbeat",
+                      "run_started_utc": "2026-05-30T00:00:00+00:00",
+                      "observed_utc": "2026-05-30T00:00:00+00:00"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None,
+             fill_config_path=str(path))
+    run = v["conditions"]["realistic_fills_enabled"]["fill_config"]["runs"][0]
+    # anchored to the START stamp, so the reach-back is the capped grace and no more
+    assert run["window_start"] == "2026-07-24T23:55:00+00:00", run["window_start"]
+    assert run["start_clamped"] is True          # and the verdict SAYS it was clamped
+    assert v["conditions"]["realistic_fills_enabled"]["fill_config"]["fills_covered"] == 0
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+
+
+def test_a_record_stamped_before_its_own_run_began_is_dropped(tmp_path):
+    """An independent bound in the REFUSE direction: observed_utc < run_started_utc.
+
+    A live process cannot stamp a record before the run it says it belongs to
+    started. It is internally impossible, it costs an honest log nothing, and it
+    is the shape a back-dating forgery reaches for.
+    """
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None,
+             fill_config_path=_forged_log(tmp_path, event="heartbeat",
+                                          run_started_utc="2026-07-25T00:00:00+00:00",
+                                          observed_utc="2026-05-01T00:00:00+00:00"))
+    fc = v["conditions"]["realistic_fills_enabled"]["fill_config"]
+    assert fc["runs"] == [] and fc["value"] is None
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+
+
 def test_each_forged_edge_is_bounded_on_its_own(tmp_path):
     """Peel the defences apart so none of them is load-bearing by accident."""
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
@@ -977,7 +1040,7 @@ def test_each_forged_edge_is_bounded_on_its_own(tmp_path):
     assert "strictly later record" in fc["runs"][0]["not_evidencing"]
 
     # 3. and an ancient CLAIMED start cannot reach back over the record: it is
-    #    clamped to the run's own first stamp minus the capped grace.
+    #    clamped to the run's own START stamp minus the capped grace.
     path = tmp_path / "clamped.jsonl"
     row = {"record": "fill_config", "schema_version": 1, "run_id": "FORGED",
            "run_started_utc": "1970-01-01T00:00:00+00:00", "heartbeat_sec": 300.0,
@@ -994,7 +1057,7 @@ def test_each_forged_edge_is_bounded_on_its_own(tmp_path):
     run = v["conditions"]["realistic_fills_enabled"]["fill_config"]["runs"][0]
     assert run["evidencing"] is True and run["start_clamped"] is True
     assert run["claimed_run_started_utc"] == "1970-01-01T00:00:00+00:00"
-    # first stamp minus this run's own capped grace (300 s), not 1970
+    # start stamp minus this run's own capped grace (300 s), not 1970
     assert run["window_start"] == "2026-07-24T23:55:00+00:00"
     assert v["conditions"]["realistic_fills_enabled"]["fill_config"]["fills_covered"] == 0
     assert v["refused"] is True and v["verdict"] == "FAIL"
@@ -1658,7 +1721,12 @@ def test_template_is_valid_apart_from_placeholders():
     for phrase in ("PINNED TO AN INSTANT THE RUN ACTUALLY STAMPED",
                    "clamped", "dated in the future is dropped",
                    "a start record AND a strictly later one",
-                   "NOT tamper-proof", "ANY SINGLE forged line",
+                   "NOT tamper-proof", "a SINGLE forged line",
+                   # the anchor must be the START stamp, not the earliest record:
+                   # anchoring to the latter was itself the 2026-09-06 forgery
+                   "own START stamp",
+                   # ...and the residual must be stated, not implied away
+                   "at most the capped grace",
                    "two coherent past-dated lines"):
         assert phrase in rf_doc, phrase
     assert gate.FILL_CONFIG_LOG_DEFAULT in tpl["_doc"]["_fill_config_log"]

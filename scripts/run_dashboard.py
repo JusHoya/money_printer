@@ -75,10 +75,12 @@ import src.bots  # noqa: F401
 # at the time it owned it, (b) the gate pins EVERY EDGE of a run window to an
 # instant the run actually stamped -- the close to a ``stop`` record or the last
 # stamp plus the capped heartbeat grace, the open to the claimed
-# ``run_started_utc`` clamped to the first stamp minus that same cap, with
+# ``run_started_utc`` clamped to the run's own START stamp minus that same cap
+# (not its first stamp -- an appended record can drag that backwards), with
 # future-dated records dropped and a run evidencing nothing until it carries a
-# start AND a strictly later record -- so NO SINGLE LINE can cover a paper
-# record, (c) the gate records the log's sha256 in the verdict, so a published
+# start AND a strictly later record -- so no single line can cover a paper
+# record on its own, and one appended to a genuine run shifts its window by at
+# most the capped grace, (c) the gate records the log's sha256 in the verdict, so a published
 # verdict is bound to an exact file that can be re-hashed later, and (d) an
 # operator assertion that CONTRADICTS the log refuses instead of overriding it.
 # It raises forgery from "type one word" to "fabricate a coherent run history --
