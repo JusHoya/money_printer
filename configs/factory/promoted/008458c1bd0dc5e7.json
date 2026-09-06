@@ -3,8 +3,15 @@
   "availability_lag_min": 240,
   "calibration": {
     "dir": "data/calibration",
+    "forecast_sha256": "564dbec7d19e634e7bc2a0ff06fa1226977e650760cece51dff18eda1ef9349d",
     "kind": "walk_forward",
-    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d"
+    "sha256": "21c5f0022d61b7d58880ec3e65eba9612431cff96574baa8380ec4e53625938d",
+    "truth_sha256": {
+      "KLAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+      "KMDW": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+      "KMIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+      "KNYC": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+    }
   },
   "config_sha256": "e679631add8e1e12efc0377e01e32d73606ad74be378fe149b1a1bd393c93c7c",
   "contracts_frame": 20,
@@ -34,5 +41,5 @@
   "registry_status": "CLOSED",
   "sigma_cap": 4.0,
   "source": "seed",
-  "spec_hash": "1cf0ce7291247fb5ea248030db8c677f5f2f3958c0e0a4bb85185c975d73b058"
+  "spec_hash": "f97757b1a299ee3a20d1e714b7f42e3b45e839813602f165fd23ffa4ed2aacff"
 }

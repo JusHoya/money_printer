@@ -364,7 +364,11 @@ for st in KNYC KMDW KLAX KMIA; do
   sudo cp -f "$T" "$STATE_ROOT/data/weather_truth/"
 done
 sudo chown -R 1000:1000 "$STATE_ROOT/data/forecast_archive" "$STATE_ROOT/data/weather_truth"
-echo "  walk-forward archives in the bind (sha256 = what the provider will report):"
+# The provider, the spec's calibration.forecast_sha256 / truth_sha256 pins and the frame
+# provenance all use the CRLF-normalised fees.sha256_file; on this LF checkout plain
+# sha256sum gives the same number. A mismatch here vs the spec's pins = the genome will
+# be REFUSED (paper) or log ARCHIVE PIN MISMATCH (shadow) -- fix the checkout, not the pins.
+echo "  walk-forward archives in the bind (sha256 = what the provider will report and the spec pins):"
 sha256sum "$STATE_ROOT/data/forecast_archive/forecast_series_${FORECAST_SRC}.csv" \
           "$STATE_ROOT"/data/weather_truth/cli_daily_high_K{NYC,MDW,LAX,MIA}.csv | sed 's/^/    /'
 

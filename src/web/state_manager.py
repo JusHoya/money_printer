@@ -319,6 +319,15 @@ class StateManager:
             "calibration_kind_spec": None,
             "calibration_kind_live": None,
             "calibration_kind_ok": None,
+            # The ARCHIVE pins (F4 red team, 2026-09-06): a walk-forward provider pointed
+            # at a different or edited forecast/truth archive passes the dir-sha and the
+            # kind checks and prices a different fit. Shadow only WARNS on it, so the
+            # standing condition has to be readable here too. None = not applicable
+            # (frozen provider, or no genome); the sha12s are for the operator's eye.
+            "archive_pins_ok": None,
+            "archive_pins_detail": None,
+            "archive_forecast_sha12_spec": None,
+            "archive_forecast_sha12_live": None,
             "error": None,
         }
         try:
@@ -373,6 +382,16 @@ class StateManager:
             block["calibration_kind_live"] = _as_str(getattr(strategy, "calibration_kind", None))
             ok = getattr(strategy, "calibration_kind_ok", None)
             block["calibration_kind_ok"] = ok if isinstance(ok, bool) else None
+            pins_ok = getattr(strategy, "archive_pins_ok", None)
+            block["archive_pins_ok"] = pins_ok if isinstance(pins_ok, bool) else None
+            detail = getattr(strategy, "archive_pins_detail", None)
+            block["archive_pins_detail"] = detail.strip()[:500] if isinstance(detail, str) and detail.strip() else None
+            pins_spec = getattr(strategy, "archive_pins_spec", None)
+            pins_live = getattr(strategy, "archive_pins_live", None)
+            f_spec = pins_spec.get("forecast_sha256") if isinstance(pins_spec, dict) else None
+            f_live = pins_live.get("forecast_sha256") if isinstance(pins_live, dict) else None
+            block["archive_forecast_sha12_spec"] = f_spec[:12] if isinstance(f_spec, str) else None
+            block["archive_forecast_sha12_live"] = f_live[:12] if isinstance(f_live, str) else None
         except Exception as exc:  # noqa: BLE001
             block["error"] = f"{type(exc).__name__}: {exc}"
         block["state_path"] = _as_str(getattr(strategy, "state_path", None))

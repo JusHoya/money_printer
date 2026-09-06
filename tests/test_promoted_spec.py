@@ -244,6 +244,65 @@ class TestCalibrationKind:
                 assert spec.calibration.kind == served, f"{path.name}: spec {spec.calibration.kind} != report {served}"
 
 
+class TestArchivePins:
+    """calibration.forecast_sha256 / truth_sha256 (F4 red team 2026-09-06): the ARCHIVES the
+    walk-forward provider prices from, pinned inside spec_hash like `kind`."""
+
+    PINS = dict(calibration_forecast_sha256="a" * 64,
+                calibration_truth_sha256={"KNYC": "1" * 64, "KMDW": "2" * 64, "KLAX": "3" * 64, "KMIA": "4" * 64})
+
+    def test_pins_round_trip_and_are_hash_covered(self):
+        spec = _spec(calibration_kind="walk_forward", **self.PINS)
+        assert spec.calibration.forecast_sha256 == "a" * 64
+        assert dict(spec.calibration.truth_sha256) == self.PINS["calibration_truth_sha256"]
+        doc = spec.to_doc()
+        assert list(doc["calibration"]["truth_sha256"]) == ["KLAX", "KMDW", "KMIA", "KNYC"]  # sorted, stable
+        assert P.from_doc(doc).calibration.truth_sha256 == spec.calibration.truth_sha256
+        doc["calibration"]["truth_sha256"]["KNYC"] = "f" * 64  # a silent edit cannot survive load
+        with pytest.raises(P.PromotedSpecError):
+            P.from_doc(doc)
+
+    def test_absent_pins_load_as_unpinned(self):
+        doc = _spec().to_doc()
+        assert doc["calibration"]["forecast_sha256"] is None and doc["calibration"]["truth_sha256"] is None
+        del doc["calibration"]["forecast_sha256"]
+        del doc["calibration"]["truth_sha256"]
+        doc["spec_hash"] = P.spec_hash_of(doc)
+        spec = P.from_doc(doc)
+        assert spec.calibration.forecast_sha256 is None and spec.calibration.truth_sha256 is None
+
+    def test_malformed_pins_are_refused(self):
+        doc = _spec().to_doc()
+        doc["calibration"]["truth_sha256"] = {"KNYC": "short"}
+        doc["spec_hash"] = P.spec_hash_of(doc)
+        with pytest.raises(P.PromotedSpecError, match="truth_sha256"):
+            P.from_doc(doc)
+        doc = _spec().to_doc()
+        doc["calibration"]["forecast_sha256"] = "nope"
+        doc["spec_hash"] = P.spec_hash_of(doc)
+        with pytest.raises(P.PromotedSpecError, match="forecast_sha256"):
+            P.from_doc(doc)
+
+    def test_every_committed_spec_pins_the_archives_its_parity_run_used(self):
+        """Backfilled 2026-09-06 from each spec's own per-genome parity report (== the frame
+        provenance for its source: gefs genomes pin the GEFS archive)."""
+        from src.data.forecast_vintage_provider import CITY_STATION
+
+        specs = sorted((REPO_ROOT / "configs" / "factory" / "promoted").glob("*.json"))
+        assert specs
+        for path in specs:
+            spec = P.load_promoted(str(path))
+            assert spec.calibration.forecast_sha256 and len(spec.calibration.forecast_sha256) == 64, path.name
+            assert set(spec.calibration.truth_sha256 or {}) == {"KNYC", "KMDW", "KLAX", "KMIA"}, path.name
+            report = REPO_ROOT / spec.parity["report"]
+            if report.exists():
+                (_, r), = json.loads(report.read_text(encoding="utf-8"))["genomes"].items()
+                assert spec.calibration.forecast_sha256 == r["inputs"]["forecast_csv"]["sha256"], path.name
+                assert dict(spec.calibration.truth_sha256) == {
+                    CITY_STATION[c]: s for c, s in r["inputs"]["truth_sha256"].items()
+                }, path.name
+
+
 class TestCalibrationKindGuard:
     """Paper REFUSES a provider mismatch; shadow reaches no exchange, so it warns and runs."""
 

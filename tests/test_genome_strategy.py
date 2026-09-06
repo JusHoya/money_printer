@@ -653,8 +653,15 @@ class TestReplayParity:
         assert r["n_discrepancies"] == 0 and r["n_offline"] == r["n_live"] == 130
         assert r["p_yes_max_abs_diff"] == 0.0 and r["column_mismatches"] == {}
         prov = r["inputs"]["calibration_provider"]
+        from src.data.forecast_vintage_provider import CITY_STATION
+
         assert prov["forecast_sha256"] == r["inputs"]["forecast_csv"]["sha256"]
-        assert prov["truth_sha256"] == r["inputs"]["truth_sha256"]
+        assert prov["truth_sha256"] == {CITY_STATION[c]: s for c, s in r["inputs"]["truth_sha256"].items()}
+        # the spec handed to the bot's builder is the COMMITTED one, and it pins these archives
+        assert r["spec_used"] == {"which": "committed", "path": "configs/factory/promoted/0c4b20502f2daf65.json"}
+        assert r["spec_hash"] == P.load_promoted("0c4b20502f2daf65").spec_hash
+        assert r["spec_archive_pins"]["forecast_sha256"] == prov["forecast_sha256"]
+        assert r["spec_archive_pins"]["truth_sha256"] == prov["truth_sha256"]
         assert doc["ok"] and doc["ok_strict"]
 
 

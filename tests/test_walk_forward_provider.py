@@ -73,7 +73,7 @@ def test_kind_and_directory_identity_are_what_the_guard_reads():
     assert prov.sha256 == spec.calibration.sha256 == P.calibration_dir_sha256(str(CAL_DIR))
     d = prov.describe()
     assert d["kind"] == "walk_forward" and d["embargo_days"] == 1 and d["min_paired_days"] == 60
-    assert len(d["forecast_sha256"]) == 64 and set(d["truth_sha256"]) == set(CITIES)
+    assert len(d["forecast_sha256"]) == 64 and set(d["truth_sha256"]) == {"KNYC", "KMDW", "KLAX", "KMIA"}
 
 
 def test_city_maps_equal_the_evaluators():
@@ -201,6 +201,47 @@ def test_embargo_two_withholds_one_more_day():
 
 
 # ---------------------------------------------------------------------------
+# archive identity: CRLF-normalised, keyed by station, equal to the spec's pins
+# ---------------------------------------------------------------------------
+def _crlf_copy(tmp_path: Path):
+    """The archives re-written with CRLF line endings (a Windows autocrlf checkout)."""
+    fdir = tmp_path / "forecast_archive"
+    tdir = tmp_path / "weather_truth"
+    fdir.mkdir()
+    tdir.mkdir()
+    for src, dst in [(FCSV, fdir / FCSV.name)] + [
+        (TRUTH_DIR / f"cli_daily_high_{s}.csv", tdir / f"cli_daily_high_{s}.csv") for s in ("KNYC", "KMDW", "KLAX", "KMIA")
+    ]:
+        dst.write_bytes(src.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    return str(fdir / FCSV.name), str(tdir)
+
+
+def test_archive_shas_are_crlf_normalised_and_match_the_frame_pins(tmp_path):
+    """Red team 2026-09-06: raw-byte hashing made an LF checkout with a CRLF provider root
+    abort parity on byte-identical content. The provider's shas must be a property of the
+    content only -- ``fees.sha256_file`` -- so a CRLF copy reports the same shas AND the
+    same payload content_hash."""
+    from src.factory.fees import sha256_file
+
+    real = _provider()
+    fcsv, tdir = _crlf_copy(tmp_path)
+    crlf = gs.WalkForwardCalibrationProvider(str(CAL_DIR), source="gfs_mex", forecast_csv=fcsv, truth_dir=tdir)
+    assert crlf.forecast_sha256 == real.forecast_sha256 == sha256_file(str(FCSV))
+    assert crlf.truth_sha256 == real.truth_sha256
+    assert set(real.truth_sha256) == {"KNYC", "KMDW", "KLAX", "KMIA"}  # keyed by STATION, like the spec
+    for city, td in PINNED:
+        assert crlf.payload_for(city, td)["content_hash"] == real.payload_for(city, td)["content_hash"]
+    # and they are the pins the committed spec carries (== the frame provenance's)
+    spec = _spec()
+    assert real.forecast_sha256 == spec.calibration.forecast_sha256
+    assert real.truth_sha256 == dict(spec.calibration.truth_sha256)
+    # a raw-byte hash of the CRLF copy is a DIFFERENT number -- the trap being closed
+    import hashlib
+
+    assert hashlib.sha256(Path(fcsv).read_bytes()).hexdigest() != real.forecast_sha256
+
+
+# ---------------------------------------------------------------------------
 # refusals
 # ---------------------------------------------------------------------------
 def test_thin_history_is_refused_as_a_runtime_error_the_strategy_skips_on():
@@ -262,6 +303,55 @@ def test_strategy_constructs_with_the_walk_forward_provider_and_kind_ok():
         fee_regime=load_regime(), calibration_provider=prov,
     )
     assert strat.calibration_kind == "walk_forward" and strat.calibration_kind_ok is True
+    assert strat.archive_pins_ok is True and strat.archive_pins_detail is None
+    assert strat.archive_pins_live["forecast_sha256"] == spec.calibration.forecast_sha256
+
+
+def test_paper_refuses_and_shadow_warns_when_the_archives_are_not_the_pinned_ones(tmp_path, caplog):
+    """The red team's attack (2026-09-06): +15 F on 61 NY truth rows under a redirected root.
+    Dir sha and kind still agree; the ARCHIVE pins do not."""
+    import datetime as _dt
+    import logging
+
+    from src.data.forecast_vintage_provider import ForecastVintageProvider
+    from src.factory.fees import load_regime
+    from src.utils.logger import logger as mp_logger
+
+    spec = _spec()
+    fcsv, tdir = _perturbed_archive(tmp_path, "NY", from_date="2026-01-01")  # every NY row, both archives
+    prov = gs.WalkForwardCalibrationProvider(str(CAL_DIR), source="gfs_mex", forecast_csv=fcsv, truth_dir=tdir)
+    assert prov.sha256 == spec.calibration.sha256 and prov.kind == spec.calibration.kind  # the old guard is blind
+    clock = lambda: _dt.datetime(2026, 7, 19, 15, 0, tzinfo=_dt.timezone.utc)  # noqa: E731
+    kw = dict(clock=clock, forecast_provider=ForecastVintageProvider.from_rows([], lag_min=spec.availability_lag_min),
+              fee_regime=load_regime(), calibration_provider=prov)
+    # shadow: loud line, run continues, condition readable on the strategy
+    caplog.set_level(logging.INFO, logger=mp_logger.name)
+    mp_logger.addHandler(caplog.handler)
+    try:
+        strat = gs.GenomeStrategy(spec, **kw)
+    finally:
+        mp_logger.removeHandler(caplog.handler)
+    assert strat.calibration_kind_ok is True and strat.archive_pins_ok is False
+    assert "KNYC" in strat.archive_pins_detail and "forecast archive sha" in strat.archive_pins_detail
+    assert any("ARCHIVE PIN MISMATCH (shadow)" in r.getMessage() for r in caplog.records)
+    # paper: refused outright
+    doc = spec.to_doc(with_hash=False)
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    with pytest.raises(gs.GenomeSpecMismatch, match="archives the spec did not pin"):
+        gs.GenomeStrategy(P.from_doc(doc), **kw)
+    # paper + a walk-forward spec that pins nothing: also refused (silence is not proof)
+    doc["calibration"]["forecast_sha256"] = None
+    doc["calibration"]["truth_sha256"] = None
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    good = gs.build_calibration_provider(P.from_doc(doc), str(CAL_DIR))
+    with pytest.raises(gs.GenomeSpecMismatch, match="pins no archives"):
+        gs.GenomeStrategy(P.from_doc(doc), **dict(kw, calibration_provider=good))
+    # frozen provider: pins are not applicable, nothing to refuse
+    doc["calibration"]["kind"] = "frozen"
+    doc["spec_hash"] = P.spec_hash_of(doc)
+    fz = gs.GenomeStrategy(P.from_doc(doc), **dict(kw, calibration_provider=gs.FrozenCalibrationProvider(str(CAL_DIR))))
+    assert fz.archive_pins_ok is None and fz.calibration_kind_ok is True
 
 
 # ---------------------------------------------------------------------------

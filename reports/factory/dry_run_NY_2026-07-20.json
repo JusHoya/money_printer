@@ -137,10 +137,10 @@
       "source": "gfs_mex",
       "truth_dir": "data/weather_truth",
       "truth_sha256": {
-        "CHI": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
-        "LAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
-        "MIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
-        "NY": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
+        "KLAX": "7ffca75bb594639b1d4e167ec2a6be1497684ff3bb074d59f132794c3749602e",
+        "KMDW": "bf4203687d1e5ac3b105fe6dc4f6f9537531d27c3da6cfab4e83aed1a37ef5f4",
+        "KMIA": "2d169e590df8130efdec4a370a66230033ccf202e9daf7f25a44ba42ff860d12",
+        "KNYC": "e54c7a3db1bf9a457aa26084df4c361d5aa00c4381553323dc504b39902689c7"
       }
     },
     "constructed_via": "GenomeStrategy(replay ForecastVintageProvider, WeatherBot.build_calibration_provider -> WalkForwardCalibrationProvider)",

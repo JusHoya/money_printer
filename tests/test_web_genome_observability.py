@@ -86,6 +86,11 @@ class FakeGenomeStrategy:
         # what GenomeStrategy's construction guard records (weather_bot builds "frozen")
         self.calibration_kind = "frozen"
         self.calibration_kind_ok = self.spec.calibration.kind == self.calibration_kind
+        # the archive-pin check (walk-forward providers only; None = not applicable)
+        self.archive_pins_spec = {"forecast_sha256": None, "truth_sha256": None}
+        self.archive_pins_live = None
+        self.archive_pins_ok = None
+        self.archive_pins_detail = None
 
     def state_dict(self):
         self.state_dict_calls += 1
@@ -595,3 +600,33 @@ class TestCalibrationProviderVisibility:
         g = _sm(orch).snapshot()["genome"]
         assert g["calibration_kind_ok"] is None
         assert g["calibration_kind_spec"] is None
+        assert g["archive_pins_ok"] is None and g["archive_pins_detail"] is None
+
+    def test_archive_pin_mismatch_is_visible_on_the_genome_block(self, orch):
+        """F4 red team 2026-09-06: a redirected/edited archive passes the dir sha and the
+        kind; shadow only WARNS. The standing condition must be on /api/genome."""
+        strategy = FakeGenomeStrategy(spec=FakeSpec(calibration_kind="walk_forward"))
+        strategy.calibration_kind = "walk_forward"
+        strategy.calibration_kind_ok = True
+        strategy.archive_pins_spec = {"forecast_sha256": "2c83" + "0" * 60, "truth_sha256": {"KNYC": "e54c" + "0" * 60}}
+        strategy.archive_pins_live = {"forecast_sha256": "2c83" + "0" * 60, "truth_sha256": {"KNYC": "dead" + "0" * 60}}
+        strategy.archive_pins_ok = False
+        strategy.archive_pins_detail = "truth KNYC sha dead00000000 != spec e54c00000000"
+        orch.bots[0] = _make_bot("Weather", {"genome": strategy}, shadow=True)
+        g = _sm(orch).snapshot()["genome"]
+        assert g["calibration_kind_ok"] is True  # the kind check alone would have said "fine"
+        assert g["archive_pins_ok"] is False
+        assert "KNYC" in g["archive_pins_detail"]
+        assert g["archive_forecast_sha12_spec"] == g["archive_forecast_sha12_live"] == "2c8300000000"
+
+    def test_archive_pins_agree_reads_as_ok_and_frozen_reads_as_not_applicable(self, orch):
+        strategy = FakeGenomeStrategy(spec=FakeSpec(calibration_kind="walk_forward"))
+        strategy.calibration_kind = "walk_forward"
+        strategy.calibration_kind_ok = True
+        strategy.archive_pins_ok = True
+        orch.bots[0] = _make_bot("Weather", {"genome": strategy}, shadow=True)
+        assert _sm(orch).snapshot()["genome"]["archive_pins_ok"] is True
+        frozen = FakeGenomeStrategy(spec=FakeSpec(calibration_kind="frozen"))  # archive_pins_ok stays None
+        orch.bots[0] = _make_bot("Weather", {"genome": frozen}, shadow=True)
+        g = _sm(orch).snapshot()["genome"]
+        assert g["calibration_kind_ok"] is True and g["archive_pins_ok"] is None
