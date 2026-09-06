@@ -125,6 +125,15 @@ services:
       # path: the directory exists (loaders that stat it get a clean "empty"
       # instead of an ENOENT surprise) but holds nothing, and nothing can be
       # written into it. `factory-holdout` is the only service that binds them.
+      #
+      # RECORDED CAVEAT (HANDOFF.md 2026-09-05 correction; not fixed here, and
+      # not to be made worse): the `../..:/app:ro` bind also carries `.git`,
+      # and the 152 holdout CSVs are git-TRACKED, so inside this container
+      # `git show HEAD:data/ladders_holdout/<series>/<date>.csv` returns the
+      # sealed rows from the object store regardless of these masks. The
+      # mask defeats a path-based read, not the object store. The fix on the
+      # table is a `.git`-less export of the checkout for the lab image, plus
+      # stripping `result` from manifest.json / RECONCILE.md (the label leak).
       - type: tmpfs
         target: /app/data/ladders_holdout
         read_only: true
@@ -148,6 +157,9 @@ services:
           mode: 0o1777
       # The sealed roots, read-only. Only `factory.py holdout --unseal ...` and
       # `factory.py score --ladders data/ladders_2026-09` run here (§9); every
-      # look is appended to reports/factory/unseal_log.jsonl.
+      # look is appended to reports/factory/unseal_log.jsonl BEFORE a row is
+      # read (src/factory/holdout.py). `factory.py holdout --audit` (manifest
+      # counts only, no unseal) may run here too. The `.git` caveat above
+      # applies to this service as well.
       - ../../data/ladders_holdout:/app/data/ladders_holdout:ro
       - ../../data/ladders_2026-09:/app/data/ladders_2026-09:ro
