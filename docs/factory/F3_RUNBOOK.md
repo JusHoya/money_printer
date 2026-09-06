@@ -411,8 +411,56 @@ refuses otherwise. Before the first paper trade, copy
 `configs/factory/gate_registration.template.json` to `gate_registration.json`, commit it,
 then fill `registration_commit_utc` from
 `git log --diff-filter=A --format=%cI -- configs/factory/gate_registration.json` and
-commit again -- the gate fails while it is null. Pass `--realistic-fills true|false` to
-`gate.py` (the exchange state does not record the flag).
+commit again -- the gate fails while it is null.
+
+**Realistic fills (FR-5.2, updated 2026-09-05).** The exchange state still does not record
+the flag, but the run can now record it for itself. The sandbox reads `MP_REALISTIC_FILLS`
+(**default OFF** -- unset, today's fills are unchanged) and, either way, appends the
+exchange's *effective* fill configuration to `data/fill_config.jsonl` at startup, on every
+book movement, on a 300 s heartbeat and on shutdown. `gate.py --fill-config
+data/fill_config.jsonl` (that is the default path) matches each settled fill's `entry_time`
+against those run windows and passes the condition only when every scored fill was made
+inside a window that recorded `realistic_fills=true`; an absent, stale or non-covering log
+REFUSES. `--realistic-fills true|false` remains as the operator's own assertion for a run
+with no log, and is now the *lowest*-precedence source: an assertion that contradicts the
+log refuses instead of overriding it.
+
+*How far this evidence goes — corrected 2026-09-05, after an adversarial review found the
+opposite of what this paragraph used to claim.* **Every edge of a run window is now pinned
+to an instant the run actually stamped**, because every field in the file is text somebody
+could type: the window closes at the run's `stop` record, or at its last stamp plus its own
+declared heartbeat grace (capped at 900 s), when it crashed; it opens at the claimed
+`run_started_utc` *clamped* to no earlier than the run's first stamp minus that same cap;
+a record whose `observed_utc` is in the future is dropped, because it claims a live process
+stamped it at a time nobody has reached; and a run evidences nothing at all until it
+carries a `start` record **and** a strictly later one. Before those bounds landed, this one
+line made the gate report "all 60 admitted fill(s) fall inside a run window that recorded
+realistic_fills=true" and print **PASS**, with no operator assertion:
+
+```json
+{"record":"fill_config","schema_version":1,"run_id":"FORGED","event":"stop",
+ "run_started_utc":"1970-01-01T00:00:00+00:00","observed_utc":"2030-01-01T00:00:00+00:00",
+ "heartbeat_sec":300.0,"realistic_fills":true}
+```
+
+**What it does NOT defend against, stated plainly: this log is written by the same host
+that writes the journal, so it is not tamper-proof and cannot be.** A forger who writes
+*two* coherent, past-dated lines — a `start` and a later `stop` bracketing the record —
+produces a file shaped exactly like the one a genuine short run writes, and the gate cannot
+tell them apart; nothing short of a signature or an off-host witness could. What the bounds
+buy is that a forgery must now be a *coherent run history* rather than a single line --
+a line appended under a genuine run's `run_id` can still shift that run's window, but by at
+most the capped grace (900 s) on either edge, and the shift raises `start_clamped` in the
+verdict -- and
+that the log's sha256 is printed in the verdict (`inputs.fill_config_log_sha256`) so the
+exact bytes that were scored can be re-hashed later. Read the condition as "the run that
+made these trades recorded this fill configuration", never as "these trades provably had
+realistic fills". **Turning the switch on is an owner decision** (it
+changes what the paper record means -- PRD_STRATEGY_FACTORY owner decision #4); the
+tooling only makes it possible and records what was actually done. Note the promoted
+genome is a *taker*, and the modelled effect is a penny-floor **resting** order that may
+not fill, so enabling it changes family #1's record very little -- that makes the condition
+cheap to satisfy here, it is not a reason to register `requires_realistic_fills: false`.
 
 ## 6. F3 exit checklist (INFRA items)
 
