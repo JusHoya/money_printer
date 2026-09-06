@@ -11,8 +11,9 @@ deadline.** It governs pulling the ladders out of Kalshi, and that pull complete
 the root. Whether to spend an unseal on family #1's seed genome — a CLOSED family whose
 paper route needs 287 days (95 % band 208–367) to reach the FR-5.2 gate — remains owner
 decision 9 in `PRD_STRATEGY_FACTORY.md` section 9, with no encoded default and **no date
-forcing it**. Note also that the unseal is not executable today (`src/factory/holdout.py`
-does not exist; `factory.py holdout|score` are NOT_IMPLEMENTED), and that the root's
+forcing it**. Note also that the unseal is executable but not spendable today (`src/factory/holdout.py`
+and `factory.py holdout|score` landed in the F4 sprint, 2026-09-06, and refuse without a
+committed `RATIFIED YYYY-MM-DD` line and a PROPOSED genome), and that the root's
 outcome labels are readable in `manifest.json` and `RECONCILE.md` — see the HANDOFF
 correction before designing any search against it.
 

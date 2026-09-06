@@ -614,7 +614,9 @@ precisely the ambiguity FR-F4's *"no second scoring of the same genome on the sa
 exists anywhere"* cannot afford, so it stays out of the record by name.
 
 Still open for F4, completely:
-1. **Calibration-provider transfer gap (blocker — still open, but no longer invisible).**
+1. **Calibration-provider transfer gap** — *2026-09-06 F4 sprint: CLOSED on the dev box as a
+   mechanism, OPEN on maia until redeploy; see the F4 entry below.* Original text:
+   **(blocker — still open, but no longer invisible).**
    Parity proven under walk-forward, bot runs frozen; 60 discrepancies and `p_yes` off by
    up to 0.336 when the real provider is substituted.
    **2026-09-06:** the swap is now *detectable and refused*, and the number is evidenced.
@@ -764,3 +766,38 @@ Still open for F4, completely:
    the second half of the original sentence — **record the exposure beside any score** — and
    F4 should treat "was this search designed by someone who had read the holdout?" as a
    question to answer in writing, not one the seal answers for it.
+
+### 2026-09-06 — Phase F4 sprint: the machinery exists and is verified; the phase cannot close
+
+Branch `sprint/f4-holdouts-promotion` (unmerged at the time of writing). Three implementers
+and five adversarial passes; every BROKEN finding was fixed and re-pinned. Per-criterion
+status is registered beside the exit criteria in `PRD_STRATEGY_FACTORY.md` Phase F4; the
+operator runbook is `docs/FACTORY.md`. The one-paragraph verdict, "either way":
+
+**F4 is NOT complete, and no code change can complete it.** Every FR-F4.1/F4.2 deliverable is
+built — `factory.py holdout|score` with the unseal protocol, once-per-purpose lock,
+hash-before-numbers and registry R3 append; `register-gate`, per-genome gate registrations,
+the gate verdict file, the PAPER board block, the weekly reconcile timer, the live-capital
+grep — and each refuses correctly today. What is missing is the owner's: a committed
+`RATIFIED YYYY-MM-DD` line in `docs/REVIVAL_2026_09.md`, a PROPOSED genome (family #1 is
+CLOSED, terminal; a rerun is `.../v2`), and rulings on the capture kill date (2026-09-15 caps
+R3 at 15 dates), the gefs twin on Sept–Oct (HALT-by-construction: the gefs archive ends
+2026-07-27), and the R5 cold-season definition — PRD owner decisions 11–13.
+
+**The calibration blocker moved from "open" to "closed on the dev box, open on maia".** The
+bot now builds the frame's walk-forward calibration live; parity through the bot's own
+builder on the committed spec is 0 discrepancies / p_yes 0.0, the frozen control still 60 /
+0.3357. The spec pins the forecast and truth archives inside its hash; paper refuses and
+shadow warns on any drift; a gefs spec is refused outright (it had been silently priced from
+relabelled MEX guidance — the F3 "GENOME_NO_VINTAGE" claim was wrong). maia still runs the
+frozen provider until `deploy/pi/deploy_f3_shadow.sh` is re-run on this code.
+
+**Two numbers worth keeping.** Holdout-B truth filter: 1 of 148 city-days (0.68 %), from the
+manifest only. maia settlement latency: 9 settled positions, all within 0.8 d, none of them
+the genome's — the shadow run books nothing, so `0/50` gate units, unchanged from 09-05.
+
+**Corrections made to the record this sprint:** the FR-F3.4 per-genome parity reports are now
+protected from silent rewrite by `promote` (it had rewritten one); `promote` cannot re-promote
+five of the six committed specs because the sizing guard fires first — `--verify-committed`
+is the read-only reproduction and reports all six IDENTICAL; the seal's "once" guarantee is
+stated plainly as HEAD-prefix append-only plus git-history review, not tamper-proof.

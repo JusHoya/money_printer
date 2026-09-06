@@ -427,6 +427,8 @@ and planted edge, yielding the first pooled OOS number — accepted whatever its
     loud one that fails CLOSED at the paper boundary — it does not make the deployed
     genome price the frame's `p_yes`. **F4 must not read this as the blocker being
     lifted.**
+    **Update 2026-09-06 (F4 sprint): closed on the dev box as a mechanism, not on maia — see
+    the F4 status block under Phase F4.**
 - `grep -nE 'datetime\.now|time\.time'` over `genome_strategy.py`, `features.py`,
   `genome.py` returns nothing.
 - Every emitted signal has a tz-aware `expiration_time` at settlement-day close; a 24-h
@@ -538,6 +540,88 @@ accumulate an admissible paper record toward FR-5.2.
     unit-win-rate CI of **[0.667, 0.875]** against a null of **0.683** — essentially no
     margin, on the data it was selected on, for a family already CLOSED.
 
+**F4 sprint, 2026-09-06 — status against each exit criterion (registered inline per
+HANDOFF §3 rule 9; nothing above is re-scoped).** Branch `sprint/f4-holdouts-promotion`.
+FR-F4.1 and FR-F4.2 are implemented and adversarially verified on the dev box (three
+implementers, five red-team passes, every BROKEN finding fixed and re-pinned). The phase
+cannot close because its preconditions are the owner's, not the code's: no `RATIFIED <date>`
+line exists in `docs/REVIVAL_2026_09.md`, family #1 is CLOSED (terminal) so no genome is
+PROPOSED, and the R3 root holds five dates. Runbook: `docs/FACTORY.md`.
+- Criterion 1 (unseal log once per family; builder still refuses; truth filter < 10 %):
+  **NOT MET / MET / MET.** `factory.py holdout --finalists <file> --unseal RATIFIED-<date>`
+  (`src/factory/holdout.py`) REFUSES today: no ratified line, family CLOSED. The lock is
+  once per family per PURPOSE, keyed on the registry as well as the log (a copied root with
+  a tweaked price or an edited manifest is refused); both records are HEAD-prefix
+  append-only; the ratification line is read from the COMMITTED doc and must be exactly
+  `RATIFIED YYYY-MM-DD` at column 0 outside fences/pre/comments. `tests/test_sealed_roots.py`
+  18/18 unchanged. `factory.py holdout --audit` (manifest counts only; no CSV opened; nothing
+  written): 148 city-days, 888 markets, truth filter touches 1 city-day = **0.68 %** — MET on
+  manifest evidence; the drop is the frame's `truth_agrees != False` clause on the six
+  markets where Kalshi's `expiration_value` ≠ CLI high (RECONCILE.md 882/888).
+  Stated limit: a COMMITTED rewrite of `registry.jsonl`/`unseal_log.jsonl` is a git-history
+  event the tool cannot detect; "once" beyond HEAD-prefix is delegated to git review.
+- Criterion 2 (R3 once with hash; PASS/HALT #3; no second scoring): **NOT MET.**
+  `factory.py score --genome <id> --ladders data/ladders_2026-09 --unseal RATIFIED-<date>`
+  prints the result sha256 before any number (pinned on captured stdout), reads thresholds
+  from the family's registry line (`thresholds_source: registry`), appends RATIFIED or
+  HALT #3 with the hash, refuses a second scoring per genome per purpose, and catches every
+  post-unseal exception with a "look is SPENT" line. Two owner rulings block a real run:
+  (a) **R3 #2 is HALT-by-construction on Sept–Oct** — `forecast_series_gefs.csv` ends
+  2026-07-27, so the gefs twin cannot be built; the scorer reports `gefs twin UNAVAILABLE`
+  and fails that check instead of burning the look, but only a gefs Sept–Oct backfill or a
+  ratified σ-cap/no-gefs disqualifier makes #2 passable (owner decision 12); (b) the capture
+  kill date 2026-09-15 caps the root at 15 dates × 4 cities against the lane's ≥40-unit
+  assert (owner decision 11). `data/ladders_2026-09` lives on alcyone only (2026-09-01..09-05
+  today; 08-31 quarantined and re-sealed).
+- Criterion 3 (Holm < 0.05 on both roots): **NOT MET; MECHANICALLY READY** — strict
+  `p_adj < alpha` from the registry's `holm_alpha`, m counts every registry family (unknown
+  p = 1.0), `holm_m`/`holm_p` in the evidence. No root has been scored.
+- Criterion 4 (settle within 3 days; PAPER row): **NOT MET for the genome; MET for the
+  sandbox path.** `scripts/check_settlement_latency.py --url http://maia.local:8050`:
+  9 settled KXHIGH positions (V2 6/6, max 0.20 d; ML Weather 3/3, max 0.78 d); genome 0 —
+  the shadow run books nothing (registered deviation above). Every measured row settled
+  in-process at the engine's EXPIRATION check; `reconcile_weather.py` was not involved and
+  its daily timer cannot be evidenced over HTTP. `factory.py board --paper-url` renders the
+  PAPER block under its own header: sandbox c/contract from closed_trades (journal fallback
+  labelled; maia's image predates `/api/closed_trades`), `0/50` target_dates, **family
+  pooled OOS +0.0308 [−0.090, +0.142]** (the PRD headline, the run's picks) and **genome
+  in-sample +0.0723** labelled "NOT a prediction".
+- Criterion 5 (≥50 units; gate file; KILLED; no live-capital flag): **NOT MET (0/50;
+  287 days at the measured rate); MECHANICALLY READY.** `factory.py register-gate <id>`
+  writes `configs/factory/gate_registration_<id>.json` (per genome, one add commit each;
+  `--fill-commit-time` stamps from `git log --diff-filter=A`); `promote --mode paper`
+  refuses without a git-reconciled registration; `gate.py` round-trips it and writes
+  `reports/factory/gate_<id>.json` with `grouped_count`, `p_exact`, `net_pnl`,
+  `spec_hash_unchanged`; a FAIL verdict renders `KILLED:GATE_FAIL`;
+  `tests/test_factory_no_live_capital.py` pins the flag list and every transitive import.
+  Weekly reconcile: `deploy/spark/systemd/mp-factory-reconcile.timer` (alcyone, Mon
+  14:30Z; resolves maia on the host and fails loudly on `HOST_UNRESOLVED`/`FRAME_MISSING`;
+  not installed — the `bfcf94654a3a` frame must be copied there first).
+- **The F4 calibration blocker (§8, "Registered deviation (2026-09-05)") is CLOSED on the
+  dev box as a mechanism, NOT on maia.** `WalkForwardCalibrationProvider` (kind
+  `walk_forward`, stdlib + numpy) is what `WeatherBot.build_calibration_provider` builds;
+  `factory_replay_parity.py --calibration live` through that builder on the COMMITTED spec:
+  **0 discrepancies, 130 = 130, p_yes_max_abs_diff 0.0**
+  (`reports/factory/replay_parity_bfcf94654a3a_0c4b20502f2daf65_live.json`); the frozen
+  control still reads **60 / 0.3357**. Cause: the frozen `_v1.json` month blocks were fitted
+  on whole months (in-sample); walk-forward at May-18 has 17 May days (< 20) and falls to
+  season/pooled. The spec's calibration block now pins `forecast_sha256` and per-station
+  `truth_sha256` inside `spec_hash` (six specs backfilled; `promote --verify-committed`
+  rebuilds all six IDENTICAL through the real builder; the deployed spec_hash moved
+  `866c65da0343` → `a48957d13a13`, and §8 item 2's `2612fdfb1416` is historical). Paper
+  REFUSES and shadow logs `ARCHIVE PIN MISMATCH` on any served-but-unpinned or mismatched
+  archive (CRLF-normalised shas). A `gefs` spec is now REFUSED in every mode
+  (`FORECAST SOURCE UNAVAILABLE`): the live vintage path fetches `gfs_mex` only, and the F3
+  note that gefs genomes would hit `GENOME_NO_VINTAGE` was wrong — they were silently priced
+  from relabelled MEX guidance. On maia the running container still builds the frozen
+  provider until `deploy/pi/deploy_f3_shadow.sh` is re-run on this code (step 2b copies the
+  two archives); the archive is then a static copy (`archive_last_target_date` 2026-09-01,
+  no re-sync job) — walk-forward-valid but stale; a re-sync trips the pins by design and
+  needs a re-promotion, which for this genome only `--verify-committed` can reproduce (the
+  sizing guard refuses a real re-promote at 10 % admissible).
+- Dev-box suite after the sprint: **17 failed / 3376 passed / 13 skipped / 1 error**, all 17 the same `xgboost`/`websocket` `ModuleNotFoundError` set (baseline: 17 `ModuleNotFoundError` failures +
+  1 collection error, unchanged).
+
 ### Phase F5 — Second lanes and GENE_SPEC v2 (data-gated)
 **Objective:** extend the same frame/kernel/registry to lanes and genes that lack
 statistics today, without changing the fitness definition.
@@ -621,7 +705,9 @@ is set by dates of tape, not by compute.
      and the backfill completed 2026-09-02 (`9a8ed2e`); `sha256sum -c` is 151 OK / 0 failed.
      What lapses is only the option to **re-pull or repair** the root, which is insurance,
      not a decision deadline.
-   - **Not spendable today regardless.** `src/factory/holdout.py` does not exist;
+   - *Update 2026-09-06:* `src/factory/holdout.py` exists and `holdout`/`score` are wired
+     (F4 sprint); the unseal is STILL not spendable — no ratified line, family CLOSED.
+   - **Not spendable today regardless** *(as written 2026-09-05)*. `src/factory/holdout.py` did not exist;
      `scripts/factory.py:63` lists `holdout`/`score` in `NOT_IMPLEMENTED` (both return 2);
      `reports/factory/unseal_log.jsonl` does not exist; `--unseal RATIFIED-<date>` needs a
      ratification `docs/REVIVAL_2026_09.md:6` says has not happened; and `registry.py:35`
@@ -642,3 +728,19 @@ is set by dates of tape, not by compute.
 10. **Taken 2026-09-05 — do not reopen without new evidence:** options that edit
     `src/core/risk_manager.py` to relieve the cold-start sizing ceiling are REJECTED
     (see Phase F4 above and `reports/factory/sizing_cold_start_2026-09-05.md`).
+11. **Capture kill date (open, no default).** `MP_CAPTURE_KILL_DATE` defaults to 2026-09-15
+    (`deploy/spark/ladder_capture.sh:31`), capping the R3 root at 15 dates × 4 cities; FR-F4.1
+    and REVIVAL M1 name a Sept–Oct root and the lane asserts ≥40 units. Nothing has been
+    scored on the root, so extending it now, on these stated grounds, does not break
+    pre-registration (FACTORY_ROADMAP.md:16); extending it after a score would. Recommended:
+    set the systemd override to 2026-10-31 before 2026-09-16 and record it here.
+12. **R3 #2 on Sept–Oct (open).** The gefs archive ends 2026-07-27, so the gefs twin cannot be
+    built and `score` fails R3 #2 as `gefs twin UNAVAILABLE` by construction. Either backfill
+    gefs for Sept–Oct into `data/forecast_archive/` before scoring, or ratify that the
+    pre-selection σ≤4F cap / the absence of a gefs vintage is the ex-ante disqualifier
+    REVIVAL §5 #2 allows. Not the scorer's call.
+13. **R5 cold-season definition (unratified constants).** `score --r5-check` re-evaluates only
+    REVIVAL §5 #6 after the recorded `as_of` using `COLD_SEASON_MONTHS = (11,12,1,2,3)` and
+    `COLD_SEASON_MIN_DATES = 28` distinct target dates. "≥1 cold-season month" is quantified
+    nowhere in REVIVAL, the architecture or this PRD; every `evidence.r5` block says so.
+    Decide whether a month means calendar dates, city-days, or one named month.
