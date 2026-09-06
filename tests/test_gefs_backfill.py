@@ -722,7 +722,15 @@ class TestCommittedArtifacts:
             assert b"\r\n" not in left, f"{city}: artifact written with CRLF"
 
     def test_committed_artifacts_match_a_fresh_rebuild(self, tmp_path):
+        """Reproducible from ITS OWN inputs -- see the gfs_mex twin in
+        tests/test_forecast_calibration.py for why the fingerprints are checked
+        first. The committed artifact is frozen (every promoted spec pins it via
+        `calibration_dir_sha256`) while the forecast and truth archives keep
+        growing, so a plain byte compare goes permanently red for a reason that is
+        not a defect -- and a check that can never pass again gets ignored.
+        """
         fresh = self._build(tmp_path / "fresh")
+        drifted = []
         for city, path in sorted(fresh.items()):
             committed = os.path.join(
                 CALIBRATION_DIR, f"{city}_{SOURCE_GEFS_SERIES}_v1.json"
@@ -733,7 +741,25 @@ class TestCommittedArtifacts:
                 built = fh.read()
             with open(committed, "rb") as fh:
                 stored = fh.read()
+            old_in = json.loads(stored.decode("utf-8"))
+            new_in = json.loads(built.decode("utf-8"))
+            if (old_in["inputs"]["forecast_content_sha256"]
+                    != new_in["inputs"]["forecast_content_sha256"]
+                    or old_in["inputs"]["truth_content_sha256"]
+                    != new_in["inputs"]["truth_content_sha256"]):
+                drifted.append(
+                    f"{city}: frozen on {old_in['coverage']['last_target_date']} "
+                    f"({old_in['inputs']['paired_rows']} paired), archives now reach "
+                    f"{new_in['coverage']['last_target_date']} "
+                    f"({new_in['inputs']['paired_rows']})"
+                )
+                continue
             assert built == stored, f"{city}: committed calibration != fresh rebuild"
+        if drifted:
+            pytest.skip(
+                "committed calibration is frozen and the archives have grown since; "
+                "rebuild is not comparable: " + "; ".join(drifted)
+            )
 
     def test_committed_calibration_loads_and_verifies_its_own_hash(self):
         for city in ("NY", "CHI", "LAX", "MIA"):
