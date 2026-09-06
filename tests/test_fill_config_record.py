@@ -242,7 +242,8 @@ def test_run_window_closes_exactly_on_a_clean_stop():
             _record(event="stop", observed_utc=_iso(stop)),
         ]
     )
-    assert problems == {"malformed_records": 0, "future_dated_records": 0}
+    assert problems == {"malformed_records": 0, "future_dated_records": 0,
+                        "incoherent_records": 0}
     assert len(runs) == 1 and runs[0]["evidencing"] is True
     assert runs[0]["window_start"] == T0
     assert runs[0]["window_end"] == stop, "a clean stop bounds the window exactly"
@@ -342,7 +343,8 @@ def test_a_future_dated_record_is_not_a_stamp(tmp_path):
     now = T0
     ahead = now + timedelta(seconds=gate.FILL_CONFIG_FUTURE_TOLERANCE_S + 60)
     runs, problems = gate.fill_config_runs(
-        [_record(event="start", observed_utc=_iso(now - timedelta(hours=1))),
+        [_record(event="start", observed_utc=_iso(now - timedelta(hours=1)),
+                 run_started_utc=_iso(now - timedelta(hours=1))),
          _record(event="stop", observed_utc=_iso(ahead))],
         now=now,
     )
@@ -351,7 +353,8 @@ def test_a_future_dated_record_is_not_a_stamp(tmp_path):
     assert runs[0]["records"] == 1 and runs[0]["evidencing"] is False
     # inside the clock-skew tolerance a slightly-ahead stamp is still honoured
     runs, problems = gate.fill_config_runs(
-        [_record(event="start", observed_utc=_iso(now - timedelta(hours=1))),
+        [_record(event="start", observed_utc=_iso(now - timedelta(hours=1)),
+                 run_started_utc=_iso(now - timedelta(hours=1))),
          _record(event="stop", observed_utc=_iso(now + timedelta(seconds=60)))],
         now=now,
     )
