@@ -615,10 +615,22 @@ Still open for F4, completely:
    capture commit `8808cd9`), so every capture 09-01..09-05 ran the unguarded script. The
    checkout was rebased to the branch head on 2026-09-06 — its 5 local capture commits
    replayed cleanly, both ladder roots intact — and the guard is now live there.
-   **Loose end for F4: nothing schedules the capture.** No user crontab, no systemd timer
-   (user or system), no Hermes cron job on alcyone mentions `ladder`. The daily captures
-   are evidently run by hand. R3 accrues one date per day only as long as someone runs it,
-   which is a poor foundation for a root F4 wants to score on a fixed cadence.
+   **Correction (same day): the capture IS scheduled, and healthy.** An earlier note here
+   claimed nothing scheduled it. That was wrong — a malformed `grep` over a truncated
+   `systemctl list-timers` head. `mp-ladder-capture.timer` is **enabled and active** on
+   alcyone (`deploy/spark/systemd/`, installed by `install_ladder_capture.sh`), fires
+   `OnCalendar=*-*-* 12:30:00 UTC`, and its last run on **2026-09-06T12:30:48Z** committed
+   `8808cd9` cleanly. Verified after the rebase: `MP_CAPTURE_DRY_RUN=1` plans
+   2026-09-04..09-05 and the floor guard refuses the exact historical case
+   (`MP_CAPTURE_TARGET_DATE=2026-08-31` → start 08-30 → *"inside sealed holdout-B"*).
+   **The real loose end is the kill date.** `ladder_capture.sh` refuses any target date
+   after `MP_CAPTURE_KILL_DATE`, **default 2026-09-15** (FR-F0.5). The guard is on the
+   target date, so the last capture fires the morning of **2026-09-16** for target 09-15
+   and every run after that dies. With 08-31 quarantined, R3 therefore tops out at
+   **2026-09-01..09-15 — 15 dates × 4 cities = 60 city-days** and then stops growing.
+   F4 must either score R3 at that size or extend `MP_CAPTURE_KILL_DATE` deliberately;
+   it will not notice on its own, because a refusal after the kill date looks exactly
+   like a healthy timer whose service exits non-zero once a day.
 9. **Two F4 preconditions found in the review but never registered here.** Both are
    structural and would break a `.../v2` run exactly as they break this one:
    - **The sandbox cannot authorize paper mode at all.** `weather_bot.py`'s
