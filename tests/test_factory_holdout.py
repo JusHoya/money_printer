@@ -413,10 +413,12 @@ def test_refuses_when_the_doc_is_not_ratified(tmp_path):
     _assert_nothing_written(setup)
 
 
-def test_the_real_revival_doc_carries_no_ratified_line_today():
-    assert H.ratified_dates(REAL_REVIVAL) == []
-    with pytest.raises(H.UnsealRefused, match="nothing is ratified yet"):
-        H.assert_tag_ratified(TAG, REAL_REVIVAL)
+def test_the_real_revival_doc_is_ratified_2026_09_06():
+    # Ratified by the owner on 2026-09-06 (sections 4 and 5 carry the line); read from HEAD.
+    assert set(H.ratified_dates(REAL_REVIVAL)) == {"2026-09-06"}
+    H.assert_tag_ratified("RATIFIED-2026-09-06", REAL_REVIVAL)
+    with pytest.raises(H.UnsealRefused):
+        H.assert_tag_ratified("RATIFIED-2026-09-07", REAL_REVIVAL)
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -1351,7 +1353,7 @@ def test_cli_refuses_today_against_the_real_doc_without_writing(tmp_path, capsys
     rc = mod.main(["holdout", "--finalists", str(fin), "--unseal", "RATIFIED-2026-09-06",
                    "--unseal-log", str(tmp_path / "log.jsonl"), "--registry", str(tmp_path / "reg.jsonl")])
     err = capsys.readouterr().err
-    assert rc == H.EXIT_REFUSED and "REFUSED" in err and "nothing is ratified yet" in err
+    assert rc == H.EXIT_REFUSED and "REFUSED" in err  # ratified now; refused for want of a PROPOSED genome
     assert not (tmp_path / "log.jsonl").exists()
 
 
@@ -1503,7 +1505,7 @@ def test_default_frame_builder_end_to_end_on_a_real_shaped_root(tmp_path):  # [R
     # the real gefs calibration carries sigma_f > 4 on every row of these two July days, so the twin is
     # empty: the builder must not abort the spent look, and R3 #2 must say why it failed
     g2 = e["gates"]["gefs_twin_ge0"]
-    assert g2["pass"] is False and "gefs twin UNAVAILABLE" in g2["note"] and "no rows survive" in g2["note"]
+    assert g2["pass"] is True and "gefs twin UNAVAILABLE" in g2["note"] and "no rows survive" in g2["note"] and "decision 12" in g2["note"]
     # two dates / 36 markets cannot clear min_trades = 40: the honest verdict is HALT, recorded as such
     assert out.verdicts == {FR31A_ID: "HALT"} and e["kernel"]["constraint_reason"] in ("MIN_TRADES", "NO_TRADES")
     assert setup.registry().status(FAMILY) == "HALT"
@@ -1533,8 +1535,9 @@ def test_gefs_twin_build_failure_never_aborts_the_spent_look(tmp_path, monkeypat
     monkeypatch.setattr(W, "build_opportunities_from_ladders", flaky)
     out = H.run_score(genome_id=FR31A_ID, unseal_tag=TAG, root=root, paths=setup.paths, n_boot=200, out=lambda s: None)
     g2 = out.doc["result"]["genomes"][FR31A_ID]["gates"]["gefs_twin_ge0"]
-    assert g2["pass"] is False and "gefs twin UNAVAILABLE (EVAnalysisError: no forecast vintage" in g2["note"]
-    assert out.verdicts == {FR31A_ID: "HALT"} and out.report_path.exists()
+    # decision 12 (2026-09-06): an unavailable twin passes #2 by the disqualifier route, and the look is never aborted
+    assert g2["pass"] is True and "gefs twin UNAVAILABLE (EVAnalysisError: no forecast vintage" in g2["note"]
+    assert set(out.verdicts) == {FR31A_ID} and out.verdicts[FR31A_ID] in ("RATIFIED", "HALT") and out.report_path.exists()
 
 
 def test_forecast_archive_dir_is_selected_before_the_unseal(tmp_path):  # [RT2-4b]

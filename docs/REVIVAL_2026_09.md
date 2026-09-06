@@ -1,4 +1,4 @@
-# Revival plan — 2026-09 (PROPOSED, awaiting owner ratification)
+# Revival plan — 2026-09 (RATIFIED 2026-09-06 — sections 4 and 5 as written)
 
 Produced 2026-08-31 by a 21-agent adversarially-verified review (4 repo
 deep-reads, 6 web research agents, screening, 2 refutation lenses per
@@ -72,6 +72,8 @@ source on the Phase 2 tape and is the source the §9.3 pre-registration
 contemplates freezing). Once ratified, this line is amended in place with
 the date and the word RATIFIED, and the M1 run uses it verbatim.
 
+RATIFIED 2026-09-06
+
 Form of the ratification line (added 2026-09-06, tightened the same day
 after red-team round 2, so the factory's unseal check and the owner agree
 on it; nothing is ratified by this note): the sealed-root commands
@@ -99,6 +101,15 @@ M1 = PASS requires ALL of:
    is provisional until R5 accrues).
 
 Any single failure = HALT #3.
+
+RATIFIED 2026-09-06
+
+Owner rulings taken with the ratification (PRD_STRATEGY_FACTORY section 9,
+decisions 12 and 13): for #2, where no gefs vintage exists for the scored
+dates (the gefs archive ended 2026-07-27) the pre-selection σ≤4F cap and the
+absence of a gefs vintage ARE the ex-ante disqualifier, and `factory.py score`
+passes #2 by that route and says so; for #6, "≥1 cold-season month" means 28
+distinct target dates in November–March after the scored `as_of`.
 
 ## 6. Standing risks and open items
 

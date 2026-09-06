@@ -544,9 +544,10 @@ accumulate an admissible paper record toward FR-5.2.
 HANDOFF §3 rule 9; nothing above is re-scoped).** Branch `sprint/f4-holdouts-promotion`.
 FR-F4.1 and FR-F4.2 are implemented and adversarially verified on the dev box (three
 implementers, five red-team passes, every BROKEN finding fixed and re-pinned). The phase
-cannot close because its preconditions are the owner's, not the code's: no `RATIFIED <date>`
-line exists in `docs/REVIVAL_2026_09.md`, family #1 is CLOSED (terminal) so no genome is
-PROPOSED, and the R3 root holds five dates. Runbook: `docs/FACTORY.md`.
+cannot close because its preconditions are the owner's, not the code's: family #1 is CLOSED
+(terminal) so no genome is PROPOSED, and the R3 root holds five dates. *(Later the same day:
+`docs/REVIVAL_2026_09.md` was RATIFIED 2026-09-06 and decisions 11–13 taken; the unseal
+still refuses for want of a PROPOSED genome.)* Runbook: `docs/FACTORY.md`.
 - Criterion 1 (unseal log once per family; builder still refuses; truth filter < 10 %):
   **NOT MET / MET / MET.** `factory.py holdout --finalists <file> --unseal RATIFIED-<date>`
   (`src/factory/holdout.py`) REFUSES today: no ratified line, family CLOSED. The lock is
@@ -728,18 +729,18 @@ is set by dates of tape, not by compute.
 10. **Taken 2026-09-05 — do not reopen without new evidence:** options that edit
     `src/core/risk_manager.py` to relieve the cold-start sizing ceiling are REJECTED
     (see Phase F4 above and `reports/factory/sizing_cold_start_2026-09-05.md`).
-11. **Capture kill date (open, no default).** `MP_CAPTURE_KILL_DATE` defaults to 2026-09-15
+11. **Capture kill date — TAKEN 2026-09-06: extended to 2026-10-31** (systemd drop-in on alcyone, before any score). `MP_CAPTURE_KILL_DATE` defaults to 2026-09-15
     (`deploy/spark/ladder_capture.sh:31`), capping the R3 root at 15 dates × 4 cities; FR-F4.1
     and REVIVAL M1 name a Sept–Oct root and the lane asserts ≥40 units. Nothing has been
     scored on the root, so extending it now, on these stated grounds, does not break
     pre-registration (FACTORY_ROADMAP.md:16); extending it after a score would. Recommended:
     set the systemd override to 2026-10-31 before 2026-09-16 and record it here.
-12. **R3 #2 on Sept–Oct (open).** The gefs archive ends 2026-07-27, so the gefs twin cannot be
+12. **R3 #2 on Sept–Oct — TAKEN 2026-09-06: the no-gefs/σ-cap route IS the ex-ante disqualifier** (`R3_2_DISQUALIFIER_RATIFIED`). The gefs archive ends 2026-07-27, so the gefs twin cannot be
     built and `score` fails R3 #2 as `gefs twin UNAVAILABLE` by construction. Either backfill
     gefs for Sept–Oct into `data/forecast_archive/` before scoring, or ratify that the
     pre-selection σ≤4F cap / the absence of a gefs vintage is the ex-ante disqualifier
     REVIVAL §5 #2 allows. Not the scorer's call.
-13. **R5 cold-season definition (unratified constants).** `score --r5-check` re-evaluates only
+13. **R5 cold-season definition — TAKEN 2026-09-06: 28 distinct target dates in Nov–Mar** (`COLD_SEASON_RATIFIED`). `score --r5-check` re-evaluates only
     REVIVAL §5 #6 after the recorded `as_of` using `COLD_SEASON_MONTHS = (11,12,1,2,3)` and
     `COLD_SEASON_MIN_DATES = 28` distinct target dates. "≥1 cold-season month" is quantified
     nowhere in REVIVAL, the architecture or this PRD; every `evidence.r5` block says so.

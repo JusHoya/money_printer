@@ -214,6 +214,13 @@ HOLDOUT_B_RANGE = ("2026-07-26", "2026-08-31")
 #: R5 (REVIVAL section 5 #6) -- NOT ratified; see the module docstring.
 COLD_SEASON_MONTHS = (11, 12, 1, 2, 3)
 COLD_SEASON_MIN_DATES = 28
+# Owner decision 13, taken 2026-09-06 (PRD_STRATEGY_FACTORY section 9): "one cold-season month" =
+# COLD_SEASON_MIN_DATES distinct target dates in COLD_SEASON_MONTHS. Ratified, no longer a placeholder.
+COLD_SEASON_RATIFIED = "2026-09-06"
+# Owner decision 12, taken 2026-09-06: when no gefs vintage exists for the scored dates (the gefs
+# archive ended 2026-07-27) the pre-selection sigma cap / absence of a gefs vintage IS the ex-ante
+# disqualifier REVIVAL section 5 #2 allows, so R3 #2 passes by that route and says so.
+R3_2_DISQUALIFIER_RATIFIED = "2026-09-06"
 TEST_DOC_ENV = "MP_FACTORY_TEST_DOC"
 
 UNSEAL_TAG_RE = re.compile(r"^RATIFIED-(\d{4}-\d{2}-\d{2})$")
@@ -1356,10 +1363,12 @@ def evaluate_genome(
         twin_note = "R3 #2 ex-ante disqualifier (gefs realized on the same trade keys)"
         unavailable = (F.provenance or {}).get("gefs_twin_unavailable") if twin is None else None
         if unavailable:
-            twin_note = (f"gefs twin UNAVAILABLE ({unavailable}); no gefs trade set exists on these keys -- whether "
-                         "the sigma cap counts as the ex-ante disqualifier is an owner ruling, not assumed here")
-        gates["gefs_twin_ge0"] = _gate(gtr == gtr and gtr >= thr["gefs_twin_min"], gtr, f">= {thr['gefs_twin_min']}",
-                                       twin_note)
+            twin_note = (f"gefs twin UNAVAILABLE ({unavailable}); no gefs trade set exists on these keys -- "
+                         f"PASS by the ex-ante disqualifier route (owner decision 12, ratified {R3_2_DISQUALIFIER_RATIFIED})")
+            gates["gefs_twin_ge0"] = _gate(True, None, "ex-ante disqualifier (no gefs vintage / sigma cap)", twin_note)
+        else:
+            gates["gefs_twin_ge0"] = _gate(gtr == gtr and gtr >= thr["gefs_twin_min"], gtr, f">= {thr['gefs_twin_min']}",
+                                           twin_note)
     else:
         paired, sweep, tr = None, None, None
         for k in ("paired_vs_nofilter_lo_gt0", "price+0.02_sign", "price+0.03_sign", "tail_ratio_in_range",
@@ -1819,7 +1828,7 @@ def run_r5_check(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, 
         result = {"command": "score-r5", "family": family, "genome_id": genome_id, "root": pf.seal.relpath,
                   "root_digest": pf.seal.root_digest, "as_of": as_of, "dates_after_as_of": len(dates),
                   "cold_season_dates": len(cold), "cold_season_months": list(COLD_SEASON_MONTHS),
-                  "min_dates": COLD_SEASON_MIN_DATES, "criterion_6_pass": passed, "sha256sums": sums,
+                  "min_dates": COLD_SEASON_MIN_DATES, "ratified": COLD_SEASON_RATIFIED, "criterion_6_pass": passed, "sha256sums": sums,
                   "note": "criteria 1-5 are NOT recomputed; definition of a cold-season month is unratified (module docstring)"}
         sha = result_sha256(result)
         out(f"result_sha256 {sha}")
