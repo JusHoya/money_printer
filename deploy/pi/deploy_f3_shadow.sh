@@ -458,9 +458,11 @@ if docker exec "$CID" test -r "$REGISTRY_IN_CONTAINER"; then
   echo "  container $REGISTRY_IN_CONTAINER = readable ($(docker exec "$CID" sh -c "wc -l < $REGISTRY_IN_CONTAINER" | tr -d ' \r') lines; read-only bind)"
 else
   log "WARNING: $REGISTRY_IN_CONTAINER is NOT readable in the container. Shadow is unaffected,"
-  log "         but paper mode would be REFUSED as DEPLOYMENT MISCONFIGURED. Check the"
-  log "         '../../reports/factory:/app/reports/factory:ro' volume in $HERE/docker-compose.yml"
-  log "         and that this checkout really has the tracked reports/factory/registry.jsonl."
+  log "         but paper mode would be REFUSED as DEPLOYMENT MISCONFIGURED. The bind is of the"
+  log "         DIRECTORY, not of registry.jsonl -- grep $HERE/docker-compose.yml for"
+  log "         'reports/factory:' and check the"
+  log "         '../../reports/factory:/app/reports/factory:ro' volume is there, and that this"
+  log "         checkout really has the tracked reports/factory/registry.jsonl."
 fi
 
 GENOME_LOG="$(poll_genome_log "$CID")" || die \

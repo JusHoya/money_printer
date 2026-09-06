@@ -484,5 +484,16 @@ live process does when it misses an hour. `GenomeStrategy` now enforces:
   also requires the family's current status in the tracked
   `reports/factory/registry.jsonl` to be PROPOSED or RATIFIED and equal to the
   spec's `registry_status`; `spec_hash` is integrity, not authorization.
+  **The sandbox needs a `reports/factory` bind to read that file at all.**
+  `.dockerignore` keeps `reports/` out of the build context on purpose — an image
+  is a build-time snapshot, and a family closed after the build would still read
+  PROPOSED — so `deploy/pi/docker-compose.yml` mounts
+  `../../reports/factory:/app/reports/factory:ro` (the DIRECTORY, not
+  `registry.jsonl`: a `git pull` renames a new inode over the file and a
+  single-file bind would go stale). Recreate the container after pulling a branch
+  that adds it. Without the bind, paper mode refuses with **DEPLOYMENT
+  MISCONFIGURED** — that is not a verdict on the family. Shadow mode is
+  unaffected either way and only logs a warning; `deploy_f3_shadow.sh` reports
+  whether `/app/reports/factory/registry.jsonl` is readable without gating on it.
 - **Empty-ask sentinel.** A missing/zero ask from the poll is treated as no quote
   (non-executable) instead of a 0.00 quote.

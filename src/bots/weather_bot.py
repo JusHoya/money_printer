@@ -67,6 +67,12 @@ GENOME_STRATEGY_KEY = "genome"
 #: Repo-relative path of the governance record the paper gate reads (POSIX form; it is
 #: also the container-relative path under /app, which is what the compose bind targets).
 REGISTRY_RELPATH = "reports/factory/registry.jsonl"
+#: What the compose bind that delivers REGISTRY_RELPATH is actually a bind OF -- the
+#: DIRECTORY, never the file (a `git pull` renames a new inode over a tracked file, and a
+#: single-file bind would stay pinned to the old one). Operator-facing messages must name
+#: THIS, because it is the string that greps in deploy/pi/docker-compose.yml; grepping for
+#: registry.jsonl there finds nothing.
+REGISTRY_BIND_RELPATH = "reports/factory"
 
 
 class RegistryUnavailable(RuntimeError):
@@ -310,15 +316,35 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
             # would stay silent until the day someone flips to paper -- and would then
             # refuse for a reason that LOOKS like a governance decision. Say it now.
             # Log-only: the genome still loads and still runs in shadow.
+            #
+            # This probe is a DIAGNOSTIC and must be incapable of deciding whether the
+            # genome loads, under ANY exception. Catching only RegistryUnavailable was
+            # not enough (F4 red team, 2026-09-06): _registry_status opens the file with
+            # encoding="utf-8", so a registry that exists but is not valid UTF-8 raised
+            # UnicodeDecodeError -- not an OSError, so not converted -- which escaped into
+            # __init__'s broad handler and REFUSED the genome on the shadow path maia is
+            # running today, turning a readable-registry fault into a failed deploy.
+            # _registry_status now converts that class of fault too; this stays broad so
+            # no future edit to it, or to the import it does, can regress the same way.
             try:
                 self._registry_status(spec.family)
             except RegistryUnavailable as exc:
                 logger.warning(
                     "[Weather] DEPLOYMENT MISCONFIGURED (shadow mode is unaffected): %s. "
                     "Paper mode would be REFUSED here for a deployment reason, not a governance one. "
-                    "The sandbox gets this file from the read-only %s bind in "
-                    "deploy/pi/docker-compose.yml; recreate the container to pick it up.",
-                    exc, REGISTRY_RELPATH,
+                    "The sandbox gets this file from the read-only %s directory bind in "
+                    "deploy/pi/docker-compose.yml (grep that file for '%s:'); "
+                    "recreate the container to pick it up.",
+                    exc, REGISTRY_BIND_RELPATH, REGISTRY_BIND_RELPATH,
+                )
+            except Exception as exc:  # noqa: BLE001 -- a diagnostic NEVER decides whether the genome loads
+                logger.warning(
+                    "[Weather] DEPLOYMENT MISCONFIGURED, registry probe failed unexpectedly "
+                    "(%s: %s) -- "
+                    "shadow mode is unaffected and the strategy still loaded; paper mode would "
+                    "need this fixed. The sandbox gets %s from the read-only %s directory bind "
+                    "in deploy/pi/docker-compose.yml.",
+                    type(exc).__name__, exc, REGISTRY_RELPATH, REGISTRY_BIND_RELPATH,
                 )
         else:
             try:
@@ -329,16 +355,19 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                 logger.error(
                     "[Weather] GenomeStrategy REFUSED paper mode: DEPLOYMENT MISCONFIGURED -- %s. "
                     "This is not a verdict on family %s; the paper gate could not read its CURRENT "
-                    "status. The sandbox gets this file from the read-only %s bind in "
-                    "deploy/pi/docker-compose.yml -- recreate the container "
+                    "status. The sandbox gets %s from the read-only %s DIRECTORY bind in "
+                    "deploy/pi/docker-compose.yml (grep that file for '%s:' -- the bind is of the "
+                    "directory, not of registry.jsonl) -- recreate the container "
                     "(`docker compose -f deploy/pi/docker-compose.yml up -d`) so the bind exists, "
-                    "and check the checkout really has the tracked file. Running V2 only.",
-                    exc, spec.family, REGISTRY_RELPATH,
+                    "and check the checkout really has the tracked file and that it is UTF-8 text. "
+                    "Running V2 only.",
+                    exc, spec.family, REGISTRY_RELPATH, REGISTRY_BIND_RELPATH, REGISTRY_BIND_RELPATH,
                 )
                 self.genome_spec = None
                 self.genome_refused_reason = (
-                    f"paper mode refused: DEPLOYMENT MISCONFIGURED -- {exc}; the registry bind is "
-                    f"missing from this container, so family {spec.family} could not be checked"
+                    f"paper mode refused: DEPLOYMENT MISCONFIGURED -- {exc}; the {REGISTRY_BIND_RELPATH} "
+                    f"registry bind is missing or unreadable in this container, so family "
+                    f"{spec.family} could not be checked"
                 )
                 return None
             if registry_status not in ("PROPOSED", "RATIFIED") or registry_status != spec.registry_status:
@@ -394,9 +423,14 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
 
         Returns the last status recorded for ``family``, or ``None`` when the registry was
         read and simply does not mention it. Raises :class:`RegistryUnavailable` when the
-        file itself cannot be read -- that is a broken deployment, not a governance answer,
-        and conflating the two (both used to be ``None``) hid the fact that the sandbox had
-        no copy of the file at all. Callers must fail closed on both, but say different things.
+        file cannot be read OR cannot be parsed as the UTF-8 JSONL it is supposed to be --
+        that is a broken deployment, not a governance answer, and conflating the two (both
+        used to be ``None``) hid the fact that the sandbox had no copy of the file at all.
+        Callers must fail closed on both, but say different things.
+
+        ``RegistryUnavailable`` is the ONLY exception this raises for a bad registry: a
+        caller that handles it has handled every registry fault. That matters because one
+        caller is a shadow-mode DIAGNOSTIC whose failure must not refuse the genome.
 
         The file is tracked in git and reaches the sandbox through the read-only
         ``reports/factory`` bind in ``deploy/pi/docker-compose.yml``. It is deliberately NOT
@@ -425,9 +459,17 @@ class WeatherBot(Bot, TickerResolverMixin, SignalProcessorMixin):
                         status = "OPEN"
                     elif line.get("event") == "transition":
                         status = line.get("status")
-        except OSError as exc:
-            # IsADirectoryError lands here too: docker creates a DIRECTORY at a bind
-            # target whose host path is missing, which is a misconfiguration, not a status.
+        except Exception as exc:  # noqa: BLE001 -- see below; every fault here is a deployment fault
+            # OSError: missing, unreadable, or -- IsADirectoryError -- the DIRECTORY docker
+            # creates at a bind target whose host path is missing.
+            # UnicodeDecodeError (a ValueError, NOT an OSError): the file exists but is not
+            # the UTF-8 text this opens it as. Until 2026-09-06 that escaped uncaught, and
+            # the SHADOW diagnostic probe added the same day turned it into a refused genome
+            # on the deployed path (F4 red team). Anything else raised while walking the
+            # lines -- a JSON value that is not an object, so no .get -- is likewise a
+            # corrupt governance record, i.e. a broken deployment.
+            # Every one of them means the same thing to a caller: this function could not
+            # determine a status, so it must NOT be allowed to look like one.
             raise RegistryUnavailable(
                 f"cannot read the family registry {REGISTRY_RELPATH} at {path} "
                 f"({type(exc).__name__}: {exc})"

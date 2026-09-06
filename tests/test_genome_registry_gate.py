@@ -43,7 +43,12 @@ if str(REPO_ROOT) not in sys.path:
 
 import src.bots.weather_bot as weather_bot  # noqa: E402
 import src.factory.promoted as P  # noqa: E402
-from src.bots.weather_bot import REGISTRY_RELPATH, RegistryUnavailable, WeatherBot  # noqa: E402
+from src.bots.weather_bot import (  # noqa: E402
+    REGISTRY_BIND_RELPATH,
+    REGISTRY_RELPATH,
+    RegistryUnavailable,
+    WeatherBot,
+)
 from src.utils.logger import logger as mp_logger  # noqa: E402
 
 FAMILY = "weather/gfs_mex/taker/v1"
@@ -51,6 +56,21 @@ FAMILY_V2 = "weather/gfs_mex/taker/v2"  # the family F4 opens; the machinery mus
 COMPOSE = REPO_ROOT / "deploy" / "pi" / "docker-compose.yml"
 DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 CONTAINER_APP_DIR = "/app"
+
+
+def _write_corrupt_registry(root: Path) -> Path:
+    """A registry that EXISTS and is readable as bytes but is not valid UTF-8.
+
+    ``_registry_status`` opens with ``encoding="utf-8"``, so this raises ``UnicodeDecodeError``
+    -- a ``ValueError``, *not* an ``OSError``.  That is the concrete fault the 2026-09-06 red
+    team drove through the constructor to refuse the genome on the deployed shadow path.
+    """
+    path = root / Path(REGISTRY_RELPATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b'{"event": "family", "family": "' + FAMILY_V2.encode() + b'", "status": "\xff\xfe OPEN"}\n'
+    )
+    return path
 
 
 def _write_registry(root: Path, family: str, status: str) -> Path:
@@ -115,6 +135,33 @@ class TestRegistryReadDiagnosis:
         _write_registry(root, FAMILY_V2, status)
         monkeypatch.setattr(P, "REPO_ROOT", str(root))
         assert WeatherBot._registry_status(FAMILY_V2) == status
+
+    def test_a_registry_that_is_not_utf8_is_a_deployment_fault_not_a_raw_crash(
+        self, tmp_path, monkeypatch
+    ):
+        # BEFORE: only OSError was converted, so a file that exists but is not UTF-8 raised
+        # UnicodeDecodeError straight out of this function -- a fault class no caller was
+        # written to handle. It is the same kind of answer as "the file is missing": the
+        # gate could not determine a status, and that must never be able to look like one.
+        root = tmp_path / "app"
+        _write_corrupt_registry(root)
+        monkeypatch.setattr(P, "REPO_ROOT", str(root))
+        with pytest.raises(RegistryUnavailable) as exc:
+            WeatherBot._registry_status(FAMILY_V2)
+        assert "UnicodeDecodeError" in str(exc.value), exc.value  # keeps the real cause visible
+
+    def test_a_registry_line_that_is_not_a_json_object_is_a_deployment_fault(
+        self, tmp_path, monkeypatch
+    ):
+        # A corrupt governance record is a broken deployment too: `["family", ...]` parses
+        # as JSON but has no .get, which used to escape as a bare AttributeError.
+        root = tmp_path / "app"
+        path = root / Path(REGISTRY_RELPATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('["event", "family"]\n', encoding="utf-8")
+        monkeypatch.setattr(P, "REPO_ROOT", str(root))
+        with pytest.raises(RegistryUnavailable):
+            WeatherBot._registry_status(FAMILY_V2)
 
     def test_the_real_checkout_still_reads_family_one_as_closed(self):
         # The tracked file in THIS checkout; guards the fixture against drifting from reality.
@@ -216,6 +263,64 @@ class TestPaperGateEndToEnd:
         assert any("MISCONFIGURED" in m and REGISTRY_RELPATH in m.replace(os.sep, "/")
                    for m in mp_caplog.messages), mp_caplog.messages
 
+    def test_a_non_utf8_registry_cannot_refuse_the_shadow_genome(
+        self, tmp_path, monkeypatch, mp_caplog
+    ):
+        # THE 2026-09-06 REGRESSION. The shadow probe caught RegistryUnavailable only, and
+        # _registry_status opened the file as UTF-8: a registry that EXISTS but is not UTF-8
+        # raised UnicodeDecodeError, which escaped the probe into WeatherBot.__init__'s broad
+        # `except Exception` and REFUSED the genome -- on the exact path maia runs today, so
+        # deploy_f3_shadow.sh's loaded-line check would have failed a deploy that used to
+        # pass. Before the probe existed no registry fault could touch the shadow branch at
+        # all; a DIAGNOSTIC must not be able to change whether the genome loads.
+        root = tmp_path / "app"
+        _write_corrupt_registry(root)
+        monkeypatch.setattr(P, "REPO_ROOT", str(root))
+        bot = self._shadow_bot(tmp_path, monkeypatch)
+        assert list(bot.strategies) == ["genome", "weather"], bot.genome_refused_reason
+        assert bot.genome_shadow is True and bot.genome_refused_reason is None
+        # It is still SAID -- log-only, and never in words the deploy reads as a verdict.
+        assert any("MISCONFIGURED" in m for m in mp_caplog.messages), mp_caplog.messages
+        assert not any("GenomeStrategy REFUSED" in m for m in mp_caplog.messages), mp_caplog.messages
+
+    def test_no_probe_failure_of_any_kind_can_refuse_the_shadow_genome(
+        self, tmp_path, monkeypatch, mp_caplog
+    ):
+        # Structural version of the test above: the UTF-8 case is one instance, and the probe
+        # must be inert under ANY exception -- a decode error, a permissions oddity, a future
+        # edit to _registry_status or to the import it does. Not "every fault we thought of".
+        root = tmp_path / "app"
+        _write_registry(root, FAMILY_V2, "CLOSED")
+        monkeypatch.setattr(P, "REPO_ROOT", str(root))
+
+        def _boom(family):
+            raise RuntimeError("probe exploded in a way nobody anticipated")
+
+        monkeypatch.setattr(WeatherBot, "_registry_status", staticmethod(_boom))
+        bot = self._shadow_bot(tmp_path, monkeypatch)
+        assert list(bot.strategies) == ["genome", "weather"], bot.genome_refused_reason
+        assert bot.genome_shadow is True and bot.genome_refused_reason is None
+        blob = " ".join(mp_caplog.messages)
+        assert "probe exploded" in blob, mp_caplog.messages   # surfaced, not swallowed
+        assert "GenomeStrategy REFUSED" not in blob, mp_caplog.messages
+
+    def test_a_non_utf8_registry_still_fails_paper_closed_with_the_deployment_message(
+        self, tmp_path, monkeypatch, mp_caplog
+    ):
+        # The paper gate must keep failing CLOSED on the same fault -- but as a named
+        # deployment fault, not as an unhandled UnicodeDecodeError reported as "could not
+        # be built", which reads like a broken spec.
+        root = tmp_path / "app"
+        _write_corrupt_registry(root)
+        monkeypatch.setattr(P, "REPO_ROOT", str(root))
+        bot = _paper_bot(tmp_path, monkeypatch)
+        assert list(bot.strategies) == ["weather"] and bot.genome_spec is None
+        blob = " ".join(m for m in mp_caplog.messages if "REFUSED" in m)
+        assert "MISCONFIGURED" in blob, blob
+        assert "UnicodeDecodeError" in blob, blob        # says which fault, not just "unreadable"
+        assert "could not be built" not in blob, blob    # not mistaken for a bad spec
+        assert "MISCONFIGURED" in (bot.genome_refused_reason or "")
+
     def test_the_deployed_shadow_path_is_unchanged_and_silent_once_the_bind_exists(
         self, tmp_path, monkeypatch, mp_caplog
     ):
@@ -265,11 +370,15 @@ class TestSandboxDeploymentServesTheRegistry:
         assert resolved == (REPO_ROOT / "reports" / "factory").resolve(), resolved
         assert resolved.is_dir(), resolved
 
-    def test_every_compose_invocation_resolves_the_relative_bind_to_this_checkout(self):
+    def test_the_two_scripts_that_deploy_the_sandbox_name_the_compose_file_explicitly(self):
         # Compose resolves a relative host path against the PROJECT directory, which is the
-        # directory of the first -f file. Every invocation in the repo passes
-        # -f <...>/deploy/pi/docker-compose.yml, so `../../reports/factory` is always the
-        # checkout the deploy just `git pull`ed -- never some other tree, never a copy.
+        # directory of the first -f file. Both scripts that bring the sandbox up pass
+        # -f <...>/deploy/pi/docker-compose.yml, so `../../reports/factory` is the checkout
+        # the deploy just `git pull`ed -- never some other tree, never a copy.
+        #
+        # SCOPE: these two scripts only. The repo-wide invariant is the next test; a bare
+        # `docker compose up -d` run from inside deploy/pi (deploy/README.md "Bring-up
+        # order") is also safe -- its project directory is deploy/pi either way.
         seen = 0
         for path in (REPO_ROOT / "deploy" / "pi" / "deploy_f3_shadow.sh",
                      REPO_ROOT / "deploy" / "pi" / "bootstrap_maia.sh"):
@@ -281,6 +390,49 @@ class TestSandboxDeploymentServesTheRegistry:
                 assert "--project-directory" not in line, \
                     f"{path.name}: --project-directory re-bases the relative bind: {line}"
         assert seen >= 2, f"found only {seen} compose invocations to check"
+
+    def test_nothing_in_the_repo_re_bases_the_compose_project_directory(self):
+        # The repo-wide half. `--project-directory` is the ONE flag that decouples the
+        # project directory from the compose file's own directory, which is what anchors
+        # `../../reports/factory` to this checkout; with it, the sandbox could silently read
+        # some other tree's registry (or nothing). Greppable with no false positives, so
+        # this scans scripts AND docs -- a copy-pasteable command in a runbook is an
+        # invocation as much as a script line is.
+        offenders = []
+        for path in REPO_ROOT.rglob("*"):
+            if path.suffix not in {".sh", ".md", ".yml", ".yaml", ".py"} or not path.is_file():
+                continue
+            if any(part in {".git", ".claude", "node_modules", ".venv"} for part in path.parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for n, line in enumerate(text.splitlines(), 1):
+                if "--project-directory" in line and "docker" in text:
+                    offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{n}: {line.strip()}")
+        assert not offenders, "compose project directory re-based:\n" + "\n".join(offenders)
+
+    def test_the_operator_messages_name_a_string_that_actually_greps_in_the_compose_file(
+        self, tmp_path, monkeypatch, container_shape, mp_caplog
+    ):
+        # The messages used to tell the operator to look for the read-only
+        # `reports/factory/registry.jsonl` bind. The bind is of the DIRECTORY, so an
+        # operator grepping docker-compose.yml for registry.jsonl finds nothing and
+        # concludes the bind is missing when it is present.
+        # The premise, read off the parsed volume ENTRIES (comments may name the file; the
+        # bind itself may not): registry.jsonl is not what compose declares, the directory is.
+        entries = self._sandbox_volumes()
+        assert any(REGISTRY_BIND_RELPATH + ":" in v for v in entries), entries
+        assert not any(REGISTRY_RELPATH in v for v in entries), \
+            f"a volume entry now names registry.jsonl; this test's premise is stale: {entries}"
+        bot = _paper_bot(tmp_path, monkeypatch)          # container shape -> the loud refusal
+        assert bot.genome_spec is None                    # still fail-closed
+        blob = " ".join(m for m in mp_caplog.messages if "MISCONFIGURED" in m)
+        assert blob, mp_caplog.messages
+        assert REGISTRY_BIND_RELPATH in blob.replace(os.sep, "/"), blob
+        # and it says the bind is of the directory, so nobody greps for the file
+        assert "directory" in blob.lower(), blob
 
     def test_the_deploy_reports_the_registry_bind_without_gating_on_it(self):
         # A shadow deploy does not need the registry, so proving the bind must not be able
@@ -297,10 +449,13 @@ class TestSandboxDeploymentServesTheRegistry:
         # "GenomeStrategy REFUSED". The new shadow-mode warning is a DIAGNOSTIC on a
         # working deploy, so it must not carry that token.
         src = (REPO_ROOT / "src" / "bots" / "weather_bot.py").read_text(encoding="utf-8")
-        warn = src.split("shadow mode is unaffected", 1)
-        assert len(warn) == 2, "premise changed: the shadow-mode registry warning is gone"
-        line = "shadow mode is unaffected" + warn[1].split('",', 1)[0]
-        assert "GenomeStrategy" not in line, f"would be read as a REFUSED/loaded line: {line}"
+        chunks = src.split("shadow mode is unaffected")[1:]
+        # There are two: RegistryUnavailable, and the catch-all that keeps the probe from
+        # ever deciding whether the genome loads. BOTH are diagnostics on a working deploy.
+        assert len(chunks) >= 2, "premise changed: a shadow-mode registry warning is gone"
+        for chunk in chunks:
+            line = "shadow mode is unaffected" + chunk.split('",', 1)[0]
+            assert "GenomeStrategy" not in line, f"would be read as a REFUSED/loaded line: {line}"
 
     def test_the_bind_is_a_directory_so_a_git_rename_is_visible(self):
         # git updates a tracked file by writing a temp file and renaming over it: a NEW
