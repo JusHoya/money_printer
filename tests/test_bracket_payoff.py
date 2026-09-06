@@ -943,6 +943,35 @@ def _regex_anchors_on_a_direction_letter(pattern: str) -> bool:
     return body[0].isalpha() and body[0].lower() in DIRECTION_LETTERS
 
 
+def _is_direction_lookup_table(node) -> bool:
+    """A dict literal that maps DIRECTION LETTERS AND NOTHING ELSE.
+
+    ``{"B": True, "T": False}`` is the lookup-table spelling of suffix
+    inference and must be caught. Merely *containing* a one-character key is
+    not enough, and the looser rule this replaces produced two false positives
+    on real code -- ``multiplicity.py``'s ``{"n":.., "mean":.., "se":.., "t":..}``
+    (``t`` is a t-statistic) and ``folds.py``'s ``CAMPAIGN_CALENDAR``, keyed by
+    campaign labels ``A``/``B``/``C``/``ALL69``. Neither decides a contract's
+    direction, and a guard that cries wolf on them gets muted, which is how a
+    real one gets through.
+
+    So: EVERY key must be a one-character string, and the letters they spell
+    must be a non-empty subset of ``{b, t}``. A table with an ``A`` or a
+    ``mean`` in it is not a direction table.
+    """
+    keys = list(node.keys)
+    if not keys:
+        return False
+    letters = set()
+    for key in keys:
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            return False  # **spread, or a non-string key -- not a letter table
+        if len(key.value) != 1:
+            return False
+        letters.add(key.value.lower())
+    return bool(letters) and letters <= DIRECTION_LETTERS
+
+
 def _suffix_letter_probes(path):
     """(lineno, snippet) for every direction-letter probe in a module.
 
@@ -986,7 +1015,7 @@ def _suffix_letter_probes(path):
                 if any(_is_direction_letter(o) for o in operands):
                     record(node)
         elif isinstance(node, ast.Dict):
-            if any(_is_direction_letter(k) for k in node.keys):
+            if _is_direction_lookup_table(node):
                 record(node)
 
     return [(path, lineno, snippet) for lineno, snippet in sorted(hits.items())]
@@ -1092,6 +1121,12 @@ LEGITIMATE_SNIPPETS = [
     ("weather_strategy-194", 'city_key = symbol.split("-")[0]'),
     ("ml_weather-85", 'city_key = symbol.split("-")[0]'),
     ("month-lookup", '_MONTHS = {"JAN": 1, "FEB": 2, "MAR": 3}'),
+    # Both verbatim from src/factory/, both flagged by the pre-2026-09-06 dict rule.
+    ("multiplicity-237", 'return {"n": n, "mean": mean, "se": se, "t": t}'),
+    ("folds-campaign-labels", 'return {"A": 1, "B": 2, "C": 3, "ALL69": 4}'),
+    # and the same table with the multi-character label removed: still campaign
+    # labels, still not a direction table, because "a"/"c" are not B/T.
+    ("folds-campaign-labels-single-char", 'return {"A": 1, "B": 2, "C": 3}'),
     ("series-prefix", 'is_weather = symbol.upper().startswith("KXHIGH")'),
 ]
 
