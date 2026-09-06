@@ -25,13 +25,15 @@ The commands
 Unseal protocol (each step pinned by ``tests/test_factory_holdout.py``)
 ------------------------------------------------------------------------
 1. ``--unseal RATIFIED-<date>`` is mandatory and ``<date>`` must be
-   ratified in ``docs/REVIVAL_2026_09.md``. [RT1-2] The ONLY form recognised
-   is a whole line at column 0 reading ``RATIFIED YYYY-MM-DD`` (optionally
-   followed by whitespace and a note), outside ``` fences -- not "not
-   RATIFIED ...", not an indented or quoted proposal, not an HTML comment.
-   ``--revival-doc`` exists for tests: a doc outside the repo root is
-   refused unless ``MP_FACTORY_TEST_DOC=1``; the unseal line records the
-   doc's repo-relative path and sha256 either way.
+   ratified in ``docs/REVIVAL_2026_09.md``. [RT1-2, RT2-2] The ONLY form
+   recognised is a whole line reading exactly ``RATIFIED YYYY-MM-DD`` --
+   column 0, nothing after the date (trailing prose negates) -- outside
+   ``` / ~~~ fences, ``<pre>`` blocks and ``<!-- -->`` comment spans; and
+   it is read from the COMMITTED content (``git show HEAD:``): a working
+   copy that differs from HEAD, or an uncommitted/untracked doc, is
+   refused. ``--revival-doc`` exists for tests: with ``MP_FACTORY_TEST_DOC=1``
+   the disk file is read as-is (a doc outside the repo is refused without
+   it); the unseal line records the doc's repo-relative path and sha256.
 2. The root must carry ``SEALED`` + ``SHA256SUMS`` + ``manifest.json``;
    every ``<date>.csv`` stem must postdate the development set. [RT1-1iv]
    Root PURPOSE is enforced from manifest metadata (never labels):
@@ -40,17 +42,24 @@ Unseal protocol (each step pinned by ``tests/test_factory_holdout.py``)
 3. Finalists: <= 3 per family, each PROPOSED (on a PROPOSED line of a live
    family, not yet RATIFIED). Family #1 is CLOSED -> refused; a rerun is a
    new family (``.../v2``).
-4. Budget: <= 3 unseals per calendar quarter (UTC). [RT1-1] The once-lock:
-   a root's identity is ``root_digest`` = sha256 over the PARSED
-   ``SHA256SUMS`` entries (sorted ``hash  path`` pairs -- comments and
-   whitespace cannot change it) plus the manifest's ``date_range`` and
-   series list; the lock consults BOTH ``unseal_log.jsonl`` AND every
-   registry line's evidence (``holdout`` / ``r3`` / ``r5`` blocks carry
-   ``root_digest``), so deleting the log or the report does not reopen a
-   look; and both files are checked for append-only integrity at the
-   start of every command: the content committed at ``HEAD`` must be a
-   byte prefix of the on-disk file (a missing on-disk file while HEAD has
-   one is a refusal too).
+4. Budget: <= 3 unseals per calendar quarter (UTC). [RT1-1, RT2-1] The
+   once-lock is PER PURPOSE, not per root digest: ``holdout`` is once per
+   FAMILY (holdout-B is one purpose; any copy, re-pull or edit of the root
+   is the same look), ``score`` once per GENOME (the R3 purpose), and
+   ``--r5-check`` once per genome. ``root_digest`` (sha256 over the PARSED
+   ``SHA256SUMS`` entries + manifest ``date_range`` + series) is RECORDED
+   as evidence of what was looked at; it is not the lock's identity. The
+   lock consults BOTH ``unseal_log.jsonl`` AND every registry line's
+   evidence (``holdout`` / ``r3`` / ``r5`` blocks), and the quarter quota
+   counts registry evidence as well as log lines, so deleting the
+   uncommitted log resets nothing. Both files are checked for append-only
+   integrity at the start of every command: the content committed at
+   ``HEAD`` must be a byte prefix of the on-disk file (a missing on-disk
+   file while HEAD has one is a refusal too). Plainly: a COMMITTED rewrite
+   of ``registry.jsonl`` / ``unseal_log.jsonl`` is a git-history event this
+   tool cannot detect -- integrity beyond the HEAD prefix is delegated to
+   review of git history -- and the unseal log gains HEAD-prefix protection
+   only once it is first committed.
 5. The unseal line is written BEFORE any price row is read. Anything that
    fails after it has spent the look: it is raised as ``HoldoutAbort``
    naming the spent line, and the CLI exits with ``EXIT_ABORT``. [RT1-3]
@@ -112,13 +121,22 @@ recorded p on this root if any, else its pooled-validation p, else 1.0,
 which cannot reject and only makes the finalists' adjustment more
 conservative). ``holm_m`` and the p vector go into the registry evidence.
 
-R3 #2 when the gefs twin is EMPTY: the gefs calibration's ``sigma_f`` can
-exceed the sigma cap on every row of a root (measured 4.54..5.97 on
-2026-07-26/27), so ``default_frame_builder`` tolerates an empty twin
+R3 #2 when the gefs twin is EMPTY or CANNOT BE BUILT [RT2-4]: the gefs
+calibration's ``sigma_f`` can exceed the sigma cap on every row of a root
+(measured 4.54..5.97 on 2026-07-26/27), and the gefs archive in
+``data/forecast_archive`` ends 2026-07-27, so on a Sept-dated root the twin
+build raises ``EVAnalysisError: no forecast vintage could be matched``.
+``default_frame_builder`` catches ANY failure of the twin build
 (``provenance["gefs_twin_unavailable"]``) instead of aborting a spent look,
-and the ``gefs_twin_ge0`` gate FAILS with that reason. Whether the sigma cap
-itself is the "ex-ante disqualifier" REVIVAL #2 allows is an owner ruling;
-nothing here assumes it. Registered limitation.
+and the ``gefs_twin_ge0`` gate FAILS with that reason. Consequence, stated
+plainly: **R3 #2 on Sept-Oct is a HALT-by-construction** unless gefs
+Sept-Oct is backfilled into the chosen archive dir, or the owner ratifies
+the sigma-cap / no-gefs ex-ante disqualifier. That is an owner ruling, not
+this module's. The forecast archive dir is chosen BEFORE the unseal
+(``select_forecast_archive_dir``): ``--forecast-archive-dir`` if given, else
+the ``data/forecast_archive*`` dir whose gfs_mex series covers the root's
+dates; none covering -> refused, nothing written; the choice is recorded in
+the report.
 
 R3 #4 (tail ratio in [0.8, 1.25] at |z| >= 2.5) is evaluated literally as
 pre-registered; on ~148 city-days the ratio is coarse (0 -> 0.00, 1 ->
@@ -200,7 +218,7 @@ TEST_DOC_ENV = "MP_FACTORY_TEST_DOC"
 
 UNSEAL_TAG_RE = re.compile(r"^RATIFIED-(\d{4}-\d{2}-\d{2})$")
 #: The owner's ratification line: column 0, the word, one space, the date, then whitespace or end of line.
-RATIFICATION_LINE_RE = re.compile(r"^RATIFIED (\d{4}-\d{2}-\d{2})(?=\s|$)")
+RATIFICATION_LINE_RE = re.compile(r"^RATIFIED (\d{4}-\d{2}-\d{2})\s*$")
 
 #: Registry thresholds read from the family line (registry key -> fitness fallback constant).
 THRESHOLD_FALLBACKS: Dict[str, float] = {
@@ -328,23 +346,86 @@ def result_sha256(result: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # 1. the tag and the ratification line  [RT1-2]
 # ---------------------------------------------------------------------------
-def ratified_dates(doc_path: Union[str, Path]) -> List[str]:
-    """Dates on lines that are EXACTLY ``RATIFIED YYYY-MM-DD[ note]`` at column 0, outside ``` fences."""
-    p = Path(doc_path)
-    if not p.exists():
-        return []
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
+def ratified_dates_in(text: str) -> List[str]:
+    """Dates on lines that are EXACTLY ``RATIFIED YYYY-MM-DD`` (nothing after the date), outside
+    ``` / ~~~ fences, ``<pre>``...``</pre>`` blocks and ``<!--``...``-->`` comment spans."""
     out: List[str] = []
-    fenced = False
-    for raw in p.read_text(encoding="utf-8", errors="replace").splitlines():
-        if raw.lstrip().startswith("```"):
-            fenced = not fenced
+    fence: Optional[str] = None
+    in_pre = False
+    in_comment = False
+    for raw in text.splitlines():
+        line = raw.rstrip("\r")
+        m = FENCE_RE.match(line)
+        if m and not in_pre and not in_comment:
+            tok = m.group(1)
+            if fence is None:
+                fence = tok
+            elif fence == tok:
+                fence = None
             continue
-        if fenced:
+        if fence is not None:
             continue
-        m = RATIFICATION_LINE_RE.match(raw)
-        if m:
-            out.append(m.group(1))
+        low = line.lower()
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
+            continue
+        if in_pre:
+            if "</pre>" in low:
+                in_pre = False
+            continue
+        if "<!--" in line:
+            if "-->" not in line.split("<!--", 1)[1]:
+                in_comment = True
+            continue
+        if "<pre" in low:
+            if "</pre>" not in low:
+                in_pre = True
+            continue
+        m2 = RATIFICATION_LINE_RE.match(line)
+        if m2:
+            out.append(m2.group(1))
     return out
+
+
+def read_ratification_text(doc_path: Union[str, Path], repo_root: Path = REPO_ROOT) -> str:
+    """The COMMITTED content of the ratification document (``git show HEAD:``); tests read the disk file.
+
+    Refuses a doc outside the repo (unless ``MP_FACTORY_TEST_DOC=1``), one not
+    committed at HEAD, or one whose working copy differs from HEAD.
+    """
+    p = Path(doc_path)
+    if os.getenv(TEST_DOC_ENV, "").strip() == "1":
+        if not p.is_file():
+            raise UnsealRefused(f"ratification document {p} does not exist")
+        return p.read_text(encoding="utf-8", errors="replace")
+    if not _inside_repo(p, repo_root):
+        raise UnsealRefused(
+            f"ratification document {p} lies outside the repository; the owner ratifies in the tracked "
+            f"docs/REVIVAL_2026_09.md (set {TEST_DOC_ENV}=1 only in tests)"
+        )
+    rel = _relpath(p, repo_root)
+    head = git_show_head(repo_root, rel)
+    if head is None:
+        raise UnsealRefused(f"ratification document {rel} is not committed at HEAD; an uncommitted or untracked "
+                            "doc ratifies nothing")
+    if not p.is_file():
+        raise UnsealRefused(f"ratification document {rel} is committed at HEAD but missing from the working copy")
+    if p.read_bytes().replace(b"\r", b"") != head.replace(b"\r", b""):
+        raise UnsealRefused(f"ratification document {rel} differs from its committed content at HEAD; commit the "
+                            "ratification (or restore the file) before opening a sealed root")
+    return head.decode("utf-8", errors="replace")
+
+
+def ratified_dates(doc_path: Union[str, Path], repo_root: Path = REPO_ROOT) -> List[str]:
+    """Ratified dates in the committed doc (``[]`` when the doc does not exist)."""
+    p = Path(doc_path)
+    if os.getenv(TEST_DOC_ENV, "").strip() == "1" and not p.exists():
+        return []
+    return ratified_dates_in(read_ratification_text(p, repo_root))
 
 
 def parse_unseal_tag(tag: Optional[str]) -> str:
@@ -360,28 +441,22 @@ def parse_unseal_tag(tag: Optional[str]) -> str:
 
 
 def resolve_revival_doc(doc_path: Union[str, Path], repo_root: Path = REPO_ROOT) -> Tuple[str, str]:
-    """(repo-relative path, sha256) of the ratification document; refuses one outside the repo unless testing."""
+    """(repo-relative path, sha256 of the text the check read) of the ratification document."""
     p = Path(doc_path)
-    if not p.is_file():
-        raise UnsealRefused(f"ratification document {p} does not exist")
-    if not _inside_repo(p, repo_root) and os.getenv(TEST_DOC_ENV, "").strip() != "1":
-        raise UnsealRefused(
-            f"ratification document {p} lies outside the repository; the owner ratifies in the tracked "
-            f"docs/REVIVAL_2026_09.md (set {TEST_DOC_ENV}=1 only in tests)"
-        )
-    return _relpath(p, repo_root), sha256_bytes_of(p)
+    text = read_ratification_text(p, repo_root)
+    return _relpath(p, repo_root), sha256_text(text.replace("\r", ""))
 
 
-def assert_tag_ratified(tag: Optional[str], doc_path: Union[str, Path]) -> str:
+def assert_tag_ratified(tag: Optional[str], doc_path: Union[str, Path], repo_root: Path = REPO_ROOT) -> str:
     """Return the ratification date the tag names, or refuse."""
     date = parse_unseal_tag(tag)
-    dates = ratified_dates(doc_path)
+    dates = ratified_dates(doc_path, repo_root)
     if date not in dates:
         have = ", ".join(dates) if dates else "none -- the document says nothing is ratified yet"
         raise UnsealRefused(
-            f"unseal tag {tag} does not match a 'RATIFIED <date>' line in {_relpath(doc_path)} "
-            f"(ratified dates present: {have}); the owner ratifies by amending that document with a whole "
-            "line at column 0 reading 'RATIFIED YYYY-MM-DD' outside code fences, not by passing a tag"
+            f"unseal tag {tag} does not match a 'RATIFIED <date>' line in {_relpath(doc_path, repo_root)} "
+            f"(ratified dates present: {have}); the owner ratifies by committing a whole line reading exactly "
+            "'RATIFIED YYYY-MM-DD' (column 0, nothing after the date, outside fences/pre/comments), not by passing a tag"
         )
     return date
 
@@ -576,10 +651,13 @@ def genome_status(reg: Registry, family: str, genome_id: str) -> Optional[str]:
 
 
 def ratified_genomes(reg: Registry, family: str) -> List[str]:
-    return sorted({
-        str(ln.get("genome_id")) for ln in _transition_lines(reg, family)
-        if ln.get("status") == "RATIFIED" and ln.get("genome_id")
-    })
+    """Genomes named on RATIFIED lines (re-asserts included), MOST RECENT FIRST, unique."""
+    out: List[str] = []
+    for ln in reversed(_transition_lines(reg, family)):
+        gid = str(ln.get("genome_id"))
+        if ln.get("status") == "RATIFIED" and ln.get("genome_id") and gid not in out:
+            out.append(gid)
+    return out
 
 
 def assert_genome_eligible(reg: Registry, family: str, genome_id: str,
@@ -752,6 +830,13 @@ def assert_append_only(path: Union[str, Path], repo_root: Path = REPO_ROOT) -> D
     return {"path": rel, "checked": True, "head_bytes": len(committed), "disk_bytes": len(current)}
 
 
+_KIND_TO_COMMAND = {"holdout": "holdout", "r3": "score", "r5": "score-r5"}
+
+
+def _quota_key(command: str, family: str, genome_id: Optional[str]) -> Tuple[str, str]:
+    return (command, family) if command == "holdout" else (command, str(genome_id))
+
+
 def assert_unseal_allowed(
     log_lines: Sequence[Dict[str, Any]],
     registry_lines: Sequence[Dict[str, Any]] = (),
@@ -763,62 +848,59 @@ def assert_unseal_allowed(
     root_digest: str,
     now: Optional[_dt.datetime] = None,
 ) -> None:
-    """Quota and once-per-root rules over the log AND the registry; refuses quoting the prior line.
-
-    ``score-r5`` re-reads the SAME root its genome was scored on (dates after
-    ``as_of`` only), so for it the genome-overlap rule is replaced by
-    once-only on ``evidence.r5`` (checked by the caller) and on prior
-    ``score-r5`` lines here.
-    """
+    """[RT2-1] The once-lock is per PURPOSE: ``holdout`` once per family, ``score``/``score-r5`` once per
+    genome -- over the log AND the registry, whatever the root's digest or path. Refuses quoting the prior
+    line. The quarter quota counts log lines and registry evidence blocks alike."""
     gids = set(map(str, genome_ids))
     for ln in log_lines:
-        same_root = ln.get("root_digest") == root_digest or ln.get("root") == root
-        if not same_root:
-            continue
         prior = json.dumps(ln, sort_keys=True)
         overlap = sorted(set(map(str, ln.get("genome_ids") or [])) & gids)
         if command == "holdout" and ln.get("command") == "holdout" and ln.get("family") == family:
             raise UnsealRefused(
-                f"family {family!r} already spent its holdout on root {root} (digest {root_digest[:12]}) -- "
-                f"once per family per root (FR-F4.1). Prior unseal line: {prior}"
+                f"family {family!r} already spent its holdout-B look ({ln.get('root')}, digest "
+                f"{str(ln.get('root_digest'))[:12]}); once per family per PURPOSE, whatever the root's copy or "
+                f"digest (FR-F4.1) -- this root is {root} digest {root_digest[:12]}. Prior unseal line: {prior}"
             )
-        if command == "score-r5":
-            if ln.get("command") == "score-r5" and overlap:
-                raise UnsealRefused(f"R5 re-check already spent for {overlap} on root {root}. Prior unseal line: {prior}")
-            continue
-        if overlap:
+        if command in ("score", "score-r5") and ln.get("command") == command and overlap:
             raise UnsealRefused(
-                f"genome(s) {overlap} were already scored on root {root} (digest {root_digest[:12]}) by "
-                f"'{ln.get('command')}' -- no second scoring of the same genome on the same root may exist "
-                f"(FR-F4.1). Prior unseal line: {prior}"
+                f"genome(s) {overlap} already spent their {command} look ({ln.get('root')}, digest "
+                f"{str(ln.get('root_digest'))[:12]}); once per genome per PURPOSE (FR-F4.1) -- no second scoring "
+                f"may exist. Prior unseal line: {prior}"
             )
     for ln in registry_lines:
         for kind, block in _evidence_blocks(ln):
-            if block.get("root_digest") != root_digest:
-                continue
             prior = json.dumps(ln, sort_keys=True)
             if command == "holdout" and kind == "holdout" and ln.get("family") == family:
                 raise UnsealRefused(
-                    f"the registry already carries holdout evidence for family {family!r} on root digest "
-                    f"{root_digest[:12]} (the unseal log is not the only record). Prior registry line: {prior}"
+                    f"the registry already carries holdout evidence for family {family!r} (root digest "
+                    f"{str(block.get('root_digest'))[:12]}); the unseal log is not the only record. "
+                    f"Prior registry line: {prior}"
                 )
-            if command == "score-r5":
-                if kind == "r5" and str(ln.get("genome_id")) in gids:
-                    raise UnsealRefused(f"R5 re-check already recorded in the registry. Prior registry line: {prior}")
-                continue
-            if str(ln.get("genome_id")) in gids:
+            if command == "score" and kind == "r3" and str(ln.get("genome_id")) in gids:
                 raise UnsealRefused(
-                    f"the registry already carries {kind} evidence for genome {ln.get('genome_id')} on root digest "
-                    f"{root_digest[:12]} (the unseal log is not the only record). Prior registry line: {prior}"
+                    f"the registry already carries r3 evidence for genome {ln.get('genome_id')} (root digest "
+                    f"{str(block.get('root_digest'))[:12]}); the unseal log is not the only record. "
+                    f"Prior registry line: {prior}"
                 )
+            if command == "score-r5" and kind == "r5" and str(ln.get("genome_id")) in gids:
+                raise UnsealRefused(f"R5 re-check already recorded in the registry. Prior registry line: {prior}")
     # the quota last: a repeat look is refused as a repeat, not as a budget overrun
     now = now or _now()
     q = quarter_of(now)
-    this_quarter = [ln for ln in log_lines if ln.get("quarter") == q or quarter_of(str(ln.get("ts"))) == q]
-    if len(this_quarter) >= MAX_UNSEALS_PER_QUARTER:
+    keys = set()
+    for ln in log_lines:
+        if ln.get("quarter") == q or (ln.get("ts") and quarter_of(str(ln.get("ts"))) == q):
+            for g in (ln.get("genome_ids") or [None]):
+                keys.add(_quota_key(str(ln.get("command")), str(ln.get("family")), g))
+    for ln in registry_lines:
+        if not ln.get("ts") or quarter_of(str(ln.get("ts"))) != q:
+            continue
+        for kind, _block in _evidence_blocks(ln):
+            keys.add(_quota_key(_KIND_TO_COMMAND[kind], str(ln.get("family")), ln.get("genome_id")))
+    if len(keys) >= MAX_UNSEALS_PER_QUARTER:
         raise UnsealRefused(
-            f"{len(this_quarter)} unseals already recorded in {q} (cap {MAX_UNSEALS_PER_QUARTER} per quarter); "
-            f"prior lines: {[json.dumps(ln, sort_keys=True) for ln in this_quarter]}"
+            f"{len(keys)} unseals already recorded in {q} across the unseal log and the registry "
+            f"(cap {MAX_UNSEALS_PER_QUARTER} per quarter): {sorted(keys)}"
         )
 
 
@@ -1040,9 +1122,61 @@ def _frame_kwargs_from_spec(spec: P.PromotedSpec, embargo_days: int) -> Dict[str
     }
 
 
+def forecast_archive_candidates(repo_root: Path = REPO_ROOT) -> List[Path]:
+    """``data/forecast_archive`` first, then every other ``data/forecast_archive*`` directory, sorted."""
+    base = Path(repo_root) / "data"
+    main = base / "forecast_archive"
+    others = sorted(p for p in base.glob("forecast_archive*") if p.is_dir() and p != main)
+    return ([main] if main.is_dir() else []) + others
+
+
+def gfs_mex_coverage(archive_dir: Path) -> Optional[Tuple[str, str]]:
+    """(min, max) target_date of ``forecast_series_gfs_mex.csv`` under ``archive_dir``; None when absent/empty."""
+    import pandas as pd
+
+    p = Path(archive_dir) / "forecast_series_gfs_mex.csv"
+    if not p.is_file():
+        return None
+    col = pd.read_csv(p, usecols=["target_date"])["target_date"].astype(str)
+    if col.empty:
+        return None
+    return str(col.min())[:10], str(col.max())[:10]
+
+
+def select_forecast_archive_dir(date_range: Sequence[str], explicit: Optional[Union[str, Path]] = None,
+                                repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
+    """[RT2-4b] The archive dir whose gfs_mex series covers ``date_range`` (explicit dir validated the same way).
+
+    Refuses when none covers it -- called BEFORE the unseal so nothing is spent.
+    """
+    start, end = str(date_range[0]), str(date_range[1])
+    cands = [Path(explicit)] if explicit else forecast_archive_candidates(repo_root)
+    tried: List[Dict[str, Any]] = []
+    for c in cands:
+        cov = gfs_mex_coverage(c) if c.is_dir() else None
+        covers = bool(cov and cov[0] <= start and cov[1] >= end)
+        tried.append({"dir": _relpath(c, repo_root), "gfs_mex_coverage": cov, "covers": covers})
+        if covers:
+            return {"dir": str(c), "relpath": _relpath(c, repo_root), "gfs_mex_coverage": list(cov),
+                    "root_dates": [start, end], "explicit": bool(explicit), "tried": tried}
+    raise UnsealRefused(
+        f"no forecast archive covers the root's dates {start}..{end} with a gfs_mex series "
+        f"({'explicit ' + str(explicit) if explicit else 'candidates data/forecast_archive*'}: {tried}); "
+        "backfill the archive (scripts/backfill_forecasts.py) before spending a sealed look"
+    )
+
+
 def default_frame_builder(ladders, *, spec: P.PromotedSpec, embargo_days: int, root: Path,
-                          fee_regime_path: Optional[str] = None) -> Tuple[Any, Any]:
-    """(frame, gefs_twin) on the unsealed tape with the search frame's hardening."""
+                          fee_regime_path: Optional[str] = None,
+                          forecast_archive_dir: Optional[str] = None) -> Tuple[Any, Any]:
+    """(frame, gefs_twin) on the unsealed tape with the search frame's hardening.
+
+    ``forecast_archive_dir`` is the dir ``select_forecast_archive_dir`` chose
+    (or the operator passed); ``None`` means the evaluator's default
+    (``data/forecast_archive``). The gefs twin is best-effort: ANY failure to
+    build it (empty after hardening, no gefs vintage for these dates, ...)
+    leaves ``twin=None`` with the reason in ``provenance["gefs_twin_unavailable"]``.
+    """
     from src.factory import fees as fees_mod
     from src.factory import frame as fr
     from src.factory.lanes import weather as W
@@ -1055,7 +1189,8 @@ def default_frame_builder(ladders, *, spec: P.PromotedSpec, embargo_days: int, r
             "the fee schedule is part of the pre-registration"
         )
     common = dict(root=str(root), embargo_days=kw["embargo_days"], contracts=kw["contracts"],
-                  adverse_fill=kw["adverse_fill"], availability_lag_min=kw["availability_lag_min"])
+                  adverse_fill=kw["adverse_fill"], availability_lag_min=kw["availability_lag_min"],
+                  forecast_archive_dir=(str(forecast_archive_dir) if forecast_archive_dir else None))
     hardening = dict(
         availability_lag_min=kw["availability_lag_min"], truth_filter=True, sigma_cap=kw["sigma_cap"],
         fold_sandbox_admissible=True, cutoff=None, fee_regime=regime,
@@ -1063,17 +1198,17 @@ def default_frame_builder(ladders, *, spec: P.PromotedSpec, embargo_days: int, r
     )
     opp = W.build_opportunities_from_ladders(ladders, kw["source"], **common)
     frame = fr.from_opportunity_frame(opp, name=f"holdout_e{kw['embargo_days']}", **hardening)
+    frame.provenance["forecast_archive_dir"] = common["forecast_archive_dir"]
     del opp
-    opp_g = W.build_opportunities_from_ladders(ladders, "gefs", **common)
     try:
+        # [RT2-4a] any failure to BUILD the twin (no gefs vintage for these dates, every row above the sigma
+        # cap, ...) is recorded, never raised: a spent look is not aborted for the ex-ante twin.
+        opp_g = W.build_opportunities_from_ladders(ladders, "gefs", **common)
         twin = fr.build_gefs_twin(frame, opp_g, **hardening)
-    except fr.FrameAbort as exc:
-        # The gefs calibration's sigma_f can exceed the sigma cap on every row of a short root (measured
-        # 4.54..5.97 on 2026-07-26/27), leaving the twin empty. That is not a reason to abort a spent look:
-        # the R3 #2 gate reports the twin as unavailable (and fails) with the reason recorded.
+        del opp_g
+    except Exception as exc:  # noqa: BLE001
         twin = None
-        frame.provenance["gefs_twin_unavailable"] = str(exc)
-    del opp_g
+        frame.provenance["gefs_twin_unavailable"] = f"{type(exc).__name__}: {exc}"
     return frame, twin
 
 
@@ -1388,9 +1523,10 @@ def _verdict_for(e: Dict[str, Any], holm_entry: Dict[str, Any]) -> Tuple[str, Li
 
 
 def _preflight(command: str, root: Union[str, Path], unseal_tag: Optional[str], family: str,
-               genome_ids: Sequence[str], paths: HoldoutPaths, as_of: Optional[str], now: Optional[_dt.datetime]):
+               genome_ids: Sequence[str], paths: HoldoutPaths, as_of: Optional[str], now: Optional[_dt.datetime],
+               select_archive: bool = False, forecast_archive_dir: Optional[str] = None):
     """Every refusal, in order; returns what the evaluation needs. Nothing is written here."""
-    ratified = assert_tag_ratified(unseal_tag, paths.revival_doc)
+    ratified = assert_tag_ratified(unseal_tag, paths.revival_doc, paths.repo_root)
     doc_rel, doc_sha = resolve_revival_doc(paths.revival_doc, paths.repo_root)
     integrity = {"unseal_log": assert_append_only(paths.unseal_log, paths.repo_root),
                  "registry": assert_append_only(paths.registry, paths.repo_root)}
@@ -1425,8 +1561,13 @@ def _preflight(command: str, root: Union[str, Path], unseal_tag: Optional[str], 
     assert_unseal_allowed(log_lines, reg.lines(), command=command, family=family, genome_ids=genome_ids,
                           root=seal.relpath, root_digest=seal.root_digest, now=now)
     thr, thr_source = family_thresholds(fam_line)
+    archive = None
+    if select_archive:
+        stems = [d for d in seal.csv_stems if as_of is None or d <= as_of]
+        archive = select_forecast_archive_dir((min(stems), max(stems)), forecast_archive_dir, paths.repo_root)
     return types.SimpleNamespace(ratified=ratified, doc_rel=doc_rel, doc_sha=doc_sha, integrity=integrity, reg=reg,
-                                 fam_line=fam_line, cfg=cfg, specs=specs, seal=seal, thr=thr, thr_source=thr_source)
+                                 fam_line=fam_line, cfg=cfg, specs=specs, seal=seal, thr=thr, thr_source=thr_source,
+                                 archive=archive)
 
 
 def _record_for(command: str, pf, unseal_tag: str, family: str, genome_ids: Sequence[str], as_of: Optional[str]) -> UnsealRecord:
@@ -1453,9 +1594,11 @@ def evaluate_on_root(
     frame_builder: Optional[FrameBuilder] = None,
     out: Callable[[str], None] = print,
     now: Optional[_dt.datetime] = None,
+    forecast_archive_dir: Optional[str] = None,
 ) -> Outcome:
     """The protocol, in the order the docstring states. Refusals raise before any write."""
-    pf = _preflight(command, root, unseal_tag, family, genome_ids, paths, as_of, now)
+    pf = _preflight(command, root, unseal_tag, family, genome_ids, paths, as_of, now,
+                    select_archive=frame_builder is None, forecast_archive_dir=forecast_archive_dir)
     seal, reg = pf.seal, pf.reg
     embargo_days = int(((pf.cfg.get("frame") or {}).get("embargo_days")) or 1)
     report_path = paths.reports_dir / (
@@ -1479,6 +1622,17 @@ def evaluate_on_root(
         raise
     except Exception as exc:  # [RT1-3] any failure after the line is a spent look, named as such
         raise HoldoutAbort(f"{type(exc).__name__}: {exc}", record) from exc
+    except BaseException as exc:  # [RT2-3] KeyboardInterrupt / SystemExit: say it is spent, then re-raise
+        _print_spent(record, exc)
+        raise
+
+
+def _print_spent(record: UnsealRecord, exc: BaseException) -> None:
+    import sys as _sys
+
+    print(f"factory: ABORT -- unseal line {record.line_no} ({record.command}, {record.family}, root {record.root}) "
+          f"is already on disk; the look is SPENT and will not be re-granted: interrupted by {type(exc).__name__}",
+          file=_sys.stderr, flush=True)
 
 
 def _evaluate_after_unseal(command, pf, record, genome_ids, embargo_days, report_path, paths, n_boot, seed,
@@ -1497,7 +1651,13 @@ def _evaluate_after_unseal(command, pf, record, genome_ids, embargo_days, report
         raise HoldoutAbort(f"{seal.relpath} yielded no rows" + (f" on or before {as_of}" if as_of else ""), record)
     truth = truth_filter_stats(ladders)
     ladders, payoff_dropped = drop_payoff_mismatch_markets(ladders)
-    builder = frame_builder or default_frame_builder
+    if frame_builder is None:
+        import functools
+
+        builder = functools.partial(default_frame_builder,
+                                    forecast_archive_dir=(pf.archive or {}).get("dir"))
+    else:
+        builder = frame_builder
     cache: Dict[int, Tuple[Any, Any]] = {}
 
     def _frames(emb: int, spec: P.PromotedSpec) -> Tuple[Any, Any]:
@@ -1538,6 +1698,8 @@ def _evaluate_after_unseal(command, pf, record, genome_ids, embargo_days, report
         "sha256sums_digest": seal.sha256sums_digest, "sha256sums": sums, "manifest_date_range": list(seal.date_range),
         "series": list(seal.series), "as_of": as_of, "embargo_days": embargo_days, "n_boot": int(n_boot),
         "seed": int(seed), "thresholds": pf.thr, "thresholds_source": pf.thr_source,
+        "forecast_archive": ({k: v for k, v in pf.archive.items() if k != "dir"} if pf.archive else
+                             {"relpath": None, "note": "frame builder injected; no archive selection"}),
         "search_window_quantities_not_recomputed": list(SEARCH_WINDOW_ONLY),
         "truth_filter": truth, "payoff_mismatch_markets_dropped": payoff_dropped,
         "genomes": evals, "holm": holm, "verdicts": verdicts,
@@ -1601,10 +1763,11 @@ def _write_transitions(reg: Registry, command: str, family: str, evals, verdicts
             # Registry.status() is last-transition-wins, and the OPS flow stamps it into gate registrations
             # (paper_spec_hash covers registry_status): re-assert the family's RATIFIED status for the genome
             # that earned it, so a sibling's PROPOSED holdout line cannot demote the family. No new status.
-            reg.transition(family, "RATIFIED", genome_id=ratified[-1], evidence={
+            reg.transition(family, "RATIFIED", genome_id=ratified[0], evidence={
                 "reasserted": True, "ratified_genomes": ratified,
-                "reason": f"holdout PASS of {passing} wrote PROPOSED line(s); family status re-asserted (no R3 here)"})
-            out(f"registry: {family} RATIFIED re-asserted for {ratified[-1]} (status is last-transition-wins)")
+                "reason": f"holdout PASS of {passing} wrote PROPOSED line(s); family status re-asserted (no R3 here)"},
+                extra={"reasserted": True})  # [RT2-6] top-level flag: never a second ratification
+            out(f"registry: {family} RATIFIED re-asserted for {ratified[0]} (status is last-transition-wins)")
         failed = [g for g in evals if g not in passing]
         halt_family = not passing and not ratified
         for gid in failed:
@@ -1644,6 +1807,10 @@ def run_r5_check(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, 
                                 repo_root=paths.repo_root)
     out(f"unseal: line {record.line_no} appended ({record.command}, {family}, root {pf.seal.relpath}, after {as_of})")
     try:
+        sums = verify_sha256sums(pf.seal.root)  # [RT2-5]
+        if sums["failed"] or sums["missing"]:
+            raise HoldoutAbort(f"SHA256SUMS check failed for {pf.seal.relpath}: failed {sums['failed']} "
+                               f"missing {sums['missing']}", record)
         ladders = open_sealed_root(pf.seal.root, record)
         dates = sorted({str(d)[:10] for d in ladders["target_date"].astype(str) if str(d)[:10] > as_of})
         del ladders
@@ -1652,7 +1819,7 @@ def run_r5_check(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, 
         result = {"command": "score-r5", "family": family, "genome_id": genome_id, "root": pf.seal.relpath,
                   "root_digest": pf.seal.root_digest, "as_of": as_of, "dates_after_as_of": len(dates),
                   "cold_season_dates": len(cold), "cold_season_months": list(COLD_SEASON_MONTHS),
-                  "min_dates": COLD_SEASON_MIN_DATES, "criterion_6_pass": passed,
+                  "min_dates": COLD_SEASON_MIN_DATES, "criterion_6_pass": passed, "sha256sums": sums,
                   "note": "criteria 1-5 are NOT recomputed; definition of a cold-season month is unratified (module docstring)"}
         sha = result_sha256(result)
         out(f"result_sha256 {sha}")
@@ -1665,6 +1832,7 @@ def run_r5_check(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, 
                                           "unseal_line_no": record.line_no, "caveat": LABEL_LEAK_CAVEAT}})
         ev = {"result_sha256": sha, "r5": dict(result, root_relpath=pf.seal.relpath, verdict="PASS" if passed else "HALT")}
         others = [g for g in ratified_genomes(pf.reg, family) if g != genome_id]
+        result["sha256sums"] = sums
         if passed:
             pf.reg.transition(family, "RATIFIED", genome_id=genome_id, evidence=ev)
             out(f"registry: {family} {genome_id} -> RATIFIED confirmed (evidence.r5)")
@@ -1680,6 +1848,9 @@ def run_r5_check(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, 
         raise
     except Exception as exc:
         raise HoldoutAbort(f"{type(exc).__name__}: {exc}", record) from exc
+    except BaseException as exc:  # [RT2-3]
+        _print_spent(record, exc)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -1688,20 +1859,22 @@ def run_r5_check(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, 
 def run_holdout(*, finalists_path: Union[str, Path], unseal_tag: Optional[str], root: Union[str, Path] = DEFAULT_HOLDOUT_ROOT,
                 paths: HoldoutPaths = HoldoutPaths(), n_boot: int = fitness.DEFAULT_N_BOOT, seed: int = fitness.DEFAULT_SEED,
                 frame_builder: Optional[FrameBuilder] = None, out: Callable[[str], None] = print,
-                now: Optional[_dt.datetime] = None) -> Outcome:
+                now: Optional[_dt.datetime] = None, forecast_archive_dir: Optional[str] = None) -> Outcome:
     family, ids = load_finalists(finalists_path)
     return evaluate_on_root(command="holdout", root=root, unseal_tag=unseal_tag, family=family, genome_ids=ids,
-                            paths=paths, n_boot=n_boot, seed=seed, frame_builder=frame_builder, out=out, now=now)
+                            paths=paths, n_boot=n_boot, seed=seed, frame_builder=frame_builder, out=out, now=now,
+                            forecast_archive_dir=forecast_archive_dir)
 
 
 def run_score(*, genome_id: str, unseal_tag: Optional[str], root: Union[str, Path] = DEFAULT_R3_ROOT,
               as_of: Optional[str] = None, paths: HoldoutPaths = HoldoutPaths(), n_boot: int = fitness.DEFAULT_N_BOOT,
               seed: int = fitness.DEFAULT_SEED, frame_builder: Optional[FrameBuilder] = None,
-              out: Callable[[str], None] = print, now: Optional[_dt.datetime] = None) -> Outcome:
+              out: Callable[[str], None] = print, now: Optional[_dt.datetime] = None,
+              forecast_archive_dir: Optional[str] = None) -> Outcome:
     family = _family_of_genome(genome_id, paths)
     return evaluate_on_root(command="score", root=root, unseal_tag=unseal_tag, family=family, genome_ids=[genome_id],
                             paths=paths, as_of=as_of, n_boot=n_boot, seed=seed, frame_builder=frame_builder, out=out,
-                            now=now)
+                            now=now, forecast_archive_dir=forecast_archive_dir)
 
 
 def _family_of_genome(genome_id: str, paths: HoldoutPaths) -> str:
@@ -1721,7 +1894,8 @@ __all__ = [
     "assert_unseal_allowed", "audit_root", "canonical_json", "check_constraints", "evaluate_genome",
     "evaluate_on_root", "family_thresholds", "genome_status", "git_show_head", "holm_across_registry",
     "inspect_root_seal", "load_finalists", "manifest_metadata", "open_sealed_root", "parse_unseal_tag",
-    "quarter_of", "r3_line", "ratified_dates", "ratified_genomes", "read_unseal_log", "render_audit",
-    "resolve_revival_doc", "result_sha256", "root_digest_of", "run_holdout", "run_r5_check", "run_score",
+    "quarter_of", "r3_line", "ratified_dates", "ratified_dates_in", "ratified_genomes", "read_ratification_text",
+    "read_unseal_log", "render_audit", "resolve_revival_doc", "result_sha256", "root_digest_of", "run_holdout",
+    "run_r5_check", "run_score", "select_forecast_archive_dir",
     "truth_filter_stats", "verify_sha256sums",
 ]

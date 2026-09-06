@@ -1161,7 +1161,7 @@ def cmd_holdout(args: argparse.Namespace) -> int:
     try:
         outcome = H.run_holdout(
             finalists_path=Path(args.finalists), unseal_tag=args.unseal, root=root, paths=_holdout_paths(args),
-            n_boot=int(args.n_boot),
+            n_boot=int(args.n_boot), forecast_archive_dir=args.forecast_archive_dir,
         )
     except Exception as exc:  # noqa: BLE001 -- post-unseal failures must name the spent line, never traceback out
         return _sealed_exit(exc)
@@ -1181,7 +1181,7 @@ def cmd_score(args: argparse.Namespace) -> int:
         else:
             outcome = H.run_score(
                 genome_id=str(args.genome), unseal_tag=args.unseal, root=root, as_of=args.as_of,
-                paths=_holdout_paths(args), n_boot=int(args.n_boot),
+                paths=_holdout_paths(args), n_boot=int(args.n_boot), forecast_archive_dir=args.forecast_archive_dir,
             )
     except Exception as exc:  # noqa: BLE001 -- post-unseal failures must name the spent line, never traceback out
         return _sealed_exit(exc)
@@ -1200,6 +1200,9 @@ def _add_sealed_common(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--revival-doc", default=None, help="default docs/REVIVAL_2026_09.md")
     sp.add_argument("--out-dir", default=None, help=f"report dir (default {REPORTS_ROOT})")
     sp.add_argument("--n-boot", type=int, default=4000)
+    sp.add_argument("--forecast-archive-dir", dest="forecast_archive_dir", default=None,
+                    help="forecast archive directory for the frame (default: the data/forecast_archive* dir whose "
+                         "gfs_mex series covers the root's dates; refused BEFORE the unseal if none does)")
 # ===========================================================================
 # end F4 HOLDOUT block
 # ===========================================================================

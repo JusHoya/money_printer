@@ -72,12 +72,14 @@ source on the Phase 2 tape and is the source the §9.3 pre-registration
 contemplates freezing). Once ratified, this line is amended in place with
 the date and the word RATIFIED, and the M1 run uses it verbatim.
 
-Form of the ratification line (added 2026-09-06 so the factory's unseal
-check and the owner agree on it; nothing is ratified by this note): the
-sealed-root commands (`src/factory/holdout.py`) recognise exactly one form
--- a whole line at column 0 reading `RATIFIED YYYY-MM-DD`, optionally
-followed by whitespace and a note, outside code fences. "not RATIFIED ...",
-an indented or quoted proposal, or a mention inside a fence does not count.
+Form of the ratification line (added 2026-09-06, tightened the same day
+after red-team round 2, so the factory's unseal check and the owner agree
+on it; nothing is ratified by this note): the sealed-root commands
+(`src/factory/holdout.py`) recognise exactly one form -- a whole line at
+column 0 reading `RATIFIED YYYY-MM-DD` and NOTHING after the date (no note,
+no trailing prose), outside ``` / ~~~ fences, `<pre>` blocks and `<!-- -->`
+comments, in the COMMITTED content of this file (`git show HEAD:`); a
+working copy that differs from HEAD, or an uncommitted file, is refused.
 
 ## 5. Draft R3 acceptance criteria (REQUIRES RATIFICATION — the §9.3
 pre-registration deliberately left the numeric thresholds open)

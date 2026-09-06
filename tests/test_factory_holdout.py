@@ -243,7 +243,7 @@ class Setup:
         self.revival = tmp / "REVIVAL.md"
         text = "# tmp copy\n\nNothing here is ratified yet.\n"
         if ratified:
-            text += "\nRATIFIED 2026-09-06 -- test copy\n"
+            text += "\nRATIFIED 2026-09-06\n"
         self.revival.write_text(text, encoding="utf-8")
         self.unseal_log = tmp / "unseal_log.jsonl"
         self.reports = tmp / "reports"
@@ -347,9 +347,9 @@ class RecordingBuilder:
         self.frame = frame or planted_frame()
         self.calls: List[Dict[str, Any]] = []
 
-    def __call__(self, ladders, *, spec, embargo_days, root):
+    def __call__(self, ladders, *, spec, embargo_days, root, **kw):
         self.calls.append({"n_rows": int(len(ladders)), "embargo_days": int(embargo_days), "root": Path(root),
-                           "genome_id": spec.genome_id, "attrs": dict(ladders.attrs)})
+                           "genome_id": spec.genome_id, "attrs": dict(ladders.attrs), **kw})
         F = copy_frame(self.frame, name=f"holdout_e{embargo_days}")
         F.twin_index = np.arange(F.n_rows, dtype=np.int64)
         twin = copy_frame(self.frame, name="gefs_twin")
@@ -421,8 +421,16 @@ def test_the_real_revival_doc_carries_no_ratified_line_today():
 
 @pytest.mark.parametrize("text, expected", [
     ("RATIFIED 2026-09-06\n", ["2026-09-06"]),
-    ("RATIFIED 2026-09-06 -- owner note\n", ["2026-09-06"]),
-    ("RATIFIED 2026-09-06\t(tab note)\n", ["2026-09-06"]),
+    ("RATIFIED 2026-09-06   \n", ["2026-09-06"]),
+    ("RATIFIED 2026-09-06\r\n", ["2026-09-06"]),
+    ("RATIFIED 2026-09-06 -- owner note\n", []),  # [RT2-2] trailing prose negates
+    ("RATIFIED 2026-09-06 -- NOT ratified, proposal only\n", []),
+    ("RATIFIED 2026-09-06\t(tab note)\n", []),
+    ("~~~\nRATIFIED 2026-09-06\n~~~\n", []),
+    ("<pre>\nRATIFIED 2026-09-06\n</pre>\n", []),
+    ("<!--\nRATIFIED 2026-09-06\n-->\n", []),
+    ("<!-- start\nmore\nRATIFIED 2026-09-06\nend -->\nRATIFIED 2026-09-07\n", ["2026-09-07"]),
+    ("```\n~~~\nRATIFIED 2026-09-06\n```\n", []),  # a ~~~ inside a ``` fence does not close it
     ("not RATIFIED 2026-09-06\n", []),
     ("  RATIFIED 2026-09-06\n", []),
     ("> RATIFIED 2026-09-06\n", []),
@@ -435,10 +443,52 @@ def test_the_real_revival_doc_carries_no_ratified_line_today():
     ("Once ratified this line reads RATIFIED 2026-09-06 verbatim\n", []),
     ("```\nfence\n```\nRATIFIED 2026-09-06\n", ["2026-09-06"]),
 ])
-def test_ratified_line_must_be_a_whole_column0_line_outside_fences(tmp_path, text, expected):  # [RT1-2]
+def test_ratified_line_must_be_a_whole_column0_line_outside_fences(tmp_path, text, expected):  # [RT1-2, RT2-2]
     p = tmp_path / "doc.md"
-    p.write_text(text, encoding="utf-8")
+    p.write_bytes(text.encode("utf-8"))
     assert H.ratified_dates(p) == expected
+    assert H.ratified_dates_in(text) == expected
+
+
+def _git(cwd: Path, *args: str) -> str:
+    import subprocess
+
+    r = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def test_ratification_is_read_from_the_committed_doc_in_a_throwaway_repo(tmp_path, monkeypatch):  # [RT2-2]
+    monkeypatch.delenv(H.TEST_DOC_ENV, raising=False)
+    repo = tmp_path / "repo"
+    (repo / "docs").mkdir(parents=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    doc = repo / "docs" / "REVIVAL.md"
+    doc.write_bytes(b"# plan\n\nRATIFIED 2026-09-06\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "ratify")
+    assert H.ratified_dates(doc, repo) == ["2026-09-06"]
+    rel, sha = H.resolve_revival_doc(doc, repo)
+    assert rel == "docs/REVIVAL.md" and sha == H.sha256_text("# plan\n\nRATIFIED 2026-09-06\n")
+    # working copy edited but not committed -> refused (even though the disk file still ratifies)
+    doc.write_bytes(b"# plan\n\nRATIFIED 2026-09-06\nRATIFIED 2026-09-07\n")
+    with pytest.raises(H.UnsealRefused, match="differs from its committed content at HEAD"):
+        H.ratified_dates(doc, repo)
+    # an untracked doc ratifies nothing
+    new = repo / "docs" / "NEW.md"
+    new.write_bytes(b"RATIFIED 2026-09-06\n")
+    with pytest.raises(H.UnsealRefused, match="not committed at HEAD"):
+        H.ratified_dates(new, repo)
+    # outside the repo -> refused
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(b"RATIFIED 2026-09-06\n")
+    with pytest.raises(H.UnsealRefused, match="outside the repository"):
+        H.ratified_dates(outside, repo)
+    # the committed content wins: delete the edit, HEAD still ratifies
+    _git(repo, "checkout", "--", "docs/REVIVAL.md")
+    assert H.ratified_dates(doc, repo) == ["2026-09-06"]
 
 
 def test_doc_outside_the_repo_is_refused_without_the_test_env(tmp_path, monkeypatch):  # [RT1-2]
@@ -448,8 +498,14 @@ def test_doc_outside_the_repo_is_refused_without_the_test_env(tmp_path, monkeypa
     with pytest.raises(H.UnsealRefused, match="outside the repository"):
         _run_holdout(setup, root)
     _assert_nothing_written(setup)
-    rel, sha = H.resolve_revival_doc(REAL_REVIVAL, REPO)  # the real doc resolves without the env
-    assert rel == "docs/REVIVAL_2026_09.md" and sha == hashlib.sha256(REAL_REVIVAL.read_bytes()).hexdigest()
+    head = H.git_show_head(REPO, "docs/REVIVAL_2026_09.md")
+    if head is None or head.replace(b"\r", b"") != REAL_REVIVAL.read_bytes().replace(b"\r", b""):
+        with pytest.raises(H.UnsealRefused, match="differs from its committed content|not committed"):
+            H.resolve_revival_doc(REAL_REVIVAL, REPO)
+    else:
+        rel, sha = H.resolve_revival_doc(REAL_REVIVAL, REPO)  # the committed real doc resolves without the env
+        assert rel == "docs/REVIVAL_2026_09.md" and sha == H.sha256_text(head.decode("utf-8").replace("\r", ""))
+        assert H.ratified_dates(REAL_REVIVAL, REPO) == []  # committed content ratifies nothing today
 
 
 def test_refuses_more_than_three_finalists(tmp_path):
@@ -560,7 +616,7 @@ def test_sha256sums_comment_attack_is_refused_even_after_deleting_the_log_and_th
     with open(attack / "SHA256SUMS", "a", encoding="utf-8") as fh:
         fh.write("# harmless comment\n")
     # (a) log intact: refused quoting the prior log line
-    with pytest.raises(H.UnsealRefused, match="once per family per root") as ei:
+    with pytest.raises(H.UnsealRefused, match="once per family per PURPOSE") as ei:
         H.run_holdout(finalists_path=setup.finalists([FR31A_ID]), unseal_tag=TAG, root=attack, paths=setup.paths,
                       n_boot=100, frame_builder=RecordingBuilder(), out=lambda s: None)
     assert json.dumps(H.read_unseal_log(setup.unseal_log)[0], sort_keys=True) in str(ei.value)
@@ -653,7 +709,7 @@ def test_second_score_of_the_same_genome_on_the_same_root_is_refused(tmp_path):
     with pytest.raises(H.UnsealRefused) as ei:
         H.assert_unseal_allowed(log, [], command="score", family=FAMILY, genome_ids=[FR31A_ID], root=seal.relpath,
                                 root_digest=seal.root_digest)
-    assert "no second scoring of the same genome on the same root" in str(ei.value)
+    assert "no second scoring may exist" in str(ei.value) and "once per genome per PURPOSE" in str(ei.value)
     assert json.dumps(log[1], sort_keys=True) in str(ei.value)
     with pytest.raises(H.UnsealRefused, match="registry already carries r3 evidence"):
         H.assert_unseal_allowed([], setup.registry().lines(), command="score", family=FAMILY, genome_ids=[FR31A_ID],
@@ -678,9 +734,92 @@ def test_at_most_three_unseals_per_quarter(tmp_path):
         json.dumps({"command": "holdout", "family": f"f{i}", "genome_ids": [f"g{i}"], "root": f"data/r{i}",
                     "root_digest": str(i) * 64, "ts": now.isoformat(), "quarter": q, "tag": TAG}) + "\n"
         for i in range(3)), encoding="utf-8")
-    with pytest.raises(H.UnsealRefused, match=rf"3 unseals already recorded in {q} \(cap 3 per quarter\)"):
+    with pytest.raises(H.UnsealRefused, match=rf"3 unseals already recorded in {q} across the unseal log and the registry"):
         _run_holdout(setup, root)
     assert len(H.read_unseal_log(setup.unseal_log)) == 3
+
+
+def test_quarter_quota_counts_registry_evidence_when_the_log_is_deleted():  # [RT2-1]
+    now = H._now()
+    ts = now.isoformat()
+    reg_lines = [
+        {"event": "transition", "family": "f/a", "genome_id": "g1", "ts": ts, "evidence": {"holdout": {"verdict": "PASS"}}},
+        {"event": "evidence", "family": "f/a", "genome_id": "g2", "ts": ts, "evidence": {"holdout": {"verdict": "HALT"}}},
+        {"event": "transition", "family": "f/b", "genome_id": "g3", "ts": ts, "evidence": {"r3": {"verdict": "PASS"}}},
+        {"event": "transition", "family": "f/c", "genome_id": "g4", "ts": ts, "evidence": {"r5": {"verdict": "PASS"}}},
+    ]
+    # holdout(f/a) counts once (two finalists = one look), r3(g3), r5(g4) -> 3 looks with an EMPTY log
+    with pytest.raises(H.UnsealRefused, match="3 unseals already recorded .* across the unseal log and the registry"):
+        H.assert_unseal_allowed([], reg_lines, command="holdout", family="f/new", genome_ids=["x"], root="r",
+                                root_digest="0" * 64, now=now)
+    # in another quarter the same evidence counts for nothing
+    import datetime as dt
+    H.assert_unseal_allowed([], reg_lines, command="holdout", family="f/new", genome_ids=["x"], root="r",
+                            root_digest="0" * 64, now=dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
+
+
+def test_lock_is_per_purpose_not_per_digest(tmp_path):  # [RT2-1]
+    """A copied root with one price changed (+ its SHA256SUMS entry fixed) or an edited manifest is the same look."""
+    setup = Setup(tmp_path, genomes=(FR31A, NOFILTER))
+    root = make_sealed_root(tmp_path / "ladders_holdout")
+    out, _l, _b = _run_holdout(setup, root, finalists=setup.finalists([FR31A_ID]))
+    assert out.verdicts == {FR31A_ID: "PASS"}
+
+    def tweaked(name: str, mutate) -> Path:
+        c = tmp_path / name
+        shutil.copytree(root, c)
+        mutate(c)
+        # re-sign every CSV so SHA256SUMS verifies and the digest is genuinely new
+        lines = []
+        for rel in sorted(p.relative_to(c).as_posix() for p in c.glob("*/*.csv")):
+            lines.append(f"{hashlib.sha256((c / rel).read_bytes()).hexdigest()}  {rel}")
+        (c / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return c
+
+    def change_price(c: Path):
+        f = c / "KXHIGHNY" / "2026-08-01.csv"
+        f.write_text(f.read_text(encoding="utf-8").replace("0.2,0.3,", "0.21,0.3,", 1), encoding="utf-8")
+
+    def edit_manifest(c: Path):
+        m = json.loads((c / "manifest.json").read_text())
+        m["generated_at_utc"] = "2026-09-07T00:00:00Z"
+        (c / "manifest.json").write_text(json.dumps(m))
+
+    seal0 = H.inspect_root_seal(root, REPO)
+    for name, mut in (("copy_price", change_price), ("copy_manifest", edit_manifest)):
+        c = tweaked(name, mut)
+        sealc = H.inspect_root_seal(c, REPO)
+        assert H.verify_sha256sums(c)["failed"] == []
+        if name == "copy_price":
+            assert sealc.root_digest != seal0.root_digest  # a genuinely different digest ...
+        with pytest.raises(H.UnsealRefused, match="once per family per PURPOSE"):  # ... is still the same look
+            H.run_holdout(finalists_path=setup.finalists([FR31A_ID]), unseal_tag=TAG, root=c, paths=setup.paths,
+                          n_boot=100, frame_builder=RecordingBuilder(), out=lambda s: None)
+        with pytest.raises(H.UnsealRefused, match="once per family per PURPOSE"):  # any finalist of the family
+            H.run_holdout(finalists_path=setup.finalists([NOFILTER_ID]), unseal_tag=TAG, root=c, paths=setup.paths,
+                          n_boot=100, frame_builder=RecordingBuilder(), out=lambda s: None)
+    # score: per genome per purpose -- a tweaked copy of the R3 root is the same look for that genome
+    r3 = make_r3_root(tmp_path / "ladders_2026-09")
+    out2, _ = _run_score(setup, r3)
+    assert out2.verdicts == {FR31A_ID: "PASS"}
+    c3 = tmp_path / "ladders_2026-09_copy"
+    shutil.copytree(r3, c3)
+    f = c3 / "KXHIGHNY" / "2026-09-01.csv"
+    f.write_text(f.read_text(encoding="utf-8").replace("0.2,0.3,", "0.22,0.3,", 1), encoding="utf-8")
+    lines = [f"{hashlib.sha256((c3 / rel).read_bytes()).hexdigest()}  {rel}"
+             for rel in sorted(p.relative_to(c3).as_posix() for p in c3.glob("*/*.csv"))]
+    (c3 / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert H.inspect_root_seal(c3, REPO).root_digest != H.inspect_root_seal(r3, REPO).root_digest
+    with pytest.raises(H.UnsealRefused, match="already RATIFIED|once per genome per PURPOSE"):
+        H.run_score(genome_id=FR31A_ID, unseal_tag=TAG, root=c3, paths=setup.paths, n_boot=100,
+                    frame_builder=RecordingBuilder(), out=lambda s: None)
+    seal3 = H.inspect_root_seal(c3, REPO)
+    with pytest.raises(H.UnsealRefused, match="once per genome per PURPOSE"):
+        H.assert_unseal_allowed(H.read_unseal_log(setup.unseal_log), [], command="score", family=FAMILY,
+                                genome_ids=[FR31A_ID], root=seal3.relpath, root_digest=seal3.root_digest)
+    with pytest.raises(H.UnsealRefused, match="registry already carries r3 evidence"):
+        H.assert_unseal_allowed([], setup.registry().lines(), command="score", family=FAMILY,
+                                genome_ids=[FR31A_ID], root=seal3.relpath, root_digest=seal3.root_digest)
 
 
 def test_quarter_of():
@@ -715,7 +854,7 @@ def test_unseal_line_is_on_disk_before_the_first_row_is_read(tmp_path, monkeypat
     assert ln["root_digest"] == seal.root_digest and ln["sha256sums_digest"] == seal.sha256sums_digest
     assert ln["sha256sums_entries"] == 6 and ln["manifest_date_range"] == list(HB)
     assert ln["series"] == ["KXHIGHCHI", "KXHIGHLAX", "KXHIGHNY"]
-    assert ln["doc_sha256"] == hashlib.sha256(setup.revival.read_bytes()).hexdigest()  # [RT1-2]
+    assert ln["doc_sha256"] == H.sha256_text(setup.revival.read_bytes().decode("utf-8").replace("\r", ""))  # [RT1-2]
     assert ln["doc_path"].endswith("REVIVAL.md")
     assert "manifest.json exposes days[].market_detail[].result" in ln["caveat"]
     assert H.read_unseal_log(setup.unseal_log) == [ln]
@@ -869,50 +1008,61 @@ def test_family_is_halted_only_when_nothing_passes_and_nothing_is_ratified(tmp_p
     assert last["evidence"]["holdout"]["failing"] and last["evidence"]["all_finalists"] == {NOFILTER_ID: "HALT"}
 
 
-def test_holdout_after_a_sibling_is_ratified_never_writes_ratified_and_never_halts(tmp_path):  # [RT1-6]
-    setup = Setup(tmp_path, genomes=(FR31A, NOFILTER))
-    hold = make_sealed_root(tmp_path / "ladders_holdout")
-    r3 = make_r3_root(tmp_path / "ladders_2026-09")
-    _run_holdout(setup, hold, finalists=setup.finalists([FR31A_ID]))
-    out, _l = _run_score(setup, r3)
-    assert out.verdicts == {FR31A_ID: "PASS"} and setup.registry().status(FAMILY) == "RATIFIED"
-    # genome B (nofilter) now takes the holdout on a fresh holdout-B copy under a new digest ... it FAILS
-    hold2 = make_sealed_root(tmp_path / "ladders_holdout_v2", dates=("2026-08-03", "2026-08-04"))
-    out2, _l2, _b2 = _run_holdout(setup, hold2, finalists=setup.finalists([NOFILTER_ID]))
-    assert out2.verdicts == {NOFILTER_ID: "HALT"}
-    reg = setup.registry()
-    assert reg.status(FAMILY) == "RATIFIED"  # the RATIFIED family is NOT halted by a failing sibling
-    last = setup.family_lines()[-1]
-    assert last["event"] == "evidence" and last["genome_id"] == NOFILTER_ID
-    # ... and a PASSING sibling B gets PROPOSED (never RATIFIED) and can still be scored. B is a distinct-id
-    # twin of fr31a (same phenotype, different name -> different genome_id), which passes on the planted frame.
-    b_genome = FR31A.with_meta(name="fr31a_twin_b")
+def test_score_beside_a_ratified_sibling_records_evidence_and_never_halts(tmp_path):  # [RT1-6, RT2-1, RT2-6]
+    """Under once-per-family-per-purpose a sibling can only enter through the SAME holdout run, so the
+    RATIFIED-sibling cases arise at `score`: a failing R3 beside a RATIFIED sibling is an evidence event."""
+    b_genome = FR31A.with_meta(name="fr31a_twin_b")  # same phenotype, different genome_id
     b_id = P.genome_id_for(P.genome_json_for(b_genome))
     assert b_id != FR31A_ID
-    setup3 = Setup(tmp_path / "s3", genomes=(FR31A, b_genome))
-    hold_b = make_sealed_root(tmp_path / "s3" / "ladders_holdout")
-    r3_b = make_r3_root(tmp_path / "s3" / "ladders_2026-09")
-    _run_holdout(setup3, hold_b, finalists=setup3.finalists([FR31A_ID]))
-    out3, _ = _run_score(setup3, r3_b)
-    assert out3.verdicts == {FR31A_ID: "PASS"} and setup3.registry().status(FAMILY) == "RATIFIED"
-    hold_c = make_sealed_root(tmp_path / "s3" / "ladders_holdout_c", dates=("2026-08-03", "2026-08-04"))
-    out4, _l4, _b4 = _run_holdout(setup3, hold_c, finalists=setup3.finalists([b_id]))
-    assert out4.verdicts == {b_id: "PASS"}
-    tail = setup3.family_lines()[-2:]
-    assert tail[0]["event"] == "transition" and tail[0]["status"] == "PROPOSED" and tail[0]["genome_id"] == b_id
-    assert "holdout" in tail[0]["evidence"]
-    # the family's RATIFIED status is re-asserted for A (last-transition-wins; the OPS flow stamps status())
-    assert tail[1]["status"] == "RATIFIED" and tail[1]["genome_id"] == FR31A_ID and tail[1]["evidence"]["reasserted"]
-    assert "r3" not in tail[1]["evidence"] and H.r3_line(setup3.registry(), FAMILY, FR31A_ID)["evidence"]["r3"]
-    assert H.genome_status(setup3.registry(), FAMILY, b_id) == "PROPOSED"  # not ratified by a holdout
-    assert setup3.registry().status(FAMILY) == "RATIFIED"
-    r3_c = make_r3_root(tmp_path / "s3" / "ladders_2026-09c", dates=("2026-09-03", "2026-09-04"))
+    setup = Setup(tmp_path, genomes=(FR31A, b_genome))
+    hold = make_sealed_root(tmp_path / "ladders_holdout")
+    out0, _l, _b = _run_holdout(setup, hold)  # both finalists in ONE look
+    assert out0.verdicts == {FR31A_ID: "PASS", b_id: "PASS"}
+    assert [ln["status"] for ln in setup.family_lines()[-2:]] == ["PROPOSED", "PROPOSED"]
+    # a second holdout for the family is refused whatever the root (per purpose), even for a fresh copy
+    hold2 = make_sealed_root(tmp_path / "ladders_holdout_v2", dates=("2026-08-03", "2026-08-04"))
+    with pytest.raises(H.UnsealRefused, match="once per family per PURPOSE"):
+        _run_holdout(setup, hold2, finalists=setup.finalists([b_id]))
+    # A scores and is RATIFIED
+    r3a = make_r3_root(tmp_path / "ladders_2026-09")
+    out1, _ = _run_score(setup, r3a)
+    assert out1.verdicts == {FR31A_ID: "PASS"} and setup.registry().status(FAMILY) == "RATIFIED"
+    # B fails R3 beside the RATIFIED sibling: evidence event, family stays RATIFIED, B stays PROPOSED
+    r3b = make_r3_root(tmp_path / "ladders_2026-09b", dates=("2026-09-03", "2026-09-04"))
     import datetime as dt
-    next_quarter = dt.datetime(2027, 1, 15, tzinfo=dt.timezone.utc)  # the 4th look lands in a fresh quota window
-    out5 = H.run_score(genome_id=b_id, unseal_tag=TAG, root=r3_c, paths=setup3.paths, n_boot=200,
-                       frame_builder=RecordingBuilder(), out=lambda s: None, now=next_quarter)  # score B is not refused
-    assert out5.verdicts == {b_id: "PASS"}
-    assert H.ratified_genomes(setup3.registry(), FAMILY) == sorted([FR31A_ID, b_id])
+    q2 = dt.datetime(2027, 1, 15, tzinfo=dt.timezone.utc)  # 4th look: a fresh quota window
+    out2 = H.run_score(genome_id=b_id, unseal_tag=TAG, root=r3b, paths=setup.paths, n_boot=200,
+                       frame_builder=RecordingBuilder(losing_frame()), out=lambda s: None, now=q2)
+    assert out2.verdicts == {b_id: "HALT"}
+    last = setup.family_lines()[-1]
+    assert last["event"] == "evidence" and last["genome_id"] == b_id and last["evidence"]["r3"]["verdict"] == "HALT"
+    assert setup.registry().status(FAMILY) == "RATIFIED"
+    assert H.genome_status(setup.registry(), FAMILY, b_id) == "PROPOSED"
+    assert H.ratified_genomes(setup.registry(), FAMILY) == [FR31A_ID]
+    # and B can never be scored again (per genome per purpose), on any root
+    with pytest.raises(H.UnsealRefused, match="registry already carries r3 evidence|once per genome per PURPOSE"):
+        H.run_score(genome_id=b_id, unseal_tag=TAG, root=r3a, paths=setup.paths, n_boot=100,
+                    frame_builder=RecordingBuilder(), out=lambda s: None, now=q2)
+
+
+def test_reassert_flag_is_top_level_and_ratified_genomes_is_most_recent_first(tmp_path):  # [RT2-6]
+    b_genome = FR31A.with_meta(name="fr31a_twin_b")
+    b_id = P.genome_id_for(P.genome_json_for(b_genome))
+    setup = Setup(tmp_path, genomes=(FR31A, b_genome))
+    reg = setup.registry()
+    reg.transition(FAMILY, "RATIFIED", genome_id=FR31A_ID, evidence={"r3": {"verdict": "PASS"}})
+    reg.transition(FAMILY, "RATIFIED", genome_id=b_id, evidence={"r3": {"verdict": "PASS"}})
+    assert H.ratified_genomes(reg, FAMILY) == [b_id, FR31A_ID]
+    # the registry's `extra` puts the flag at the TOP level of the line, beside status, not only in evidence
+    ln = reg.transition(FAMILY, "RATIFIED", genome_id=FR31A_ID, evidence={"reasserted": True},
+                        extra={"reasserted": True})
+    assert ln["reasserted"] is True and ln["status"] == "RATIFIED"
+    raw = [json.loads(x) for x in setup.registry_path.read_text(encoding="utf-8").splitlines() if x.strip()][-1]
+    assert raw["reasserted"] is True and raw["evidence"]["reasserted"] is True
+    assert H.ratified_genomes(reg, FAMILY) == [FR31A_ID, b_id]  # the re-assert is the most recent RATIFIED line
+    from src.factory.registry import RegistryError
+    with pytest.raises(RegistryError, match="would shadow"):
+        reg.transition(FAMILY, "RATIFIED", genome_id=FR31A_ID, extra={"status": "PROPOSED"})
 
 
 def test_score_ratifies_on_pass_and_records_the_r3_checks(tmp_path):
@@ -1003,9 +1153,28 @@ def test_r5_check_re_evaluates_only_criterion_6_after_as_of_and_is_once_only(tmp
     last = setup.family_lines()[-1]
     assert last["status"] == "RATIFIED" and last["genome_id"] == FR31A_ID and last["evidence"]["r5"]["verdict"] == "PASS"
     assert last["evidence"]["r5"]["min_dates"] == H.COLD_SEASON_MIN_DATES
-    with pytest.raises(H.UnsealRefused, match="R5 re-check already"):
+    with pytest.raises(H.UnsealRefused, match="already spent their score-r5 look|R5 re-check already"):
         H.run_r5_check(genome_id=FR31A_ID, unseal_tag=TAG, root=r3, paths=setup.paths, out=lambda s: None)
     assert len(H.read_unseal_log(setup.unseal_log)) == n_log + 1
+    # ... and the registry alone (log deleted) still refuses it
+    setup.unseal_log.unlink()
+    with pytest.raises(H.UnsealRefused, match="R5 re-check already recorded in the registry"):
+        H.run_r5_check(genome_id=FR31A_ID, unseal_tag=TAG, root=r3, paths=setup.paths, out=lambda s: None)
+
+
+def test_r5_check_verifies_sha256sums_before_reading_rows(tmp_path):  # [RT2-5]
+    setup = Setup(tmp_path, genomes=(FR31A,))
+    hold = make_sealed_root(tmp_path / "ladders_holdout")
+    r3 = make_r3_root(tmp_path / "ladders_2026-09", dates=("2026-09-01", "2026-09-02", "2026-11-01"))
+    _run_holdout(setup, hold)
+    _run_score(setup, r3, as_of="2026-09-02")
+    f = r3 / "KXHIGHNY" / "2026-11-01.csv"
+    f.write_text(f.read_text(encoding="utf-8").replace("0.2,0.3,", "0.25,0.3,", 1), encoding="utf-8")
+    n_log = len(H.read_unseal_log(setup.unseal_log))
+    with pytest.raises(H.HoldoutAbort, match="SHA256SUMS check failed") as ei:
+        H.run_r5_check(genome_id=FR31A_ID, unseal_tag=TAG, root=r3, paths=setup.paths, out=lambda s: None)
+    assert ei.value.record is not None and ei.value.record.command == "score-r5"
+    assert len(H.read_unseal_log(setup.unseal_log)) == n_log + 1  # the look was spent, as for holdout/score
 
 
 def test_r5_check_halts_when_the_cold_season_month_is_missing_and_refuses_without_as_of(tmp_path):
@@ -1210,7 +1379,7 @@ def test_cli_aborts_with_the_spent_line_named_when_the_builder_raises_after_the_
     setup = Setup(tmp_path, genomes=(FR31A,))
     root = make_sealed_root(tmp_path / "ladders_holdout")
 
-    def boom(ladders, *, spec, embargo_days, root):
+    def boom(ladders, *, spec, embargo_days, root, **kw):
         raise ev.EVAnalysisError("ladder has no finite bracket; cannot measure its width")
 
     monkeypatch.setattr(H, "default_frame_builder", boom)
@@ -1226,7 +1395,25 @@ def test_cli_aborts_with_the_spent_line_named_when_the_builder_raises_after_the_
     # the same root cannot be re-run: the log line is still there
     rc2 = mod.main(_cli_args(setup, "holdout", "--finalists", str(setup.finalists()), "--ladders", str(root),
                              "--unseal", TAG))
-    assert rc2 == H.EXIT_REFUSED and "once per family per root" in capsys.readouterr().err
+    assert rc2 == H.EXIT_REFUSED and "once per family per PURPOSE" in capsys.readouterr().err
+
+
+def test_keyboard_interrupt_after_the_unseal_prints_spent_and_reraises(tmp_path, capsys):  # [RT2-3]
+    setup = Setup(tmp_path, genomes=(FR31A,))
+    root = make_sealed_root(tmp_path / "ladders_holdout")
+
+    def interrupt(ladders, *, spec, embargo_days, root):
+        raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        H.run_holdout(finalists_path=setup.finalists(), unseal_tag=TAG, root=root, paths=setup.paths, n_boot=100,
+                      frame_builder=interrupt, out=lambda s: None)
+    err = capsys.readouterr().err
+    assert "SPENT" in err and "unseal line 1 (holdout" in err and "KeyboardInterrupt" in err
+    assert len(H.read_unseal_log(setup.unseal_log)) == 1
+    with pytest.raises(H.UnsealRefused, match="once per family per PURPOSE"):
+        H.run_holdout(finalists_path=setup.finalists(), unseal_tag=TAG, root=root, paths=setup.paths, n_boot=100,
+                      frame_builder=RecordingBuilder(), out=lambda s: None)
 
 
 def test_a_refusal_before_the_unseal_is_never_reported_as_spent(tmp_path, capsys):
@@ -1322,6 +1509,52 @@ def test_default_frame_builder_end_to_end_on_a_real_shaped_root(tmp_path):  # [R
     assert setup.registry().status(FAMILY) == "HALT"
     assert any(ln.startswith("result_sha256 ") for ln in lines)
     assert len(H.read_unseal_log(setup.unseal_log)) == 1 and out.report_path.exists()
+    fa = out.doc["result"]["forecast_archive"]
+    assert fa["relpath"] == "data/forecast_archive" and fa["explicit"] is False and fa["covers"] if "covers" in fa else True
+    assert fa["gfs_mex_coverage"][0] <= "2026-07-26" and fa["gfs_mex_coverage"][1] >= "2026-07-27"
+
+
+def test_gefs_twin_build_failure_never_aborts_the_spent_look(tmp_path, monkeypatch):  # [RT2-4a]
+    if not (REPO / "data" / "forecast_archive" / "forecast_series_gfs_mex.csv").exists():
+        pytest.skip("forecast archive not on disk")
+    setup = Setup(tmp_path, genomes=(FR31A,))
+    root = make_real_shaped_root(tmp_path / "ladders_r3_real")
+    if root is None:
+        pytest.skip("truth files do not cover the synthetic root's dates")
+    setup.write_holdout_pass(FR31A_ID)
+    from src.factory.lanes import weather as W
+    real = W.build_opportunities_from_ladders
+
+    def flaky(ladders, source=None, **kw):
+        if source == "gefs":
+            raise ev.EVAnalysisError("no forecast vintage could be matched to any snapshot")
+        return real(ladders, source, **kw)
+
+    monkeypatch.setattr(W, "build_opportunities_from_ladders", flaky)
+    out = H.run_score(genome_id=FR31A_ID, unseal_tag=TAG, root=root, paths=setup.paths, n_boot=200, out=lambda s: None)
+    g2 = out.doc["result"]["genomes"][FR31A_ID]["gates"]["gefs_twin_ge0"]
+    assert g2["pass"] is False and "gefs twin UNAVAILABLE (EVAnalysisError: no forecast vintage" in g2["note"]
+    assert out.verdicts == {FR31A_ID: "HALT"} and out.report_path.exists()
+
+
+def test_forecast_archive_dir_is_selected_before_the_unseal(tmp_path):  # [RT2-4b]
+    if not (REPO / "data" / "forecast_archive" / "forecast_series_gfs_mex.csv").exists():
+        pytest.skip("forecast archive not on disk")
+    cov = H.gfs_mex_coverage(REPO / "data" / "forecast_archive")
+    assert cov and cov[0] <= "2026-07-26"
+    sel = H.select_forecast_archive_dir(("2026-07-26", "2026-07-27"), None, REPO)
+    assert sel["relpath"] == "data/forecast_archive" and sel["explicit"] is False
+    with pytest.raises(H.UnsealRefused, match="no forecast archive covers the root's dates 2031-01-01"):
+        H.select_forecast_archive_dir(("2031-01-01", "2031-01-02"), None, REPO)
+    with pytest.raises(H.UnsealRefused, match="no forecast archive covers"):
+        H.select_forecast_archive_dir(("2026-07-26", "2026-07-27"), tmp_path / "nowhere", REPO)
+    # through the command, with the DEFAULT builder, a root beyond coverage is refused before any write
+    setup = Setup(tmp_path, genomes=(FR31A,))
+    setup.write_holdout_pass(FR31A_ID)
+    far = make_r3_root(tmp_path / "ladders_2031", dates=("2031-01-01",))
+    with pytest.raises(H.UnsealRefused, match="no forecast archive covers"):
+        H.run_score(genome_id=FR31A_ID, unseal_tag=TAG, root=far, paths=setup.paths, n_boot=100, out=lambda s: None)
+    _assert_nothing_written(setup)
 
 
 # ===========================================================================
