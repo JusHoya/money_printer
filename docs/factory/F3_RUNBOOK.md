@@ -425,13 +425,45 @@ payloads live, or re-establish parity under the frozen provider). Grep for it on
 curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=500'   | python -c "import json,sys; print(json.load(sys.stdin)['content'])"   | grep -E 'CALIBRATION PROVIDER MISMATCH|GenomeStrategy REFUSED'
 ```
 
+### 4.6 Collecting a fill-realism tape that means something
+
+Two ways this study has produced a number that was not what it claimed to be. Both
+are now fixed in the script, but they decide how you collect.
+
+**Collect over the hours the genome trades.** The 2026-09-05 runs covered 02:00Z and
+03:00Z only; the deployed genome's 130 offline trades contain **zero** there (15Z
+34.6 %, 04Z 27.7 %, 16Z 16.2 %). Aim at a `:00` boundary in the 14Z-16Z band:
+
+```bash
+PYTHONPATH=. python scripts/measure_fill_realism.py   --url http://maia.local:8050/api/logs/data   --cache data/fill_realism/maia_tape_<date>_daytime.csv   --collect-seconds 12000 --poll-interval 3.0 --date <date>
+```
+
+`data/fill_realism/` is gitignored scratch; commit a trimmed tape beside the report
+as `reports/factory/fill_realism_<date>_tape.csv`, per the 2026-09-05 pair.
+
+**The 20-second primary window is not measurable at maia's cadence.** Per-market poll
+gap is p50 ~35-41 s / p90 ~74-79 s (the bot rotates cities), so the 20 s window has
+n = 0 and the reported p90 is a *next-poll* number at a ~35-40 s lag — a conservative
+upper bound, and the report says so in `p90_basis`. The table's older "14-s maia tape"
+was wrong; nothing polls that fast.
+
+**A zero ask is an empty book, not a cheap contract.** `_parse_price` returns `0.0`
+for a missing ask, and a next-day ladder sits at ask 0.00 / volume 0 until it opens,
+so the first real quote used to score as adverse drift of the entire ask. On the
+2026-09-06 daytime tape that alone read p90 = **0.06** — six times `adverse_fill`,
+which by the FR-5.2 exit criterion would have forced a registry change and a re-score
+of family #1. `measure_fill_realism._ask` now drops non-positive asks, matching
+`genome_strategy.py`'s own rule ("a zero ask is not a quote"), and the same tape reads
+**0.00**. If you ever see a p90 in the tens of cents, check for `ask 0.00 / volume 0`
+rows at the decision poll before believing it.
+
 ## 5. Weekly reconcile and gate cadence (GATE-owned scripts)
 
 | When | What | Script (GATE workstream) |
 |---|---|---|
 | daily 13:30Z (existing timer) | settle sandbox weather positions against CLI truth | `scripts/reconcile_weather.py` (`deploy/pi/systemd/mp-reconcile-weather.timer`) |
 | weekly (Monday, after the daily reconcile) | lab-vs-paper: every sandbox fill re-priced at `quote + adverse_fill`, C=20 taker, held to settlement; the sandbox trade set ⊆ the lab trade set with REJECT codes for the difference | `scripts/factory_paper_reconcile.py` |
-| once after ≥ 1 day of shadow tape, then after any `adverse_fill` change | intra-cadence bid/ask drift at :00 decision points on the 14-s maia tape (`/api/logs/data` or a local CSV); p90 → recommended `adverse_fill` | `scripts/measure_fill_realism.py` → `reports/factory/fill_realism_<date>.json` |
+| once after ≥ 1 day of shadow tape, then after any `adverse_fill` change | intra-cadence bid/ask drift at :00 decision points on the maia tape (`/api/logs/data` or a local CSV); p90 → recommended `adverse_fill`. **Collect over the hours the genome trades** (15Z/16Z/04Z), not a quiet overnight boundary — see below | `scripts/measure_fill_realism.py` → `reports/factory/fill_realism_<date>.json` |
 | after ≥ 50 settled `target_date`s of **paper** (F4) | FR-5.2 gate: exact binomial p vs fee-adjusted breakeven, net PnL > 0, spec hash unchanged vs `gate_registration.json` | `scripts/gate.py --registration configs/factory/gate_registration.json` → `reports/factory/gate_<id>.json` |
 
 In shadow mode the reconcile has no fills to re-price; run it anyway once a week so the
