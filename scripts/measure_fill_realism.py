@@ -166,6 +166,32 @@ def _f(v: Any) -> Optional[float]:
     return x if math.isfinite(x) else None
 
 
+def _ask(v: Any) -> Optional[float]:
+    """An ask, or ``None`` when there is no quote on that side.
+
+    ``src/data/kalshi_provider.py::_parse_price`` returns **0.0** for a missing or
+    null ask, so a zero here means an EMPTY BOOK, not a free contract. The strategy
+    already knows this -- ``genome_strategy.py`` maps ``yes_ask <= 0.0`` to NaN with
+    the comment "a zero ask is not a quote" -- and this study has to use the same
+    rule, or it measures something the strategy would never have traded.
+
+    It is not a rounding detail. Treating 0.0 as a price turns every book OPENING
+    into an adverse tick: a next-day ladder sits at ask 0.0 / volume 0 until it
+    opens, and the first real quote then reads as a drift of the whole ask. On the
+    2026-09-06 daytime tape that single confusion moved the reported p90 from
+    0.00 to 0.06 and would have told the registry to raise ``adverse_fill`` sixfold
+    and re-score family #1 -- on markets nobody could have been filled in.
+
+    The 02Z/03Z runs never saw it because next-day books were already open by then,
+    so the defect was invisible in exactly the hours that were measured and appears
+    in exactly the hours the genome trades.
+    """
+    x = _f(v)
+    if x is None or x <= 0.0:
+        return None
+    return x
+
+
 def _ts(v: str, tz: timezone) -> Optional[datetime]:
     try:
         dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
@@ -247,7 +273,7 @@ def analyse(
         if ts is None:
             continue
         n_market_rows += 1
-        series[ticker].append((ts, _f(r.get("Ask")), _f(r.get("NoAsk"))))
+        series[ticker].append((ts, _ask(r.get("Ask")), _ask(r.get("NoAsk"))))
 
     counts: Counter = Counter()
     lag_samples: List[float] = []

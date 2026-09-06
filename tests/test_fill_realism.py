@@ -357,3 +357,78 @@ def test_cli_writes_dated_report(tmp_path):
     assert rep["recommended_adverse_fill"] == 0.02 and rep["p90_exceeds_1c"] is True
     md = (out / "fill_realism_2026-09-05.md").read_text("utf-8")
     assert "EXCEEDS 1c" in md and "| 20s | both_sides |" in md
+
+
+# ---------------------------------------------------------------------------
+# A zero ask is an EMPTY BOOK, not a free contract (2026-09-06).
+#
+# kalshi_provider._parse_price returns 0.0 for a missing/null ask, and
+# genome_strategy.py maps `yes_ask <= 0.0` to NaN with the comment "a zero ask is
+# not a quote". This study has to use the same rule or it measures decision points
+# the strategy would never have traded -- and the failure is not small or safe:
+# a next-day ladder sits at ask 0.0 / volume 0 until its book opens, so the first
+# real quote reads as an adverse tick of the ENTIRE ask.
+#
+# Real case, 2026-09-06 daytime tape, KXHIGHLAX-26SEP07-T83:
+#   14:00:13  bid 0.00  ask 0.00  volume 0     <- the decision poll
+#   14:00:59  bid 0.76  ask 0.78  volume 58    <- the book opens
+# scored as +0.78 of "adverse drift". Across the boundary this moved the reported
+# p90 from 0.00 to 0.06 and would have told the registry to raise adverse_fill
+# sixfold and re-score family #1, on markets nobody could have been filled in.
+# The 02Z/03Z runs never saw it: next-day books were already open by then.
+# ---------------------------------------------------------------------------
+D = "KXHIGHMIA-26SEP07-T83 (Market)"
+
+
+def test_zero_ask_is_not_a_quote():
+    """The parser rule, matching genome_strategy.py:822."""
+    assert mfr._ask("0.40") == 0.40
+    assert mfr._ask("0.0") is None
+    assert mfr._ask("0") is None
+    assert mfr._ask("-0.01") is None, "a negative ask is not a quote either"
+    assert mfr._ask("") is None
+    assert mfr._ask(None) is None
+
+
+def test_a_book_opening_is_not_adverse_drift():
+    """The whole failure, end to end: an empty book at :00, a real quote after."""
+    rows = [
+        _row("2026-09-06T13:59:50.0", D, "0.0", "1.0"),
+        _row("2026-09-06T14:00:13.0", D, "0.0", "1.0"),   # decision poll: no book
+        _row("2026-09-06T14:00:59.0", D, "0.78", "0.24"),  # the book opens
+    ]
+    rep = mfr.analyse(rows, series_prefix="KXHIGH", windows=(20.0, 60.0))
+    # The empty side contributes NO drift sample at all -- it is not a decision point.
+    assert rep["next_poll_adverse_drift"]["yes_ask"]["n"] == 0, rep["next_poll_adverse_drift"]["yes_ask"]
+    assert rep["recommended_adverse_fill"] == 0.01
+    assert not rep["p90_exceeds_1c"]
+
+
+def test_a_real_quote_at_the_decision_poll_still_measures_drift():
+    """The guard must not silence genuine adverse movement."""
+    rows = [
+        _row("2026-09-06T13:59:50.0", D, "0.40", "0.61"),
+        _row("2026-09-06T14:00:13.0", D, "0.40", "0.61"),
+        _row("2026-09-06T14:00:33.0", D, "0.47", "0.61"),
+    ]
+    rep = mfr.analyse(rows, series_prefix="KXHIGH", windows=(20.0, 60.0))
+    assert rep["next_poll_adverse_drift"]["yes_ask"]["n"] == 1
+    assert rep["next_poll_adverse_drift"]["yes_ask"]["max"] == pytest.approx(0.07)
+    assert rep["recommended_adverse_fill"] == pytest.approx(0.07)
+    assert rep["p90_exceeds_1c"]
+
+
+def test_the_2026_09_05_published_result_is_unchanged_by_the_rule():
+    """The fix must not rewrite a published number. That tape never had a zero ask."""
+    tape = _REPO_ROOT / "reports" / "factory" / "fill_realism_2026-09-05_tape.csv"
+    if not tape.exists():
+        pytest.skip("committed 2026-09-05 tape not present")
+    published = json.loads(
+        (_REPO_ROOT / "reports" / "factory" / "fill_realism_2026-09-05.json").read_text(encoding="utf-8")
+    )
+    rep = mfr.analyse(mfr.read_csv_rows([str(tape)]), series_prefix="KXHIGH", windows=(20.0, 60.0))
+    assert rep["statement"] == published["statement"]
+    assert rep["recommended_adverse_fill"] == published["recommended_adverse_fill"]
+    assert rep["p90_next_poll"] == published["p90_next_poll"]
+    assert rep["next_poll_adverse_drift"] == published["next_poll_adverse_drift"]
+    assert rep["adverse_drift"] == published["adverse_drift"]
