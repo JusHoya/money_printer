@@ -19,6 +19,13 @@ Line shapes::
      "notes": "", "ts": iso, "git_rev": sha}
     {"event": "transition", "family": ..., "status": "PROPOSED"|"RATIFIED"|"CLOSED"|"HALT",
      "genome_id": ..., "evidence": {...}, "ts": iso, "git_rev": sha}
+    {"event": "evidence", "family": ..., "genome_id": ..., "evidence": {...}, "ts": iso, "git_rev": sha}
+
+``evidence`` lines (F4, 2026-09-06) are status-neutral: ``status()`` ignores
+them. They record a sealed-root outcome (a failed holdout finalist, a failed
+R3/R5 for a genome whose sibling is RATIFIED) without HALTing a family that
+still holds a live genome; the once-per-root lock in ``holdout.py`` reads
+their ``evidence.*.root_digest`` like any transition's.
 """
 from __future__ import annotations
 
@@ -220,6 +227,22 @@ class Registry:
             "notes": notes,
         }
         return self._append(line)
+
+    def evidence(
+        self,
+        family: str,
+        *,
+        genome_id: Optional[str],
+        evidence: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Append a status-neutral evidence line (the family must be registered and not terminal)."""
+        self.assert_registered(family)
+        current = self.status(family)
+        if current in TERMINAL:
+            raise RegistryError(f"family {family!r} is {current}; no further evidence lines")
+        return self._append(
+            {"event": "evidence", "family": family, "genome_id": genome_id, "evidence": dict(evidence or {})}
+        )
 
     def transition(
         self,
