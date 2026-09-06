@@ -701,16 +701,28 @@ class GenomeStrategy(Strategy):
             want_f = spec.calibration.forecast_sha256
             want_t = dict(spec.calibration.truth_sha256 or {})
             problems: List[str] = []
-            if want_f is None or not want_t:
+            if want_f is None and not want_t:
                 problems.append("the spec pins no archives (promoted before calibration.forecast_sha256 / "
                                 "truth_sha256 existed)")
             else:
-                if live_f != want_f:
+                # Every archive the provider SERVES must be pinned and must match. A pin map
+                # that simply omits a station (second red team, 2026-09-06: KNYC deleted from
+                # a 3-station map, spec rehashed, KNYC mutated -> loaded clean) is a mismatch,
+                # not a pass: iterate what is served, not what the spec chose to mention.
+                if want_f is None:
+                    problems.append(f"forecast archive sha {str(live_f)[:12]} is served but the spec pins none")
+                elif live_f != want_f:
                     problems.append(f"forecast archive sha {str(live_f)[:12]} != spec {want_f[:12]}")
-                for station, sha in sorted(want_t.items()):
-                    got = live_t.get(station)
-                    if got != sha:
+                for station, got in sorted(live_t.items()):
+                    sha = want_t.get(station)
+                    if sha is None:
+                        problems.append(f"truth {station} sha {str(got)[:12]} is served but the spec pins no {station}")
+                    elif got != sha:
                         problems.append(f"truth {station} sha {str(got)[:12]} != spec {sha[:12]}")
+                for station in sorted(set(want_t) - set(live_t)):
+                    problems.append(f"the spec pins truth {station} but the provider serves no {station}")
+                if not live_t:
+                    problems.append("the provider serves no truth archive at all")
             self.archive_pins_ok = not problems
             if problems:
                 self.archive_pins_detail = "; ".join(problems)

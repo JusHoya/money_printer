@@ -745,6 +745,19 @@ def cmd_promote(args: argparse.Namespace) -> int:
     execute it (``src.factory.sizing``; see
     ``reports/factory/sizing_cold_start_2026-09-05.md``).  The sizing guard
     runs before replay parity, so the refusal is immediate.
+
+    Two switches (second red team, 2026-09-06):
+
+    * ``--rewrite-parity-report`` -- without it, an EXISTING per-genome
+      ``reports/factory/replay_parity_<sha12>_<id>.json`` (FR-F3.4 evidence) is
+      refused up front, before the sizing guard and the replay; a re-promote
+      must never rewrite it silently.
+    * ``--verify-committed`` -- READ-ONLY: the same builder (replay parity + pin
+      stamping), skipping ONLY the sizing guard and every write, then a diff of the
+      built document against ``configs/factory/promoted/<id>.json`` (LF-normalised):
+      ``IDENTICAL`` (exit 0) or ``DIFFERS`` with the differing keys (exit 1). It
+      exists because the sizing guard fires for five of the six committed specs, so
+      the real path could re-verify only one of them.
     """
     from src.factory import frame as FRAME
     from src.factory import genome as G
@@ -831,6 +844,30 @@ def cmd_promote(args: argparse.Namespace) -> int:
     frames_dir = Path(args.frames) if args.frames else _latest_frames_dir(str(config.get("lane", "weather")))
     if frames_dir is None or not frames_dir.exists():
         _die("no frozen frames found; pass --frames DIR")
+    verify_only = bool(getattr(args, "verify_committed", False))
+    # --out-dir names the directory holding the spec under verification (default the
+    # committed configs/factory/promoted), so a test can verify a COPY without ever
+    # touching a tracked spec; in this mode the directory is only ever read.
+    committed_path = (Path(args.out_dir) if args.out_dir else PROMOTED_DIR) / f"{gid}.json"
+    if verify_only and not committed_path.exists():
+        _die(f"--verify-committed: no spec to verify at {committed_path}")
+
+    # The per-genome parity report is FR-F3.4 evidence. A re-promote must not rewrite
+    # it silently (second red team, 2026-09-06: re-promoting 09fca4bc rewrote it in
+    # place). Refused up front -- before the sizing guard and the slow replay -- unless
+    # the operator says --rewrite-parity-report; --verify-committed never writes it.
+    frame_sha12 = None
+    try:
+        frame_sha12 = str(json.loads((frames_dir / "search" / "provenance.json").read_text(encoding="utf-8"))
+                          .get("frame_sha256") or "")[:12]
+    except (OSError, ValueError):
+        pass
+    if frame_sha12 and not verify_only and not bool(getattr(args, "rewrite_parity_report", False)):
+        existing = REPORTS_ROOT / f"replay_parity_{frame_sha12}_{gid}.json"
+        if existing.exists():
+            _die(f"{existing.relative_to(REPO_ROOT).as_posix()} already exists and is FR-F3.4 evidence; "
+                 f"promote will not overwrite it silently. Pass --rewrite-parity-report to replace it "
+                 f"on purpose, or --verify-committed to check the committed spec without writing anything")
 
     # --- cold-start sizing guard (reports/factory/sizing_cold_start_2026-09-05.md) ---
     # Runs BEFORE replay parity: a shape the runtime cannot size is not worth a
@@ -842,16 +879,21 @@ def cmd_promote(args: argparse.Namespace) -> int:
             _die(f"--min-sizable-fraction may only be raised above the "
                  f"{S.MIN_SIZABLE_TRADE_FRACTION:.2f} default, not lowered to {min_frac:.2f}; "
                  f"loosening this bar is how {S.FINDING_REPORT} happened")
-    sizing_frame_dir = frames_dir / ("gefs_twin" if str(getattr(genome, "source", "gfs_mex")) == "gefs" else "search")
-    if not sizing_frame_dir.exists():
-        _die(f"cold-start sizing guard needs {sizing_frame_dir}, which does not exist")
-    try:
-        sizing_audit = S.assert_promotable(
-            FRAME.load(str(sizing_frame_dir)), genome, label=f"{name} ({gid})", min_fraction=min_frac
-        )
-    except S.UnsizableGenomeError as exc:
-        _die(str(exc))
-    print(f"promote: cold-start sizing OK -- {sizing_audit.summary()}")
+    if verify_only:
+        # The ONLY thing --verify-committed skips. It cannot write, so it cannot promote,
+        # so the guard has nothing to guard here; for an actual promotion it is untouched.
+        print(f"promote: --verify-committed: cold-start sizing guard SKIPPED (read-only run; nothing will be written)")
+    else:
+        sizing_frame_dir = frames_dir / ("gefs_twin" if str(getattr(genome, "source", "gfs_mex")) == "gefs" else "search")
+        if not sizing_frame_dir.exists():
+            _die(f"cold-start sizing guard needs {sizing_frame_dir}, which does not exist")
+        try:
+            sizing_audit = S.assert_promotable(
+                FRAME.load(str(sizing_frame_dir)), genome, label=f"{name} ({gid})", min_fraction=min_frac
+            )
+        except S.UnsizableGenomeError as exc:
+            _die(str(exc))
+        print(f"promote: cold-start sizing OK -- {sizing_audit.summary()}")
 
     print(f"promote {gid} ({name}, {source_label}): replay parity on {frames_dir.name} ...")
     try:
@@ -864,8 +906,14 @@ def cmd_promote(args: argparse.Namespace) -> int:
     res = doc["genomes"][name]
     print(rp.render_table(doc))
     report_path = REPORTS_ROOT / f"replay_parity_{str(doc['search_sha256'])[:12]}_{gid}.json"
-    write_json(report_path, doc)
-    print(f"promote: parity report {report_path}")
+    if verify_only:
+        print(f"promote: --verify-committed: parity report NOT written ({report_path.name} untouched)")
+    else:
+        if report_path.exists() and not bool(getattr(args, "rewrite_parity_report", False)):
+            _die(f"{report_path.relative_to(REPO_ROOT).as_posix()} already exists (FR-F3.4 evidence); "
+                 f"pass --rewrite-parity-report to replace it; nothing written")
+        write_json(report_path, doc)
+        print(f"promote: parity report {report_path}")
     if res["n_discrepancies"] != 0 or not res["p_yes_within_tol"]:
         _die(f"replay parity FAILED for {name}: {res['n_discrepancies']} discrepancies, "
              f"p_yes max diff {res['p_yes_max_abs_diff']:.3e}; nothing written")
@@ -912,6 +960,40 @@ def cmd_promote(args: argparse.Namespace) -> int:
         if problems:
             _die("--mode paper refused: the spec about to be written is not the one registered: "
                  + "; ".join(problems) + "; nothing written")
+    if verify_only:
+        # READ-ONLY: the document the builder would write, byte-for-byte as write_promoted
+        # would serialise it (report.write_json: sort_keys, indent=2, trailing LF), against
+        # the committed file with CRLF normalised. Nothing is written in this branch.
+        from src.factory.report import _json_safe, _norm_paths
+
+        built_doc = spec.to_doc(with_hash=True)
+        built_text = json.dumps(_json_safe(_norm_paths(built_doc)), sort_keys=True, indent=2) + "\n"
+        committed_text = committed_path.read_bytes().replace(b"\r\n", b"\n").decode("utf-8")
+        committed_doc = json.loads(committed_text)
+        shown = (committed_path.relative_to(REPO_ROOT).as_posix()
+                 if str(committed_path).startswith(str(REPO_ROOT)) else str(committed_path))
+        if built_text == committed_text:
+            print(f"verify-committed {gid}: IDENTICAL to {shown} "
+                  f"(spec_hash {spec.spec_hash[:12]}; parity {res['n_discrepancies']} disc / "
+                  f"p_yes {res['p_yes_max_abs_diff']:.1e}; sizing guard skipped; nothing written)")
+            return 0
+
+        def _flat(d: Any, prefix: str = "") -> Dict[str, Any]:
+            if isinstance(d, dict):
+                out: Dict[str, Any] = {}
+                for k, v in d.items():
+                    out.update(_flat(v, f"{prefix}{k}."))
+                return out
+            return {prefix[:-1]: d}
+
+        a, b = _flat(built_doc), _flat(committed_doc)
+        differing = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+        print(f"verify-committed {gid}: DIFFERS from {shown} "
+              f"(built spec_hash {spec.spec_hash[:12]} vs committed {str(committed_doc.get('spec_hash'))[:12]}); "
+              f"differing keys: {differing}; nothing written")
+        for k in differing:
+            print(f"  {k}: built={a.get(k)!r} committed={b.get(k)!r}")
+        return 1
     out_dir = Path(args.out_dir) if args.out_dir else PROMOTED_DIR
     path = P.write_promoted(spec, out_dir / f"{gid}.json")
     P.load_promoted(path)  # round-trip: hash verifies
@@ -1212,6 +1294,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "size at cold start (default 0.75; values below it are refused)")
     pm.add_argument("--registration", default=None,
                     help="gate_registration.json to check for --mode paper (default configs/factory/gate_registration.json)")
+    pm.add_argument("--verify-committed", action="store_true",
+                    help="READ-ONLY: build the spec document through the same builder (replay parity + pin "
+                         "stamping), skipping ONLY the cold-start sizing guard and every write, and diff it "
+                         "against configs/factory/promoted/<id>.json (or <--out-dir>/<id>.json, read only; "
+                         "LF-normalised); prints IDENTICAL or DIFFERS with the differing keys; exit 0 iff "
+                         "IDENTICAL. Never writes a spec or a parity report")
+    pm.add_argument("--rewrite-parity-report", action="store_true",
+                    help="allow promote to overwrite an EXISTING reports/factory/replay_parity_<sha12>_<id>.json "
+                         "(FR-F3.4 evidence; refused otherwise)")
     pm.set_defaults(func=cmd_promote)
     # ---- end F3 STRATEGY block ---------------------------------------------
 

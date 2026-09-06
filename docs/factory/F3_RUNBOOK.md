@@ -460,6 +460,38 @@ or a bug:
   below -- is the **CRLF-normalised** `fees.sha256_file`, so an LF and a CRLF checkout of
   the same content agree (raw-byte hashing had made an LF checkout + CRLF root abort parity
   with `forecast archive sha db0911f30c45 != frame provenance 2c8367037cbf`).
+* **The pin check covers what is SERVED, not what the spec mentions** (second red team,
+  2026-09-06): a walk-forward spec whose `truth_sha256` map simply omitted KNYC (rehashed,
+  KNYC mutated) used to load clean. The guard now iterates the provider's `truth_sha256`
+  stations and requires each to be pinned AND to match; a served station the spec does not
+  pin, a pinned station the provider does not serve, or a forecast pin missing while truth
+  pins exist are all mismatches -- paper refuses, shadow logs `ARCHIVE PIN MISMATCH ...
+  the spec pins no KNYC`.
+* **A gefs genome cannot be served live -- and is now refused rather than mis-served.** The
+  live vintage path (`ForecastVintageProvider.live` over `MOSGuidanceProvider`) fetches
+  GFS-MEX MOS guidance and nothing else; handed the gefs spec `008458c1bd0dc5e7` it used to
+  fetch MEX rows, stamp them `gefs`, and price them through the GEFS-fitted calibration with
+  no guard and no log (second red team, 2026-09-06). The earlier F3 record that a gefs genome
+  "would always hit `GENOME_NO_VINTAGE`" was **wrong** -- it got vintages, the wrong ones.
+  Now `ForecastVintageProvider.live` refuses any `forecast_source` outside `LIVE_SOURCES =
+  ("gfs_mex",)`, and `WeatherBot._build_genome_strategy` checks first: paper ->
+  `GenomeSpecMismatch("no live provider for forecast_source 'gefs' ...")`, shadow -> a
+  `FORECAST SOURCE UNAVAILABLE: GenomeStrategy REFUSED <id>` line and the genome is NOT
+  loaded (V2 only). Both reach `/api/genome` as `refused: true` / `refused_reason`. gefs
+  genomes remain offline-only (replay parity, dry run from the archive CSV) until a real
+  live GEFS fetch exists.
+* **Verifying the committed specs without promoting** (`factory.py promote <id> --from-seed
+  NAME --verify-committed`): builds the spec document through the same builder (full replay
+  parity + pin stamping), skips ONLY the cold-start sizing guard -- which fires for five of
+  the six committed specs and is untouched for a real promotion -- writes nothing (no spec,
+  no parity report), and prints `verify-committed <id>: IDENTICAL ...` or `DIFFERS ...
+  differing keys: [...]` against `configs/factory/promoted/<id>.json` (LF-normalised).
+  2026-09-06, all six: IDENTICAL (`008458 f97757b1a299`, `03355f d4ef89ea6b6e`, `09fca4
+  c542c0475aaa`, `0c4b20 a48957d13a13`, `ad4825 db619dfbc073`, `d02c9e 3585b95973c1`).
+  Relatedly, `promote` now **refuses up front** to overwrite an existing
+  `reports/factory/replay_parity_<sha12>_<id>.json` (FR-F3.4 evidence) unless
+  `--rewrite-parity-report` is passed -- re-promoting `09fca4bc` earlier that day had
+  rewritten it silently.
 
 Measure it -- the gating evidence, the diagnostic, and its control, same command:
 
