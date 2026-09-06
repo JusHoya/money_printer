@@ -180,7 +180,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = Path(os.path.dirname(os.path.dirname(_THIS_DIR)))
 
 # ``src.data.kalshi_history`` and ``src.backtest`` are imported LAZILY, inside the functions that need them:
-# ``kalshi_history`` pulls in ``src.data.kalshi_provider`` (the live client), which the factory package must
+# ``kalshi_history`` pulls in the live exchange client module (the one ``tests/test_factory_no_live_capital.py`` names), which the factory package must
 # never load at import time (OPS red team, 2026-09-06; pinned by
 # tests/test_factory_holdout.py::test_importing_holdout_does_not_load_the_kalshi_client). The sealed reader is
 # resolved through this module attribute so tests can spy on it; ``None`` means "import on first use".
