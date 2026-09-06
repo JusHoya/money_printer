@@ -394,6 +394,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -2062,6 +2063,15 @@ def evaluate(
         "refused": refused,
         "refusal": "; ".join(refusals) if refusals else None,
         "refusals": list(refusals),
+        # F4 exit criterion 5 names these four by name ("grouped count, exact binomial
+        # p, net PnL and spec-hash check"); they are ALIASES of the numbers below,
+        # lifted to the top level so gate_<id>.json answers the criterion on its
+        # first screen. Nothing here is computed differently.
+        "grouped_count": n_units,
+        "p_exact": p_units,
+        "p_exact_str": _fraction_str(p_exact),
+        "net_pnl": net_pnl,
+        "spec_hash_unchanged": hash_ok,
         "conditions": conditions,
         "failing": [name for name, c in conditions.items() if c.get("ok") is False and c.get("gating", True)],
         "not_applicable": not_applicable,
@@ -2699,7 +2709,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--journal", default="data/trade_journal.jsonl")
     ap.add_argument("--state", default=None, help="exchange_state.json (closed_trades)")
     ap.add_argument("--registration", required=True, help="gate_registration.json")
-    ap.add_argument("--out", default=None, help="verdict JSON path")
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="verdict JSON path (default reports/factory/gate_<genome_id>.json, the file F4 exit criterion 5 names)",
+    )
     ap.add_argument("--strategy", default=None, help="override registration.strategy_name")
     ap.add_argument(
         "--promoted", default=None, help="override registration.promoted_spec_path"
@@ -2736,15 +2750,35 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def default_out_path(registration_path: str, reports_root: Optional[str] = None) -> str:
+    """``reports/factory/gate_<genome_id>.json`` -- the verdict file F4 exit criterion 5 names.
+
+    ``genome_id`` is read from the registration; a registration that cannot be
+    read falls back to ``gate_unregistered.json`` so a usage error is still
+    reported by ``run_gate`` rather than masked here.
+    """
+    root = reports_root or os.path.join(REPO_ROOT, "reports", "factory")
+    try:
+        with open(registration_path, "r", encoding="utf-8") as fh:
+            reg = json.load(fh)
+        gid = str((reg or {}).get("genome_id") or "").strip()
+    except (OSError, ValueError, AttributeError):
+        gid = ""
+    if not gid or not re.fullmatch(r"[0-9a-f]{8,64}", gid):
+        gid = "unregistered"
+    return os.path.join(root, f"gate_{gid}.json")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     rf = {"true": True, "false": False, "unknown": None}[args.realistic_fills]
+    out_path = args.out if args.out else default_out_path(args.registration)
     try:
         verdict = run_gate(
             journal_path=args.journal,
             state_path=args.state,
             registration_path=args.registration,
-            out_path=args.out,
+            out_path=out_path,
             strategy_override=args.strategy,
             promoted_override=args.promoted,
             allow_unverified_registration=args.allow_unverified_registration,
