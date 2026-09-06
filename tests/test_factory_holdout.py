@@ -696,7 +696,7 @@ def test_unseal_line_is_on_disk_before_the_first_row_is_read(tmp_path, monkeypat
     setup = Setup(tmp_path)
     root = make_sealed_root(tmp_path / "ladders_holdout")
     seen: Dict[str, Any] = {}
-    real_loader = H._load_ladders_unchecked
+    from src.data.kalshi_history import _load_ladders_unchecked as real_loader  # H's attr is a lazy sentinel
 
     def spy(r, *a, **k):
         seen["log_at_read"] = H.read_unseal_log(setup.unseal_log)
@@ -1068,6 +1068,20 @@ def test_the_sanctioned_tape_is_marked_and_the_mark_does_not_survive_concat(tmp_
     stamped.attrs["ladder_root"] = str(sr.SEALED_LADDER_ROOTS[0])
     with pytest.raises(sr.SealedDataError):
         sr.assert_frame_not_sealed(stamped)
+
+
+def test_importing_holdout_does_not_load_the_kalshi_client():
+    """OPS red team: the factory package must not pull the live-capital client in at import time."""
+    import subprocess
+    import sys as _sys
+
+    code = ("import sys, src.factory.holdout; "
+            "assert 'src.data.kalshi_provider' not in sys.modules, sorted(m for m in sys.modules if m.startswith('src.data')); "
+            "assert 'src.data.kalshi_history' not in sys.modules; "
+            "print('ok')")
+    r = subprocess.run([_sys.executable, "-c", code], cwd=str(REPO), capture_output=True, text=True, timeout=180,
+                       env={**__import__("os").environ, "PYTHONPATH": str(REPO)})
+    assert r.returncode == 0 and r.stdout.strip() == "ok", r.stderr
 
 
 def test_the_bypass_symbols_live_only_in_holdout_py():

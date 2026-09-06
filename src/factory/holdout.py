@@ -151,12 +151,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from src.backtest.sealed_roots import (
-    DEV_SET_LAST_DATE,
-    SEALED_EVALUATION_ATTR,
-    SEALED_MARKER,
-)
-from src.data.kalshi_history import _load_ladders_unchecked
 from src.factory import fitness
 from src.factory import genome as G
 from src.factory import multiplicity as MP
@@ -166,6 +160,13 @@ from src.factory.registry import TERMINAL, Registry, RegistryError, git_rev
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = Path(os.path.dirname(os.path.dirname(_THIS_DIR)))
+
+# ``src.data.kalshi_history`` and ``src.backtest`` are imported LAZILY, inside the functions that need them:
+# ``kalshi_history`` pulls in ``src.data.kalshi_provider`` (the live client), which the factory package must
+# never load at import time (OPS red team, 2026-09-06; pinned by
+# tests/test_factory_holdout.py::test_importing_holdout_does_not_load_the_kalshi_client). The sealed reader is
+# resolved through this module attribute so tests can spy on it; ``None`` means "import on first use".
+_load_ladders_unchecked = None
 
 DEFAULT_UNSEAL_LOG = REPO_ROOT / "reports" / "factory" / "unseal_log.jsonl"
 DEFAULT_REVIVAL_DOC = REPO_ROOT / "docs" / "REVIVAL_2026_09.md"
@@ -451,6 +452,8 @@ def manifest_metadata(root: Path) -> Tuple[Tuple[str, str], Tuple[str, ...]]:
 
 def inspect_root_seal(root: Union[str, Path], repo_root: Path = REPO_ROOT) -> RootSeal:
     """Refuse a root without ``SEALED`` + ``SHA256SUMS`` + manifest or with dev-set-dated CSVs. Reads no rows."""
+    from src.backtest.sealed_roots import DEV_SET_LAST_DATE, SEALED_MARKER
+
     r = Path(root)
     if not r.is_dir():
         raise UnsealRefused(f"ladder root {r} does not exist")
@@ -850,9 +853,14 @@ def open_sealed_root(root: Path, record: UnsealRecord):
     sets ``attrs[SEALED_EVALUATION_ATTR]`` to the record's identity, which the
     content gate honours and ``pd.concat`` drops (by design).
     """
+    from src.backtest.sealed_roots import SEALED_EVALUATION_ATTR
+
     if record.line_no is None:
         raise HoldoutAbort("open_sealed_root called before the unseal line was appended; refusing", record)
-    df = _load_ladders_unchecked(root)
+    loader = _load_ladders_unchecked
+    if loader is None:
+        from src.data.kalshi_history import _load_ladders_unchecked as loader  # the ONLY sanctioned reader
+    df = loader(root)
     origin = df.attrs.pop("ladder_root", str(Path(root).resolve()))
     df.attrs["unsealed_root"] = origin
     df.attrs[SEALED_EVALUATION_ATTR] = {
@@ -929,6 +937,8 @@ def _count(v: Any) -> int:
 
 def audit_root(root: Union[str, Path], repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
     """Truth-filter drop fraction from ``manifest.json`` COUNTS only. No CSV is opened, nothing is written."""
+    from src.backtest.sealed_roots import SEALED_MARKER
+
     r = Path(root)
     manifest = r / MANIFEST
     if not manifest.is_file():
