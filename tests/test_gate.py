@@ -88,6 +88,20 @@ gate = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None
 _spec.loader.exec_module(gate)
 
+
+@pytest.fixture(autouse=True)
+def _gate_verdicts_go_to_tmp(tmp_path, monkeypatch):
+    """F4: ``gate.main`` without ``--out`` now writes ``reports/factory/gate_<genome_id>.json``.
+
+    These tests score SYNTHETIC records under the deployed genome's real id
+    (``SPEC`` is the fr31a_taker seed = 0c4b20502f2daf65), so an un-redirected
+    run would leave a fake FAIL verdict in the repo -- which ``factory.py board``
+    would then render as ``KILLED:GATE_FAIL`` for the live genome. Point the
+    default at tmp_path for every test here.
+    """
+    monkeypatch.setattr(gate, "REPO_ROOT", str(tmp_path))
+
+
 from src.core.weather_settlement import settlement_close_for  # noqa: E402
 from src.ml.trade_journal import TradeJournal, TradeOutcome  # noqa: E402
 

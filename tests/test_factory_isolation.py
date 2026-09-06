@@ -50,6 +50,10 @@ LAB_ONLY = (
     # construction: the sandbox must keep executing the real risk manager, not
     # an offline model of it.
     "sizing",
+    # F4 OPS: the gate-registration builder (git, template) and the PAPER board
+    # row (reads maia over HTTP / state files). Both are operator-side; the
+    # sandbox must never hold the code that judges its own record.
+    "registration", "paper",
 )
 BLOCKED_LIBS = ("lightgbm", "scipy", "pyarrow", "torch", "xgboost")
 WALL_CLOCK_FILES = (

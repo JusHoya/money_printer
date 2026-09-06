@@ -1,0 +1,31 @@
+[Unit]
+Description=Money Printer weekly lab-vs-paper reconcile of the promoted genome (PRD_STRATEGY_FACTORY FR-F4.2; docs/FACTORY.md)
+# WHY THIS LIVES ON alcyone AND NOT ON maia: scripts/factory_paper_reconcile.py
+# re-scores the genome's lab trade set on the FROZEN SEARCH FRAME
+# (data/factory/frames/<lane>_<cutoff>_<sha12>/, gitignored, ~30 MB, pandas +
+# pyarrow), which exists only in the lab. The sandbox side it needs -- the
+# journal, the closed_trades ledger, the REJECT log lines -- it reads from maia
+# over the read-only HTTP API (/api/journal, /api/closed_trades, /api/logs/tail),
+# so the Pi runs nothing new. The `lab` compose service keeps its network (the
+# `factory` service is network_mode: none on purpose and cannot reach maia).
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jushoya
+Group=jushoya
+WorkingDirectory=/home/jushoya/projects/money_printer
+Environment=MP_REPO_DIR=/home/jushoya/projects/money_printer
+Environment=MONEY_PRINTER_URL=http://maia.local:8050
+# The genome to reconcile: unset = whatever maia's /api/genome reports as deployed.
+# Environment=MP_GENOME_ID=0c4b20502f2daf65
+ExecStart=/usr/bin/env bash /home/jushoya/projects/money_printer/deploy/spark/factory_reconcile.sh
+# A week of maia tape against one frozen frame is seconds; the ceiling only stops
+# a wedged container from overlapping the next run.
+TimeoutStartSec=30m
+Nice=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mp-factory-reconcile

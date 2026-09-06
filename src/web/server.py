@@ -10,6 +10,7 @@ Routes:
     GET  /api/portfolio_history  → merged equity curve from logs/portfolio_*.csv
     GET  /api/genome             → the promoted genome's status alone
     GET  /api/journal            → recent trade-journal entries
+    GET  /api/closed_trades      → the exchange's closed_trades ledger + open positions (F4)
     GET  /api/training           → ML training state (offline-produced)
     GET  /api/win_rates          → raw per-strategy win-rate file
     GET  /api/stats/rolling      → rolling PnL/WR/EV over a window
@@ -334,6 +335,50 @@ def create_app(state_manager, orchestrator) -> FastAPI:
             return JSONResponse(content={"ok": False, "error": str(e)}, status_code=500)
         body["ok"] = True
         return JSONResponse(content=body)
+
+    @app.get("/api/closed_trades")
+    async def get_closed_trades(last_n: int = 500, strategy: str = ""):
+        """The exchange's ``closed_trades`` ledger and open positions, read-only (F4, FR-F4.2).
+
+        ``scripts/factory_paper_reconcile.py`` and the ``factory.py board``
+        PAPER row need ``entry_fee`` per settled fill, which lives only in the
+        exchange state (the journal carries ``pnl`` but not the fee), and until
+        this route the state was "NOT exposed over HTTP" (that script's
+        docstring), so a LAN reader could only recompute the fee. Side-effect
+        free like ``/api/genome``: it touches ``rm.exchange`` through attribute
+        reads only -- no ``get_stats()`` reset, no equity point, no mascot.
+        Capped at 500 rows like ``/api/journal``; ``capped`` says whether the
+        cap cut anything. GET, so ``MP_CONTROL_TOKEN`` never applies.
+        """
+        rm = getattr(orchestrator, "risk_manager", None)
+        exchange = getattr(rm, "exchange", None) if rm is not None else None
+        if exchange is None:
+            return JSONResponse(
+                content={"ok": False, "error": "no exchange on this process"},
+                status_code=404,
+            )
+        try:
+            closed = [dict(t) for t in list(getattr(exchange, "closed_trades", None) or []) if isinstance(t, dict)]
+            positions = [dict(p) for p in list(getattr(exchange, "positions", None) or []) if isinstance(p, dict)]
+        except Exception as e:
+            log.error(f"[api] closed_trades error: {e}")
+            return JSONResponse(content={"ok": False, "error": str(e)}, status_code=500)
+        total = len(closed)
+        if strategy:
+            closed = [t for t in closed if str(t.get("strategy_name") or t.get("strategy") or "") == strategy]
+        cap = min(max(int(last_n), 1), 500)
+        capped = len(closed) > cap
+        closed = closed[-cap:]
+        body = {
+            "ok": True,
+            "count": len(closed),
+            "total_closed_trades": total,
+            "capped": capped,
+            "closed_trades": closed,
+            "positions": positions,
+        }
+        # datetimes inside the position dicts are not JSON-native
+        return JSONResponse(content=json.loads(json.dumps(body, default=str)))
 
     @app.get("/api/logs/data")
     async def get_data_log():

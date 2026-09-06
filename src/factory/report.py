@@ -355,6 +355,59 @@ def _lane_units(info: Dict[str, Any]) -> str:
     return f"{left}; ETA {eta if eta else DASH}"
 
 
+def _paper_cell_value(v: Any) -> str:
+    """A pre-formatted string passes through; a number is rendered signed to 4 dp."""
+    return v if isinstance(v, str) else _fmt(v)
+
+
+def _paper_row(paper: Optional[Dict[str, Any]]) -> List[str]:
+    """The PAPER board row (F4 exit criterion 4/5; built by ``src.factory.paper``).
+
+    Columns reuse the family table's slots: ``pooled OOS lo..hi`` carries the
+    sandbox's realized c/contract (from ``closed_trades``, never equity),
+    ``dates`` the settled ``target_date`` count (the FR-5.2 unit), ``trades`` the
+    settled fills, ``vs fr31a`` the factory's prediction for the same genome, and
+    ``status`` either ``<mode> k/n_min`` or ``KILLED:<reason>`` -- the same
+    ``KILLED:`` marker ``_row_cell`` uses for a constraint-killed seed, so a
+    reader of either table meets one vocabulary.
+    """
+    if not paper:
+        return ["PAPER", "n/a (F3)", DASH, DASH, "n/a (F3)", "n/a (F3)", "n/a (F3)", DASH, DASH, DASH,
+                "n/a (F3)", DASH, DASH, "sandbox closed_trades vs factory prediction"]
+    p = paper
+    gid = str(p.get("genome_id") or DASH)
+    killed = p.get("killed")
+    status = str(p.get("status") or DASH)
+    if killed and not status.startswith("KILLED"):
+        status = f"KILLED:{killed}"
+    pick = f"`{gid[:8]}` {p.get('strategy_name') or ('Genome ' + gid[:8])}" if gid != DASH else DASH
+    if p.get("mode"):
+        pick += f" ({p['mode']})"
+    n_settled = int(p.get("settled_trades") or 0)
+    c = p.get("sandbox_c_per_contract")
+    sandbox = (
+        f"sandbox {_paper_cell_value(c)}/c ({n_settled} fills)" if c is not None
+        else f"sandbox {DASH} ({n_settled} settled fills)"
+    )
+    pred = p.get("prediction_c_per_contract")
+    if pred is None:
+        prediction = f"pred {DASH}"
+    else:
+        prediction = f"pred {_paper_cell_value(pred)}/c"
+        if p.get("prediction_lo") is not None and p.get("prediction_hi") is not None:
+            prediction += f" [{_fmt(p['prediction_lo'])}, {_fmt(p['prediction_hi'])}]"
+        if p.get("prediction_source"):
+            prediction += f" ({p['prediction_source']})"
+    k = p.get("settled_target_dates")
+    n_min = p.get("n_min")
+    dates = f"{_fmt(k)}/{n_min} target_dates" if (k is not None and n_min) else _fmt(k)
+    return [
+        "PAPER", status, str(p.get("family") or DASH), pick, sandbox, dates,
+        _fmt(n_settled), DASH, DASH, DASH, prediction, DASH, DASH,
+        str(p.get("note") or "sandbox closed_trades vs factory prediction"),
+    ]
+
+
 def render_board(summary: Optional[Dict[str, Any]], coverage: Optional[Dict[str, Any]], paper: Optional[Dict[str, Any]] = None) -> str:
     summary = summary or {}
     seeds = summary.get("seeds") or {}
@@ -397,13 +450,7 @@ def render_board(summary: Optional[Dict[str, Any]], coverage: Optional[Dict[str,
             ])
         else:
             rows.append([lane, _lane_status(info), DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, DASH, _lane_units(info)])
-    p = paper or {}
-    rows.append([
-        "PAPER", p.get("status", "n/a (F3)"), p.get("family", DASH), p.get("genome_id", DASH),
-        p.get("sandbox_c_per_contract", "n/a (F3)"), _fmt(p.get("settled_target_dates")) if p else "n/a (F3)",
-        _fmt(p.get("settled_trades")) if p else "n/a (F3)", DASH, DASH, DASH,
-        p.get("prediction_c_per_contract", "n/a (F3)"), DASH, DASH, p.get("note", "sandbox closed_trades vs factory prediction"),
-    ])
+    rows.append(_paper_row(paper))
 
     out = ["# Factory board", ""]
     out.append(f"run `{summary.get('run_id', DASH)}` ({summary.get('kind', DASH)}) -- registry {(_g(summary, 'registry_line', 'status') or 'UNREGISTERED')}")

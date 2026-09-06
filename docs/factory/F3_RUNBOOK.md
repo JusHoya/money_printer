@@ -554,7 +554,7 @@ rows at the decision poll before believing it.
 | When | What | Script (GATE workstream) |
 |---|---|---|
 | daily 13:30Z (existing timer) | settle sandbox weather positions against CLI truth | `scripts/reconcile_weather.py` (`deploy/pi/systemd/mp-reconcile-weather.timer`) |
-| weekly (Monday, after the daily reconcile) | lab-vs-paper: every sandbox fill re-priced at `quote + adverse_fill`, C=20 taker, held to settlement; the sandbox trade set ⊆ the lab trade set with REJECT codes for the difference | `scripts/factory_paper_reconcile.py` |
+| weekly (Monday 14:30Z, after the daily reconcile) — `mp-factory-reconcile.timer` **on alcyone** (F4; it needs the frozen search frame, which only the lab has, and reads maia over HTTP) | lab-vs-paper: every sandbox fill re-priced at `quote + adverse_fill`, C=20 taker, held to settlement; the sandbox trade set ⊆ the lab trade set with REJECT codes for the difference | `deploy/spark/factory_reconcile.sh` → `scripts/factory_paper_reconcile.py --url http://maia.local:8050` (`docs/FACTORY.md` §4.8) |
 | once after ≥ 1 day of shadow tape, then after any `adverse_fill` change | intra-cadence bid/ask drift at :00 decision points on the maia tape (`/api/logs/data` or a local CSV); p90 → recommended `adverse_fill`. **Collect over the hours the genome trades** (15Z/16Z/04Z), not a quiet overnight boundary — see below | `scripts/measure_fill_realism.py` → `reports/factory/fill_realism_<date>.json` |
 | after ≥ 50 settled `target_date`s of **paper** (F4) | FR-5.2 gate: exact binomial p vs fee-adjusted breakeven, net PnL > 0, spec hash unchanged vs `gate_registration.json` | `scripts/gate.py --registration configs/factory/gate_registration.json` → `reports/factory/gate_<id>.json` |
 

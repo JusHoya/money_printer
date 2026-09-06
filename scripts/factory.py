@@ -3,7 +3,10 @@
 
     python scripts/factory.py freeze-frame [--cutoff 2026-07-25 ...]
     python scripts/factory.py gen0 [--frames DIR] [--out reports/factory/gen0_<date>] [--workers N] [--bench]
-    python scripts/factory.py board | coverage | status
+    python scripts/factory.py board [--paper-url http://maia.local:8050 | --paper-state S --paper-journal J] [--genome ID]
+    python scripts/factory.py coverage | status
+    python scripts/factory.py register-gate <id> | register-gate --fill-commit-time     (F4, FR-F4.2)
+    python scripts/factory.py gate [-- gate.py args]                                    (-> scripts/gate.py)
     python scripts/factory.py run [--config Y] [--frames DIR] [--run-id ID] [--workers N] [--population N]
                                   [--generations N] [--master-seed S] [--campaigns A,B,C,ALL69]
                                   [--blocked-folds|--no-blocked-folds] [--out DIR]
@@ -464,6 +467,51 @@ def cmd_resume(args: argparse.Namespace) -> int:
 # --- F2 EVOLVE: run / resume (end) -----------------------------------------
 
 
+def _paper_row_for_board(args: argparse.Namespace, latest: Optional[Dict[str, Any]], summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The PAPER row (F4 exit criterion 4/5) from maia over HTTP or from state/journal files; ``None`` when not asked."""
+    from src.factory import paper as PAPER
+    from src.factory import report as report_mod
+    from src.factory.registry import Registry
+
+    url = getattr(args, "paper_url", None)
+    state = getattr(args, "paper_state", None)
+    journal = getattr(args, "paper_journal", None)
+    if not url and not state and not journal:
+        return None
+    if url and (state or journal):
+        _die("board: pass --paper-url OR --paper-state/--paper-journal, not both")
+    try:
+        inputs = PAPER.load_sandbox_http(url) if url else PAPER.load_sandbox_files(state, journal)
+    except PAPER.PaperInputError as exc:
+        _die(f"board: {exc}")
+    gblock = inputs.get("genome") or {}
+    gid = (getattr(args, "genome", None) or gblock.get("genome_id") or os.getenv("GENOME_STRATEGY_ID") or "").strip()
+    if not gid:
+        _die("board: which genome? pass --genome <id> (the sandbox did not report one)")
+    spec_doc = report_mod._load_json(PROMOTED_DIR / f"{gid}.json")
+    if spec_doc is None:
+        cands = [p for p in PROMOTED_DIR.glob("*.json") if p.stem.startswith(gid)]
+        if len(cands) == 1:
+            gid = cands[0].stem
+            spec_doc = report_mod._load_json(cands[0])
+    family = (spec_doc or {}).get("family") or gblock.get("family") or (summary or {}).get("family")
+    mode = getattr(args, "mode", None) or inputs.get("genome_mode") or gblock.get("execution_mode") or (spec_doc or {}).get("mode")
+    reg = Registry(REPORTS_ROOT / "registry.jsonl", repo_root=REPO_ROOT)
+    registry_status = reg.status(str(family)) if family else None
+    family_summary = report_mod._load_json(REPORTS_ROOT / latest["family_summary"]) if latest and latest.get("family_summary") else None
+    gen0_summary = summary if summary and summary.get("seeds") else None
+    n_min = PAPER.n_min_from_registration(
+        REPO_ROOT / "configs" / "factory" / "gate_registration.json",
+        REPO_ROOT / "configs" / "factory" / "gate_registration.template.json",
+    )
+    gate_verdict = report_mod._load_json(PAPER.gate_verdict_path(gid, REPORTS_ROOT))
+    return PAPER.paper_row_from_inputs(
+        inputs, genome_id=gid, family=family, mode=mode, registry_status=registry_status,
+        family_summary=family_summary, gen0_summary=gen0_summary, spec_doc=spec_doc,
+        n_min=n_min, gate_verdict=gate_verdict, strategy_name=gblock.get("strategy"),
+    )
+
+
 def cmd_board(args: argparse.Namespace) -> int:
     from src.factory import report as report_mod
 
@@ -475,7 +523,12 @@ def cmd_board(args: argparse.Namespace) -> int:
     if summary is None and coverage is None:
         print("board: no reports/factory/latest.json or coverage.json yet", file=sys.stderr)
         return 1
-    print(report_mod.render_board(summary, coverage, None), end="")
+    paper = _paper_row_for_board(args, latest, summary)
+    if paper is not None and getattr(args, "paper_json", None):
+        out = Path(args.paper_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        report_mod.write_json(out, {k: v for k, v in paper.items()})
+    print(report_mod.render_board(summary, coverage, paper), end="")
     return 0
 
 
@@ -748,6 +801,31 @@ def cmd_promote(args: argparse.Namespace) -> int:
     if mode == "paper" and status not in P.PAPER_ALLOWED_STATUSES:
         _die(f"--mode paper refused: family {family} is {status}, not one of {P.PAPER_ALLOWED_STATUSES} "
              "(nothing may paper-trade a CLOSED genome; use --mode shadow)")
+    registration = None
+    if mode == "paper":
+        # FR-F4.2: gate_registration.json must exist, match this genome, and carry the
+        # commit time of the commit that ADDED it, BEFORE a paper spec may be written.
+        # The spec_hash it names is checked again below against the spec about to be
+        # written; everything else is checked here so a stale registration refuses
+        # before the (slow) replay parity.
+        from src.factory import registration as REG
+
+        reg_path = Path(args.registration) if getattr(args, "registration", None) else REG.REGISTRATION_PATH
+        try:
+            registration = REG.load_registration(reg_path)
+        except REG.RegistrationError as exc:
+            _die(f"--mode paper refused: {exc}")
+        pre_doc = {"genome_id": gid, "adverse_fill": registration.get("adverse_fill"), "fee": {"type": "taker"}}
+        problems = [
+            p for p in REG.check_registration(
+                registration, pre_doc, registry_status=status, require_commit_time=True,
+                expected_spec_hash=str(registration.get("spec_hash") or ""),
+            )
+        ]
+        if problems:
+            _die(f"--mode paper refused: {reg_path} does not license {gid}: " + "; ".join(problems))
+        print(f"promote: gate registration {reg_path.name} names {gid} "
+              f"(spec_hash {str(registration['spec_hash'])[:12]}, registered {registration['registration_commit_utc']})")
 
     frames_dir = Path(args.frames) if args.frames else _latest_frames_dir(str(config.get("lane", "weather")))
     if frames_dir is None or not frames_dir.exists():
@@ -815,11 +893,101 @@ def cmd_promote(args: argparse.Namespace) -> int:
                         else (config.get("frame") or {}).get("sigma_cap", 4.0)),
         mode=mode, registry_status=status, source=source_label, parity=parity,
     )
+    if registration is not None:
+        from src.factory import registration as REG
+
+        problems = REG.check_registration(
+            registration, spec.to_doc(), registry_status=status, require_commit_time=True,
+            expected_spec_hash=spec.spec_hash,
+        )
+        if problems:
+            _die("--mode paper refused: the spec about to be written is not the one registered: "
+                 + "; ".join(problems) + "; nothing written")
     out_dir = Path(args.out_dir) if args.out_dir else PROMOTED_DIR
     path = P.write_promoted(spec, out_dir / f"{gid}.json")
     P.load_promoted(path)  # round-trip: hash verifies
     print(f"promote: wrote {path} (mode={mode}, registry={status}, spec_hash={spec.spec_hash[:12]})")
     return 0
+
+
+def cmd_register_gate(args: argparse.Namespace) -> int:
+    """Generate ``configs/factory/gate_registration.json`` from the template + a promoted spec, or stamp it.
+
+    ``register-gate <id>`` writes the file with ``registration_commit_utc: null``
+    and prints the exact git command that fills it. ``register-gate
+    --fill-commit-time`` reads that commit time from git and refuses while the
+    file is untracked or carries uncommitted edits (FR-F4.2; F3_RUNBOOK section 5).
+    """
+    from src.factory import promoted as P
+    from src.factory import registration as REG
+    from src.factory.registry import Registry
+
+    reg_path = Path(args.registration) if args.registration else REG.REGISTRATION_PATH
+    if args.fill_commit_time:
+        if args.id:
+            _die("register-gate: --fill-commit-time takes no genome id")
+        try:
+            stamp = REG.fill_commit_time(reg_path)
+        except REG.RegistrationError as exc:
+            _die(f"register-gate: {exc}")
+        print(f"register-gate: {reg_path} registration_commit_utc = {stamp}")
+        print("register-gate: commit this edit too -- `git add "
+              f"{_relpath_posix(reg_path)} && git commit -m 'gate: registration commit time'`")
+        return 0
+    if not args.id:
+        _die("register-gate needs a genome id (or --fill-commit-time)")
+    spec_dir = Path(args.spec_dir) if args.spec_dir else PROMOTED_DIR
+    try:
+        spec = P.load_promoted(str(args.id), str(spec_dir))
+    except P.PromotedSpecError as exc:
+        cands = [p for p in spec_dir.glob("*.json") if p.stem.startswith(str(args.id))] if len(str(args.id)) >= 8 else []
+        if len(cands) != 1:
+            _die(f"register-gate: {exc}")
+        spec = P.load_promoted(str(cands[0]))
+    if spec.fee.type == "maker":
+        _die(f"register-gate: {spec.genome_id} is a MAKER genome; it can never be paper-promoted, so it has no gate")
+    reg = Registry(REPORTS_ROOT / "registry.jsonl", repo_root=REPO_ROOT)
+    status = reg.status(spec.family) or "OPEN"
+    if status not in P.PAPER_ALLOWED_STATUSES and not args.allow_closed:
+        _die(f"register-gate: family {spec.family} is {status}, not one of {P.PAPER_ALLOWED_STATUSES}; a paper "
+             "spec cannot exist for it, so a registration would name a spec_hash no promotion can produce. "
+             "(--allow-closed writes it anyway for a dry run; promote --mode paper still refuses.)")
+    if reg_path.exists() and not args.force:
+        _die(f"register-gate: {reg_path} exists; a registration is re-issued, never edited in place -- "
+             "pass --force to overwrite (and re-commit + re-fill the commit time)")
+    doc = REG.build_registration(spec.to_doc(), registry_status=status)
+    REG.write_registration(doc, reg_path)
+    rel = _relpath_posix(reg_path)
+    print(f"register-gate: wrote {rel} for {spec.genome_id} (strategy_name {doc['strategy_name']!r}, "
+          f"paper spec_hash {doc['spec_hash'][:12]}, registry {status}, adverse_fill {doc['adverse_fill']})")
+    print("register-gate: registration_commit_utc is null. Next:")
+    print(f"  git add {rel} && git commit -m 'gate: register {spec.genome_id} (FR-F4.2)'")
+    print(f"  {REG.GIT_ADDED_COMMAND.format(path=rel)}")
+    print("  python scripts/factory.py register-gate --fill-commit-time   # fills it from that command, refuses if uncommitted")
+    print(f"  git add {rel} && git commit -m 'gate: registration commit time'")
+    return 0
+
+
+def _relpath_posix(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    """Thin wrapper: ``factory.py gate [gate.py args...]`` -> ``scripts/gate.py`` (default --registration)."""
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import gate as gate_mod  # noqa: E402
+
+    argv = list(args.gate_args or [])
+    if argv[:1] == ["--"]:
+        argv = argv[1:]
+    if "--registration" not in argv:
+        argv = ["--registration", str(REPO_ROOT / "configs" / "factory" / "gate_registration.json")] + argv
+    return int(gate_mod.main(argv))
 # ===========================================================================
 # end F3 STRATEGY block
 # ===========================================================================
@@ -944,7 +1112,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="overwrite an existing reports/factory/<run_id>/summary.json and the latest.json pointer")
     g0.set_defaults(func=cmd_gen0)
 
-    b = sub.add_parser("board", help="print board.md rendered from the latest summary + coverage")
+    b = sub.add_parser("board", help="print board.md rendered from the latest summary + coverage (+ the PAPER row, F4)")
+    b.add_argument("--paper-url", default=None,
+                   help="read the sandbox over HTTP (e.g. http://maia.local:8050: /api/genome, /api/journal, /api/closed_trades)")
+    b.add_argument("--paper-state", default=None, help="exchange_state.json (closed_trades) for a file-sourced PAPER row")
+    b.add_argument("--paper-journal", default=None, help="trade_journal.jsonl for a file-sourced PAPER row")
+    b.add_argument("--genome", default=None, help="genome id for the PAPER row (default: the one the sandbox reports)")
+    b.add_argument("--mode", default=None, choices=("shadow", "paper"),
+                   help="execution mode for a file-sourced row (HTTP reads it from /api/genome)")
+    b.add_argument("--paper-json", default=None, help="also write the PAPER row (with its fills) to this JSON path")
     b.set_defaults(func=cmd_board)
 
     c = sub.add_parser("coverage", help="regenerate reports/factory/coverage.json")
@@ -1016,6 +1192,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="TIGHTEN the cold-start sizing guard: minimum fraction of the genome's "
                          "offline trades RiskManager.calculate_kelly_size would give a non-zero "
                          "size at cold start (default 0.75; values below it are refused)")
+    pm.add_argument("--registration", default=None,
+                    help="gate_registration.json to check for --mode paper (default configs/factory/gate_registration.json)")
     pm.set_defaults(func=cmd_promote)
     # ---- end F3 STRATEGY block ---------------------------------------------
 
@@ -1039,6 +1217,25 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=cmd_score)
     # ---- end F4 HOLDOUT block ---------------------------------------------------
 
+
+    # ---- F4 OPS: gate registration + gate wrapper ---------------------------
+    rg = sub.add_parser("register-gate", help="write configs/factory/gate_registration.json from the template + a promoted spec, "
+                                              "or --fill-commit-time to stamp it from git (FR-F4.2)")
+    rg.add_argument("id", nargs="?", default=None, help="genome id of a promoted spec on disk (>= 8-char prefix accepted)")
+    rg.add_argument("--fill-commit-time", action="store_true",
+                    help="fill registration_commit_utc from `git log --diff-filter=A --format=%%cI`; refuses if the file is not committed as-is")
+    rg.add_argument("--registration", default=None, help="path (default configs/factory/gate_registration.json)")
+    rg.add_argument("--spec-dir", default=None, help=f"where promoted specs live (default {PROMOTED_DIR})")
+    rg.add_argument("--force", action="store_true", help="overwrite an existing registration (re-issue)")
+    rg.add_argument("--allow-closed", action="store_true", help="dry run: write a registration for a family that is not PROPOSED/RATIFIED")
+    rg.set_defaults(func=cmd_register_gate)
+
+    gt = sub.add_parser("gate", help="run scripts/gate.py (FR-5.2) with --registration defaulted; other args pass through")
+    gt.add_argument("gate_args", nargs=argparse.REMAINDER, help="arguments for scripts/gate.py (e.g. --journal ... --state ... --quiet)")
+    gt.set_defaults(func=cmd_gate)
+    # ---- end F4 OPS block ---------------------------------------------------
+
+
     for name in NOT_IMPLEMENTED:  # empty since F4; kept so main()'s lenient parse stays uniform
         ni = sub.add_parser(name, help="not implemented yet")
         ni.set_defaults(func=cmd_not_implemented)
@@ -1046,6 +1243,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list] = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ["gate"] and raw[1:2] not in (["-h"], ["--help"]):
+        # `factory.py gate --journal ... --state ...`: every flag belongs to gate.py, and
+        # argparse would otherwise claim `--journal` as an unrecognised option of ours.
+        return int(cmd_gate(argparse.Namespace(command="gate", gate_args=raw[1:])) or 0)
     parser = build_parser()
     # The remaining stubs accept (and ignore) any arguments so `factory.py report --x`
     # exits 2 with the not-implemented message instead of an argparse error.
