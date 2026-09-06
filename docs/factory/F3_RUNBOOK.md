@@ -411,8 +411,24 @@ refuses otherwise. Before the first paper trade, copy
 `configs/factory/gate_registration.template.json` to `gate_registration.json`, commit it,
 then fill `registration_commit_utc` from
 `git log --diff-filter=A --format=%cI -- configs/factory/gate_registration.json` and
-commit again -- the gate fails while it is null. Pass `--realistic-fills true|false` to
-`gate.py` (the exchange state does not record the flag).
+commit again -- the gate fails while it is null.
+
+**Realistic fills (FR-5.2, updated 2026-09-05).** The exchange state still does not record
+the flag, but the run can now record it for itself. The sandbox reads `MP_REALISTIC_FILLS`
+(**default OFF** -- unset, today's fills are unchanged) and, either way, appends the
+exchange's *effective* fill configuration to `data/fill_config.jsonl` at startup, on every
+book movement, on a 300 s heartbeat and on shutdown. `gate.py --fill-config
+data/fill_config.jsonl` (that is the default path) matches each settled fill's `entry_time`
+against those run windows and passes the condition only when every scored fill was made
+inside a window that recorded `realistic_fills=true`; an absent, stale or non-covering log
+REFUSES. `--realistic-fills true|false` remains as the operator's own assertion for a run
+with no log, and is now the *lowest*-precedence source: an assertion that contradicts the
+log refuses instead of overriding it. **Turning the switch on is an owner decision** (it
+changes what the paper record means -- PRD_STRATEGY_FACTORY owner decision #4); the
+tooling only makes it possible and records what was actually done. Note the promoted
+genome is a *taker*, and the modelled effect is a penny-floor **resting** order that may
+not fill, so enabling it changes family #1's record very little -- that makes the condition
+cheap to satisfy here, it is not a reason to register `requires_realistic_fills: false`.
 
 ## 6. F3 exit checklist (INFRA items)
 

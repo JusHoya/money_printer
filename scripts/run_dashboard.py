@@ -1,10 +1,16 @@
 import fnmatch
+import json
+import random
 import shutil
+import socket
 import time
 import threading
 import os
 import sys
+import uuid
 import argparse
+from datetime import datetime as _datetime
+from datetime import timezone as _timezone
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -25,6 +31,209 @@ from src.notifications.discord import send_discord_notification
 
 # Import bots to trigger registration
 import src.bots  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# FILL CONFIGURATION RECORD (2026-09-05, F4 blocker 2 -- PRD FR-5.2)
+# ---------------------------------------------------------------------------
+# FR-5.2 says the promotion gate is evaluated ONLY on runs with realistic fills.
+# ``SimulatedExchange`` has carried the capability since Task E (2026-06-03) but
+# nothing in the runtime ever turned it on and nothing ever recorded whether it
+# was on: ``RiskManager.__init__`` builds the exchange without the argument and
+# ``_save_state`` does not serialise the flag. Both of those files are PROTECTED
+# (tests/test_protected_files.py), so the runtime switch and the evidence trail
+# both live here, in the orchestrator, which is not protected.
+#
+# TWO SEPARATE THINGS, deliberately kept apart:
+#
+#   1. The SWITCH -- ``MP_REALISTIC_FILLS``. DEFAULT OFF. Unset (or any falsey
+#      value) reproduces today's behaviour exactly: the exchange is constructed
+#      with ``realistic_fills=False`` by RiskManager and this code leaves every
+#      fill attribute alone. Deploying this branch with no new environment set
+#      changes NOTHING about how the sandbox fills orders.
+#      Whether the paper record SHOULD be produced with probabilistic
+#      penny-floor fills is an OWNER decision (PRD_STRATEGY_FACTORY owner
+#      decision #4), not this module's -- all this provides is the ability to
+#      make that decision, act on it, and have it recorded.
+#
+#   2. The EVIDENCE -- ``data/fill_config.jsonl``. An append-only log of the
+#      exchange's EFFECTIVE fill configuration, read back OFF THE EXCHANGE (not
+#      off the environment, so a mis-parsed variable or a later mutation is
+#      recorded as it really is, never as it was intended). ``scripts/gate.py``
+#      joins it to the paper record by TIME: a run's records bracket a window,
+#      and a settled fill counts as evidenced only when its ``entry_time`` falls
+#      inside a window whose recorded flag is true. That is what makes the
+#      record describe THE RUN THAT PRODUCED THE TRADES rather than the moment
+#      the gate happened to run, and it is why an absent or stale log makes the
+#      gate REFUSE rather than assume anything.
+#
+# HOW STRONG IS THIS? It is a machine-written, time-structured, hash-pinned
+# record -- NOT a tamper-proof one. The file is plain JSONL on the same disk as
+# everything else; an operator with write access can hand-craft lines. What it
+# buys over ``--realistic-fills true`` typed at the gate is that (a) the claim
+# is made by the process that owned the exchange, at the time it owned it,
+# (b) it has to be internally consistent with the fills it is supposed to cover
+# (run ids, windows, heartbeat cadence, the state file it names), (c) the gate
+# records the log's sha256 in the verdict, so a published verdict is bound to an
+# exact file that can be re-hashed later, and (d) an operator assertion that
+# CONTRADICTS the log refuses instead of overriding it. It raises forgery from
+# "type one word" to "fabricate a consistent run history and keep it consistent
+# with a hash already published in a committed verdict". It is evidence, not
+# proof, and the gate reports it as evidence.
+FILL_CONFIG_RECORD = "fill_config"
+FILL_CONFIG_SCHEMA_VERSION = 1
+FILL_CONFIG_LOG_DEFAULT = os.path.join("data", "fill_config.jsonl")
+#: Seconds between periodic liveness records. Also the grace the gate adds to a
+#: run's last record when the run left no ``stop`` event (i.e. it crashed), so
+#: keep it small -- it is the width of the window in which a fill made by some
+#: OTHER writer could be mis-attributed to this run's configuration.
+FILL_CONFIG_HEARTBEAT_S = 300.0
+
+_ENV_TRUE = frozenset({"1", "true", "t", "yes", "y", "on"})
+_ENV_FALSE = frozenset({"", "0", "false", "f", "no", "n", "off"})
+
+
+def _fill_env(name: str, env=None):
+    source = os.environ if env is None else env
+    value = source.get(name)
+    return None if value is None else str(value).strip()
+
+
+def realistic_fills_from_env(env=None) -> bool:
+    """``MP_REALISTIC_FILLS`` as a bool. DEFAULT AND FALLBACK: False.
+
+    Unset, empty, or any recognised falsey spelling is False. An UNRECOGNISED
+    value is False too, and says so in the log: the safe direction is the one
+    that leaves the live paper regime untouched, and the fill-config record
+    reports the exchange's real state either way, so a typo can never silently
+    masquerade as an enabled run.
+    """
+    raw = _fill_env("MP_REALISTIC_FILLS", env)
+    if raw is None:
+        return False
+    low = raw.lower()
+    if low in _ENV_TRUE:
+        return True
+    if low not in _ENV_FALSE:
+        logger.warning(
+            "[FillConfig] MP_REALISTIC_FILLS=%r is not a recognised boolean; "
+            "treating it as OFF (the default paper-trading regime)",
+            raw,
+        )
+    return False
+
+
+def fill_config_snapshot(exchange) -> dict:
+    """The exchange's EFFECTIVE fill configuration, read off the object."""
+    return {
+        "realistic_fills": bool(getattr(exchange, "realistic_fills", False)),
+        "penny_fill_prob": float(getattr(exchange, "penny_fill_prob", 0.0) or 0.0),
+        "penny_floor_band": [
+            float(getattr(exchange, "PENNY_FLOOR_LO", 0.01)),
+            float(getattr(exchange, "PENNY_FLOOR_HI", 0.05)),
+        ],
+        "fill_rng_seed": getattr(exchange, "fill_rng_seed", None),
+        "exchange_class": type(exchange).__name__,
+    }
+
+
+def apply_fill_config(exchange, env=None) -> dict:
+    """Push the environment's fill configuration onto an existing exchange.
+
+    ``RiskManager`` constructs ``SimulatedExchange`` with no fill arguments and
+    is a protected file, so the flag is set POST-CONSTRUCTION. That is sound by
+    construction, not by luck: the engine reads ``self.realistic_fills`` at FILL
+    TIME -- ``penny_floor_fill_probability`` (matching_engine.py:851) and the
+    early-out at the top of ``open_position`` (matching_engine.py:972) -- and
+    never caches it at ``__init__``. ``tests/test_fill_config_record.py`` pins
+    that behaviour so a future engine change that caches it fails loudly.
+
+    Writes NOTHING unless the environment asks for it, so with no new
+    environment set this is a no-op and the exchange keeps exactly the values
+    ``SimulatedExchange.__init__`` gave it. Returns the EFFECTIVE configuration
+    read back off the exchange.
+    """
+    if realistic_fills_from_env(env):
+        exchange.realistic_fills = True
+        prob = _fill_env("MP_PENNY_FILL_PROB", env)
+        if prob:
+            try:
+                exchange.penny_fill_prob = float(prob)
+            except ValueError:
+                logger.warning(
+                    "[FillConfig] MP_PENNY_FILL_PROB=%r is not a float; keeping %s",
+                    prob,
+                    getattr(exchange, "penny_fill_prob", None),
+                )
+        seed = _fill_env("MP_FILL_RNG_SEED", env)
+        if seed:
+            try:
+                exchange._fill_rng = random.Random(int(seed))
+                exchange.fill_rng_seed = int(seed)
+            except ValueError:
+                logger.warning("[FillConfig] MP_FILL_RNG_SEED=%r is not an int", seed)
+        logger.warning(
+            "[FillConfig] realistic_fills ENABLED (MP_REALISTIC_FILLS): resting orders "
+            "in [%.2f, %.2f] now fill probabilistically (base p=%.3f). This CHANGES "
+            "what the paper record means -- see PRD FR-5.2 and the fill-config log.",
+            getattr(exchange, "PENNY_FLOOR_LO", 0.01),
+            getattr(exchange, "PENNY_FLOOR_HI", 0.05),
+            getattr(exchange, "penny_fill_prob", 0.5),
+        )
+    return fill_config_snapshot(exchange)
+
+
+def fill_config_record(
+    exchange,
+    *,
+    run_id: str,
+    run_started_utc: str,
+    event: str,
+    heartbeat_sec: float = FILL_CONFIG_HEARTBEAT_S,
+    observed_utc: str = None,
+) -> dict:
+    """One append-only line describing this run's effective fill configuration."""
+    try:
+        host = socket.gethostname()
+    except Exception:  # pragma: no cover - gethostname does not fail in practice
+        host = None
+    state_file = getattr(exchange, "_state_file", None)
+    record = {
+        "record": FILL_CONFIG_RECORD,
+        "schema_version": FILL_CONFIG_SCHEMA_VERSION,
+        "run_id": run_id,
+        "event": event,
+        "run_started_utc": run_started_utc,
+        "observed_utc": observed_utc or _datetime.now(_timezone.utc).isoformat(),
+        "heartbeat_sec": float(heartbeat_sec),
+        "writer": "scripts/run_dashboard.py:OrchestratorEngine",
+        "entrypoint": (
+            os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else None
+        ),
+        "pid": os.getpid(),
+        "host": host,
+        "exchange_state_file": str(state_file) if state_file else None,
+        "open_positions": len(getattr(exchange, "positions", None) or []),
+        "closed_trades": len(getattr(exchange, "closed_trades", None) or []),
+        "penny_floor_requested": int(getattr(exchange, "penny_floor_requested", 0) or 0),
+        "penny_floor_skipped": int(getattr(exchange, "penny_floor_skipped", 0) or 0),
+    }
+    record.update(fill_config_snapshot(exchange))
+    return record
+
+
+def append_fill_config_record(path: str, record: dict) -> bool:
+    """Append one JSON line. Best-effort: never raises, never breaks the loop."""
+    try:
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+        return True
+    except Exception as exc:
+        logger.warning("[FillConfig] could not append to %s: %s", path, exc)
+        return False
 
 
 class OrchestratorEngine:
@@ -49,6 +258,20 @@ class OrchestratorEngine:
         self.dashboard = Dashboard()
         self.running = True
         self.risk_manager = RiskManager(starting_balance=100.0, persist_state=True)
+
+        # FR-5.2 fill configuration: apply the (default-OFF) opt-in to the
+        # already-constructed exchange, then open this run's evidence trail.
+        # Both live here because risk_manager.py and matching_engine.py are
+        # protected files -- see the module header.
+        self._fill_config_log = (
+            _fill_env("MP_FILL_CONFIG_LOG") or FILL_CONFIG_LOG_DEFAULT
+        )
+        self._fill_run_id = uuid.uuid4().hex
+        self._fill_run_started_utc = _datetime.now(_timezone.utc).isoformat()
+        self._fill_config = apply_fill_config(self.risk_manager.exchange)
+        self._fill_config_last_write = 0.0
+        self._fill_config_book = None
+        self._record_fill_config("start")
 
         # Wire the trade-close callback
         self.risk_manager.exchange.on_close = self._on_trade_close
@@ -196,6 +419,60 @@ class OrchestratorEngine:
         for bot in self.bots:
             if strategy_name == "Late Sniper" and "late_sniper" in bot.strategies:
                 bot.strategies["late_sniper"]._handle_position_close(position)
+
+    # ------------------------------------------------------------------
+    # FR-5.2 fill-configuration evidence trail (2026-09-05)
+    # ------------------------------------------------------------------
+
+    def _record_fill_config(self, event: str) -> bool:
+        """Append one fill-config record for this run. Best-effort, never raises.
+
+        The value written is read back OFF THE EXCHANGE, so the log records what
+        the engine actually has, never what the environment asked for.
+        """
+        try:
+            record = fill_config_record(
+                self.risk_manager.exchange,
+                run_id=self._fill_run_id,
+                run_started_utc=self._fill_run_started_utc,
+                event=event,
+                heartbeat_sec=FILL_CONFIG_HEARTBEAT_S,
+            )
+        except Exception as exc:
+            logger.warning("[FillConfig] could not build a %s record: %s", event, exc)
+            return False
+        self._fill_config_last_write = time.time()
+        return append_fill_config_record(self._fill_config_log, record)
+
+    def _fill_config_tick(self) -> None:
+        """One market-loop pass of the evidence trail. Never raises.
+
+        Writes on TWO triggers, and both matter to the gate:
+
+        * ``book_change`` -- the open/closed position counts moved, i.e. a fill
+          or a settlement just happened. This is what makes the window around a
+          real fill tight (order of the loop period, ~2 s) instead of order of
+          the heartbeat, so an evidenced fill is bracketed by records written
+          seconds either side of it.
+        * ``heartbeat`` -- a periodic liveness stamp so that a run that dies
+          without a ``stop`` event stops covering later fills. The gate treats a
+          run's window as ending at its last record plus its declared
+          ``heartbeat_sec``; without the stamps a crashed run's window would
+          stretch forward forever and evidence trades it never made.
+        """
+        try:
+            exchange = self.risk_manager.exchange
+            book = (len(exchange.positions), len(exchange.closed_trades))
+            if self._fill_config_book is None:
+                self._fill_config_book = book
+            elif book != self._fill_config_book:
+                self._fill_config_book = book
+                self._record_fill_config("book_change")
+                return
+            if time.time() - self._fill_config_last_write >= FILL_CONFIG_HEARTBEAT_S:
+                self._record_fill_config("heartbeat")
+        except Exception as exc:  # evidence must never break the trading loop
+            logger.warning("[FillConfig] tick failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Runtime state markers (2026-06-10 fix b) — best-effort, never raise
@@ -350,6 +627,14 @@ class OrchestratorEngine:
             logger.info("[Shutdown] Win rates saved.")
         except Exception as exc:
             logger.error("[Shutdown] Could not save win rates: %s", exc)
+
+        # 2c. Close this run's fill-configuration window (FR-5.2). A clean stop
+        # bounds the run's evidence window exactly; a crash leaves the window to
+        # expire at the last heartbeat plus its declared grace instead.
+        try:
+            self._record_fill_config("stop")
+        except Exception as exc:
+            logger.error("[Shutdown] Could not record fill config: %s", exc)
 
         # 3. Log final data inventory
         try:
@@ -1010,6 +1295,11 @@ class OrchestratorEngine:
                 # autoheal can tell a hung harvester thread from a live one
                 # (staleness threshold lives in src/web/server.py).
                 self._last_loop_pass_monotonic = time.monotonic()
+
+                # FR-5.2: keep this run's fill-configuration evidence trail
+                # alive and tight around every book movement (see
+                # _fill_config_tick). Cheap: two len() calls per pass.
+                self._fill_config_tick()
 
                 # Heartbeat
                 if time.time() - last_heartbeat > 60:

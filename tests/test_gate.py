@@ -786,7 +786,8 @@ def test_realistic_fills_condition(tmp_path):
     assert v["not_applicable"] == [] and v["verdict"] == "PASS"
     rc = gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
-         "--realistic-fills", "false", "--allow-unverified-registration", "--quiet"]
+         "--realistic-fills", "false", "--allow-unverified-registration",
+         "--fill-config", "", "--quiet"]
     )
     assert rc == gate.EXIT_FAIL
 
@@ -805,9 +806,151 @@ def test_unknown_realistic_fills_is_refused_not_downgraded(tmp_path):
     assert "realistic_fills_enabled" not in v["not_applicable"]
     rc = gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
-         "--allow-unverified-registration", "--quiet"]
+         "--allow-unverified-registration", "--fill-config", "", "--quiet"]
     )
     assert rc == gate.EXIT_REFUSED
+
+
+# ---------------------------------------------------------------------------
+# Realistic fills, part 2: the run's own record (F4 blocker 2, 2026-09-05)
+# ---------------------------------------------------------------------------
+# Refusing on "unknown" fixed the no-op but left FR-5.2 unsatisfiable: nothing in
+# the runtime could turn realistic fills ON, and nothing could record that it
+# had, so the terminal gate could never PASS either. scripts/run_dashboard.py now
+# writes an append-only fill-configuration log (default-OFF switch,
+# MP_REALISTIC_FILLS) and the gate joins it to the paper record BY TIME. The
+# synthetic record's entry_times run 2026-05-31T15:00 .. 2026-07-19T15:xx.
+FC_RUN_START = "2026-05-30T00:00:00+00:00"
+FC_RUN_STOP = "2026-07-21T00:00:00+00:00"
+
+
+def _fill_config_log(tmp_path, *, realistic=True, start=FC_RUN_START, stop=FC_RUN_STOP,
+                     run_id="sandbox-run", name="fill_config.jsonl"):
+    """A log shaped exactly like the orchestrator's, bracketing the record."""
+    rows = [
+        {
+            "record": "fill_config",
+            "schema_version": 1,
+            "run_id": run_id,
+            "event": event,
+            "run_started_utc": start,
+            "observed_utc": when,
+            "heartbeat_sec": 300.0,
+            "realistic_fills": realistic,
+            "writer": "scripts/run_dashboard.py:OrchestratorEngine",
+            "host": "maia",
+        }
+        for event, when in (("start", start), ("stop", stop))
+    ]
+    path = tmp_path / name
+    path.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows), encoding="utf-8")
+    return str(path)
+
+
+def test_a_recorded_realistic_fills_run_evidences_the_gate_on_its_own(tmp_path):
+    """The terminal FR-5.2 gate can now PASS -- on a RUN THAT RECORDED ITSELF.
+
+    No ``--realistic-fills``: the only thing saying the fills were realistic is
+    the log the orchestrator wrote while it owned the exchange, and every
+    admitted settled fill falls inside that run's window.
+    """
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    log = _fill_config_log(tmp_path)
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None, fill_config_path=log)
+    c = v["conditions"]["realistic_fills_enabled"]
+    assert c["ok"] is True and c["gating"] is True
+    assert c["source"] == "fill_config_log"
+    assert c["fill_config"]["fills_covered"] == 60
+    assert c["fill_config"]["fills_uncovered"] == 0
+    assert v["refused"] is False and v["refusals"] == []
+    assert v["verdict"] == "PASS"
+
+
+def test_the_verdict_is_bound_to_the_exact_log_it_was_scored_against(tmp_path):
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    log = _fill_config_log(tmp_path)
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None, fill_config_path=log)
+    assert v["inputs"]["fill_config_log"] == log
+    assert v["inputs"]["fill_config_log_sha256"] == gate.sha256_file(log)
+    assert v["inputs"]["realistic_fills_source"] == "fill_config_log"
+    assert v["inputs"]["realistic_fills"] is True
+
+
+def test_a_log_that_stops_before_the_trades_evidences_nothing(tmp_path):
+    """Staleness must refuse, not default to yes: it describes another run."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    log = _fill_config_log(tmp_path, stop="2026-06-05T00:00:00+00:00")
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None, fill_config_path=log)
+    c = v["conditions"]["realistic_fills_enabled"]
+    assert c["ok"] is False and "REFUSED" in c["note"]
+    assert c["fill_config"]["fills_uncovered"] > 0
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+
+
+def test_a_log_recording_an_off_run_fails_the_condition(tmp_path):
+    """A definite answer, so a FAIL rather than a refusal."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    log = _fill_config_log(tmp_path, realistic=False)
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None, fill_config_path=log)
+    assert v["conditions"]["realistic_fills_enabled"]["ok"] is False
+    assert v["refused"] is False
+    assert v["verdict"] == "FAIL" and v["failing"] == ["realistic_fills_enabled"]
+
+
+def test_an_operator_assertion_cannot_overrule_the_recorded_run(tmp_path):
+    """``--realistic-fills true`` over a log that says false is a REFUSAL."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    log = _fill_config_log(tmp_path, realistic=False)
+    v = _run(tmp_path, journal, state, registration, realistic_fills=True, fill_config_path=log)
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+    assert any("CONTRADICT" in r for r in v["refusals"])
+    assert v["conditions"]["realistic_fills_enabled"]["source"] is None
+
+
+def test_a_forged_grace_cannot_stretch_one_ancient_line_over_the_record(tmp_path):
+    """The gate caps the grace a record may claim for itself."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    path = tmp_path / "fill_config.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "record": "fill_config",
+                "schema_version": 1,
+                "run_id": "ancient",
+                "event": "start",
+                "run_started_utc": "2020-01-01T00:00:00+00:00",
+                "observed_utc": "2020-01-01T00:00:00+00:00",
+                "heartbeat_sec": 10**9,  # "this one line covers everything"
+                "realistic_fills": True,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None,
+             fill_config_path=str(path))
+    assert v["refused"] is True
+    assert v["conditions"]["realistic_fills_enabled"]["fill_config"]["runs"][0]["grace_sec"] == (
+        gate.FILL_CONFIG_MAX_GRACE_S
+    )
+
+
+def test_cli_reads_the_fill_config_log(tmp_path):
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+    log = _fill_config_log(tmp_path)
+    argv = ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
+            "--allow-unverified-registration", "--quiet", "--fill-config"]
+    assert gate.main(argv + [log]) == gate.EXIT_PASS
+    assert gate.main(argv + [str(tmp_path / "absent.jsonl")]) == gate.EXIT_REFUSED
+    assert gate.main(argv + [""]) == gate.EXIT_REFUSED
 
 
 # ---------------------------------------------------------------------------
@@ -1363,7 +1506,8 @@ def test_fewer_than_n_min_units_is_refused(tmp_path):
     assert "underpowered" in v["refusal"]
     rc = gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
-         "--realistic-fills", "true", "--allow-unverified-registration", "--quiet"]
+         "--realistic-fills", "true", "--allow-unverified-registration",
+         "--fill-config", "", "--quiet"]
     )
     assert rc == gate.EXIT_REFUSED
 
@@ -1374,7 +1518,7 @@ def test_cli_exit_codes(tmp_path, capsys):
     rc = gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
          "--realistic-fills", "true", "--allow-unverified-registration",
-         "--out", str(tmp_path / "v.json")]
+         "--fill-config", "", "--out", str(tmp_path / "v.json")]
     )
     assert rc == gate.EXIT_PASS
     printed = json.loads(capsys.readouterr().out)
@@ -1383,7 +1527,8 @@ def test_cli_exit_codes(tmp_path, capsys):
     journal, state, registration = _write_record(tmp_path, layout, commit_utc=None)
     assert gate.main(
         ["--journal", str(journal), "--state", str(state), "--registration", str(registration),
-         "--realistic-fills", "true", "--allow-unverified-registration", "--quiet"]
+         "--realistic-fills", "true", "--allow-unverified-registration",
+         "--fill-config", "", "--quiet"]
     ) == gate.EXIT_FAIL
     out = capsys.readouterr().out
     assert "excluded_rate=" in out and "saturated_units=" in out
@@ -1438,6 +1583,14 @@ def test_template_is_valid_apart_from_placeholders():
         assert key in tpl["_doc"], key
     assert "Poisson-binomial" in tpl["_doc"]["test"]
     assert "every fill" in tpl["_doc"]["fee_type"]
+    # F4 blocker 2: a reader must be able to tell from the template alone what
+    # requires_realistic_fills now means and how a run evidences it.
+    rf_doc = tpl["_doc"]["requires_realistic_fills"]
+    for phrase in ("MP_REALISTIC_FILLS", "--fill-config", gate.FILL_CONFIG_LOG_DEFAULT,
+                   "REFUSED", "entry_time", "evidence, not proof"):
+        assert phrase in rf_doc, phrase
+    assert "taker" in rf_doc and "NOT a reason to register false" in rf_doc
+    assert gate.FILL_CONFIG_LOG_DEFAULT in tpl["_doc"]["_fill_config_log"]
 
 
 # ---------------------------------------------------------------------------

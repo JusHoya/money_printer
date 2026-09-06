@@ -261,19 +261,65 @@ git cannot answer -- no repo, untracked file, no git binary -- the value stays
 UNVERIFIED and the condition FAILS unless ``--allow-unverified-registration``
 downgrades it to a reported, non-gating line for dry runs.
 
-REALISTIC FILLS (2026-09-05, F3 review defect 5)
--------------------------------------------------
+REALISTIC FILLS (2026-09-05, F3 review defect 5 + F4 blocker 2)
+---------------------------------------------------------------
 ``requires_realistic_fills`` was a no-op: the exchange state has never
 serialised a ``realistic_fills`` key, so the condition resolved to None, dropped
 out of the gating list into ``not_applicable``, and the verdict still said PASS.
-It now REFUSES: a registration that requires realistic fills and a record that
-cannot evidence them is a record the gate will not score. ``--realistic-fills
-true|false`` is the operator's explicit, recorded assertion; silence is not one.
+It REFUSES on that None instead. But refusing was only half a fix -- nothing in
+the runtime could turn realistic fills ON or record that it had, so the terminal
+FR-5.2 gate could never PASS either. Both halves now exist:
+
+* ``scripts/run_dashboard.py`` reads ``MP_REALISTIC_FILLS`` (DEFAULT OFF -- with
+  no new environment set the sandbox fills orders exactly as it does today) and
+  applies it to the already-constructed exchange. Whether the paper record
+  SHOULD be produced with probabilistic penny-floor fills is the owner's call;
+  the runtime only makes it possible and records what was actually done.
+* That orchestrator appends its EFFECTIVE fill configuration -- read back off
+  the exchange object, not off the environment -- to ``data/fill_config.jsonl``
+  at startup, on every book movement, on a heartbeat, and on shutdown.
+
+The gate resolves the flag from three sources and reports which one answered:
+
+    exchange state  ``realistic_fills`` in exchange_state.json. Read FIRST so
+                    the gate picks it up for free if the engine ever serialises
+                    it (``matching_engine.py`` is protected; today this is None).
+    fill-config log ``--fill-config`` (default ``data/fill_config.jsonl``). Runs
+                    are grouped by ``run_id`` into time windows -- opening at the
+                    run's first stamp and closing at its ``stop`` record, or at
+                    its last stamp plus its declared heartbeat grace when it
+                    crashed. A fill is evidenced only when its own ``entry_time``
+                    falls inside such a window, so the record describes THE RUN
+                    THAT PRODUCED THE TRADES rather than the moment the gate ran.
+                    An absent, stale, truncated or non-covering log answers
+                    "unknown", never "yes".
+    operator        ``--realistic-fills true|false``, the operator's explicit,
+                    recorded assertion. Lowest precedence.
+
+Sources that DISAGREE refuse: a typed assertion can no longer overrule a record
+written by the process that owned the exchange. The verdict carries the log's
+sha256 under ``inputs.fill_config_log_sha256``, so a published PASS is bound to
+an exact file that can be re-hashed later.
+
+HOW STRONG IS THIS? Evidence, not proof. The log is plain JSONL on the same disk
+as the journal; an operator with write access can hand-craft it, exactly as they
+can type ``--realistic-fills true``. What it costs a forger is consistency: run
+ids, windows that bracket every scored fill, a heartbeat cadence that is capped
+so no single ancient line can claim to cover a year, and a hash already printed
+in a committed verdict.
+
+SCOPE (honest note, not an excuse): the modelled effect -- a penny-floor resting
+order that may not fill -- is about RESTING orders, and family #1's promoted
+genome is a taker whose fills cross the spread, so enabling it changes that
+family's record little. The condition is not softened for that. The gate is
+generic, makers are the obvious next family, and a condition that is only
+enforced when it bites is not a condition.
 
 USAGE
 -----
     python scripts/gate.py --journal data/trade_journal.jsonl \
         --state data/exchange_state.json \
+        --fill-config data/fill_config.jsonl \
         --registration configs/factory/gate_registration.json \
         --out reports/factory/gate_<genome_id>.json
 
@@ -282,7 +328,7 @@ rather than scoring when the record cannot be gated as it stands:
 
     n_units < n_min                     underpowered (verdict, ``refused: true``)
     excluded_rate > max_excluded_rate   too much of the sample is unreadable
-    requires_realistic_fills unevidenced
+    requires_realistic_fills unevidenced (no source answers, or they disagree)
     registration_commit_utc contradicted by git
     stale NO-side settlement rows       (GateRefusal, before any p is computed)
     rows whose booked money or unit key contradicts their settlement fields
@@ -323,7 +369,7 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 from datetime import date as _date
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from itertools import product
 from pathlib import Path
@@ -1696,6 +1742,7 @@ def evaluate(
     spec_hash_source: str,
     allow_unverified_registration: bool = False,
     realistic_fills: Optional[bool] = None,
+    realistic_fills_evidence: Optional[Mapping[str, Any]] = None,
     counts: Optional[Mapping[str, Any]] = None,
     registration_commit_git: Optional[Tuple[Optional[str], str]] = None,
 ) -> Dict[str, Any]:
@@ -1842,11 +1889,23 @@ def evaluate(
         )
 
     requires_realistic = bool(registration.get("requires_realistic_fills", True))
-    if realistic_fills is None and not requires_realistic:
-        rf_ok: Optional[bool] = None
+    rf_evidence = dict(realistic_fills_evidence or {})
+    rf_source = rf_evidence.get("source")
+    rf_contradiction = rf_evidence.get("contradiction")
+    rf_fill_config = rf_evidence.get("fill_config") or {}
+    if rf_contradiction:
+        # Two sources of the same fact disagree. Refuse regardless of what the
+        # registration requires: one of them is false and the gate cannot tell
+        # which, and an operator assertion must never quietly overrule a record
+        # written by the process that owned the exchange.
+        rf_ok: Optional[bool] = False
+        rf_note = f"REFUSED: {rf_contradiction}"
+        refusals.append(rf_contradiction)
+    elif realistic_fills is None and not requires_realistic:
+        rf_ok = None
         rf_note = (
-            "not required by the registration and not recorded by the exchange state; "
-            "reported, non-gating"
+            "not required by the registration, not recorded by the exchange state, and "
+            "not evidenced by a fill-configuration log; reported, non-gating"
         )
     elif realistic_fills is None:
         # requires_realistic and nothing evidences it: the no-op that let
@@ -1854,16 +1913,28 @@ def evaluate(
         rf_ok = False
         rf_note = (
             "REFUSED: the registration requires realistic fills and nothing evidences "
-            "them -- SimulatedExchange._save_state does not serialise a realistic_fills "
-            "key, so pass --realistic-fills true|false as an explicit, recorded assertion"
+            "them. "
+            + (
+                str(rf_fill_config.get("note"))
+                if rf_fill_config.get("note")
+                else "SimulatedExchange._save_state does not serialise a realistic_fills key"
+            )
+            + ". Run the sandbox with MP_REALISTIC_FILLS set so the orchestrator records "
+            "its effective fill configuration into data/fill_config.jsonl and point "
+            "--fill-config at it, or state the fact yourself with --realistic-fills "
+            "true|false"
         )
         refusals.append(
             "requires_realistic_fills=True but the run cannot evidence realistic fills; "
-            "pass --realistic-fills true|false"
+            "supply --fill-config <orchestrator fill_config.jsonl covering the fills> "
+            "or --realistic-fills true|false"
         )
     else:
         rf_ok = bool(realistic_fills) or not requires_realistic
-        rf_note = f"realistic_fills={realistic_fills}; required={requires_realistic}"
+        rf_note = (
+            f"realistic_fills={realistic_fills} (source: {rf_source or 'operator assertion'}); "
+            f"required={requires_realistic}"
+        )
 
     refused = bool(refusals)
 
@@ -1935,6 +2006,9 @@ def evaluate(
             "gating": rf_ok is not None,
             "observed": realistic_fills,
             "required": requires_realistic,
+            "source": rf_source,
+            "sources": dict(rf_evidence.get("sources") or {}),
+            "fill_config": rf_fill_config,
             "note": rf_note,
         },
     }
@@ -2031,18 +2105,17 @@ def evaluate(
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# REALISTIC FILLS: three sources of evidence, in precedence order
 # ---------------------------------------------------------------------------
 def _state_realistic_fills(state_path: Optional[str]) -> Optional[bool]:
     """``realistic_fills`` from the exchange state, or ``None``.
 
     ``SimulatedExchange._save_state`` does not serialise this key (and
-    ``matching_engine.py`` is a protected file the F3 sprint may not touch), so
-    on today's state files this always returns ``None``. That used to make
-    ``requires_realistic_fills`` a structural no-op -- the condition fell out of
-    the gating list into ``not_applicable`` and the verdict still said PASS.
-    ``evaluate`` now REFUSES on that ``None`` instead (F3 review defect 5); the
-    read stays so the gate picks the flag up for free if the engine ever writes it.
+    ``matching_engine.py`` is a protected file), so on today's state files this
+    always returns ``None``. It is read FIRST anyway, so the gate picks the flag
+    up for free -- and prefers it over every weaker source -- if the engine ever
+    starts writing it. ``None`` no longer means "not applicable": it falls
+    through to the fill-config log and, failing that, refuses.
     """
     if not state_path or not os.path.exists(state_path):
         return None
@@ -2055,6 +2128,315 @@ def _state_realistic_fills(state_path: Optional[str]) -> Optional[bool]:
     return bool(v) if isinstance(v, bool) else None
 
 
+#: Default path of the orchestrator's append-only fill-configuration log.
+FILL_CONFIG_LOG_DEFAULT = "data/fill_config.jsonl"
+FILL_CONFIG_RECORD = "fill_config"
+FILL_CONFIG_SUPPORTED_SCHEMA = (1,)
+#: Fallback grace for a record that does not declare ``heartbeat_sec``.
+FILL_CONFIG_DEFAULT_GRACE_S = 300.0
+#: HARD CAP on the grace a record may claim for itself. A record declares its own
+#: heartbeat cadence, which the gate turns into how far past a run's last stamp
+#: that run keeps evidencing fills. Without a cap, one ancient line claiming
+#: ``heartbeat_sec: 1e9`` would evidence every trade ever made. 15 minutes is
+#: three times the orchestrator's 300 s cadence, so a genuinely slow disk still
+#: covers itself and nothing else does.
+FILL_CONFIG_MAX_GRACE_S = 900.0
+
+
+def load_fill_config_records(path: Optional[str]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Parse the orchestrator's fill-config JSONL. Returns ``(records, problems)``.
+
+    Tolerant of junk (a truncated tail line after a hard kill is normal) but
+    never tolerant in the direction of a PASS: an unreadable line is COUNTED as
+    a problem and dropped, and a dropped line can only shrink coverage, which
+    can only make the gate refuse.
+    """
+    problems = {"unreadable_lines": 0, "foreign_records": 0, "unsupported_schema": 0}
+    records: List[Dict[str, Any]] = []
+    if not path or not os.path.exists(path):
+        return records, problems
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    problems["unreadable_lines"] += 1
+                    continue
+                if not isinstance(row, dict) or row.get("record") != FILL_CONFIG_RECORD:
+                    problems["foreign_records"] += 1
+                    continue
+                if row.get("schema_version") not in FILL_CONFIG_SUPPORTED_SCHEMA:
+                    problems["unsupported_schema"] += 1
+                    continue
+                records.append(row)
+    except OSError:
+        problems["unreadable_lines"] += 1
+    return records, problems
+
+
+def fill_config_runs(records: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    """Group fill-config records into runs with a covered time window.
+
+    A run is one orchestrator process (``run_id``). Its window opens at the
+    earliest instant the run stamped (its ``run_started_utc``, or its first
+    record) and closes at
+
+    * its ``stop`` record, when the process shut down cleanly -- an exact bound;
+    * otherwise its LAST record plus its own declared ``heartbeat_sec`` (capped
+      at ``FILL_CONFIG_MAX_GRACE_S``). A run that died stops stamping, so its
+      window stops advancing and it stops evidencing anything.
+
+    Returns ``(runs, malformed)``. A record without a ``run_id``, without a
+    readable ``observed_utc``, or without a genuine boolean ``realistic_fills``
+    cannot place or interpret itself and is counted as malformed, not guessed at.
+    """
+    runs: Dict[str, Dict[str, Any]] = {}
+    malformed = 0
+    for row in records:
+        run_id = row.get("run_id")
+        observed = _as_utc(row.get("observed_utc"))
+        flag = row.get("realistic_fills")
+        if not isinstance(run_id, str) or not run_id or observed is None or not isinstance(flag, bool):
+            malformed += 1
+            continue
+        started = _as_utc(row.get("run_started_utc")) or observed
+        raw_grace = row.get("heartbeat_sec")
+        try:
+            grace = float(raw_grace)
+        except (TypeError, ValueError):
+            grace = FILL_CONFIG_DEFAULT_GRACE_S
+        if not math.isfinite(grace) or grace < 0.0:
+            grace = FILL_CONFIG_DEFAULT_GRACE_S
+        grace = min(grace, FILL_CONFIG_MAX_GRACE_S)
+        run = runs.get(run_id)
+        if run is None:
+            run = runs[run_id] = {
+                "run_id": run_id,
+                "started": started,
+                "last_seen": observed,
+                "stopped": None,
+                "grace_sec": grace,
+                "records": 0,
+                "flags": set(),
+                "hosts": set(),
+                "state_files": set(),
+            }
+        run["records"] += 1
+        run["flags"].add(flag)
+        run["started"] = min(run["started"], started, observed)
+        run["last_seen"] = max(run["last_seen"], observed)
+        run["grace_sec"] = max(run["grace_sec"], grace)
+        if row.get("event") == "stop":
+            run["stopped"] = observed if run["stopped"] is None else max(run["stopped"], observed)
+        if row.get("host"):
+            run["hosts"].add(str(row["host"]))
+        if row.get("exchange_state_file"):
+            run["state_files"].add(str(row["exchange_state_file"]))
+    out: List[Dict[str, Any]] = []
+    for run in runs.values():
+        if run["stopped"] is not None:
+            window_end = max(run["stopped"], run["last_seen"])
+        else:
+            window_end = run["last_seen"] + timedelta(seconds=run["grace_sec"])
+        run["window_start"] = run["started"]
+        run["window_end"] = window_end
+        out.append(run)
+    out.sort(key=lambda r: r["window_start"])
+    return out, malformed
+
+
+def _run_public(run: Mapping[str, Any]) -> Dict[str, Any]:
+    """A run, JSON-serialisable, for the verdict."""
+    flags = sorted(run["flags"])
+    return {
+        "run_id": run["run_id"],
+        "realistic_fills": flags[0] if len(flags) == 1 else None,
+        "flags_recorded": flags,
+        "window_start": run["window_start"].isoformat(),
+        "window_end": run["window_end"].isoformat(),
+        "closed_cleanly": run["stopped"] is not None,
+        "grace_sec": run["grace_sec"],
+        "records": run["records"],
+        "hosts": sorted(run["hosts"]),
+        "exchange_state_files": sorted(run["state_files"]),
+    }
+
+
+def resolve_fill_config(
+    path: Optional[str], trades: Sequence[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """Attribute every admitted settled fill to a recorded run configuration.
+
+    This is the join that makes the record EVIDENCE rather than decoration: it
+    describes the run that produced the trades, because a fill only counts as
+    evidenced when its own ``entry_time`` lands inside a window a live run
+    stamped out. The answer is
+
+    * ``True``  -- every admitted fill is covered, and everything covering it
+      recorded ``realistic_fills`` true;
+    * ``False`` -- some fill is covered unambiguously by ``realistic_fills``
+      false. A definite answer, and a FAIL rather than a refusal;
+    * ``None``  -- some fill is covered by nothing (no log, a stale log, a log
+      that stops before the trades, a crashed run whose window expired), or by
+      runs that disagree. Unknown, and the caller refuses.
+
+    Nothing here can answer ``True`` by default or by omission: ``True`` is only
+    reachable when there is at least one admitted fill and every one of them is
+    positively covered.
+    """
+    detail: Dict[str, Any] = {
+        "path": path,
+        "exists": bool(path and os.path.exists(path)),
+        "sha256": None,
+        "records": 0,
+        "malformed_records": 0,
+        "runs": [],
+        "fills_total": len(trades),
+        "fills_covered": 0,
+        "fills_uncovered": 0,
+        "fills_conflicting": 0,
+        "fills_without_entry_time": 0,
+        "uncovered_examples": [],
+        "value": None,
+        "note": "",
+    }
+    if not detail["exists"]:
+        detail["note"] = (
+            f"no fill-configuration log at {path!r}: the run left no record of how it "
+            "filled orders"
+        )
+        return detail
+    try:
+        detail["sha256"] = sha256_file(path)
+    except OSError:  # pragma: no cover - exists() just said otherwise
+        pass
+    records, problems = load_fill_config_records(path)
+    detail["records"] = len(records)
+    detail.update(problems)
+    runs, malformed = fill_config_runs(records)
+    detail["malformed_records"] = malformed
+    detail["runs"] = [_run_public(r) for r in runs]
+    if not trades:
+        detail["note"] = "no admitted settled fills to attribute to a run"
+        return detail
+    if not runs:
+        detail["note"] = (
+            f"{len(records)} line(s) in {path!r} but no usable run: nothing evidences "
+            "the fill configuration of the run that produced these trades"
+        )
+        detail["fills_uncovered"] = len(trades)
+        return detail
+
+    saw_false = False
+    for t in trades:
+        entry = _as_utc(t.get("entry_time"))
+        if entry is None:
+            detail["fills_without_entry_time"] += 1
+            detail["fills_uncovered"] += 1
+            if len(detail["uncovered_examples"]) < 5:
+                detail["uncovered_examples"].append(
+                    {"symbol": t.get("symbol"), "entry_time": t.get("entry_time"),
+                     "reason": "no readable entry_time"}
+                )
+            continue
+        flags: set = set()
+        for run in runs:
+            if run["window_start"] <= entry <= run["window_end"]:
+                flags |= run["flags"]
+        if not flags:
+            detail["fills_uncovered"] += 1
+            if len(detail["uncovered_examples"]) < 5:
+                detail["uncovered_examples"].append(
+                    {"symbol": t.get("symbol"), "entry_time": entry.isoformat(),
+                     "reason": "outside every recorded run window"}
+                )
+            continue
+        detail["fills_covered"] += 1
+        if len(flags) > 1:
+            detail["fills_conflicting"] += 1
+        elif False in flags:
+            saw_false = True
+
+    if saw_false:
+        detail["value"] = False
+        detail["note"] = (
+            "at least one admitted fill was made by a run that recorded "
+            "realistic_fills=false"
+        )
+    elif detail["fills_uncovered"] or detail["fills_conflicting"]:
+        detail["value"] = None
+        detail["note"] = (
+            f"{detail['fills_uncovered']} of {detail['fills_total']} admitted fill(s) fall "
+            f"outside every recorded run window and {detail['fills_conflicting']} fall "
+            "inside runs that disagree; the log does not cover the record it is being "
+            "asked to evidence"
+        )
+    else:
+        detail["value"] = True
+        detail["note"] = (
+            f"all {detail['fills_total']} admitted fill(s) fall inside a run window that "
+            "recorded realistic_fills=true"
+        )
+    return detail
+
+
+def resolve_realistic_fills(
+    *,
+    operator_assertion: Optional[bool],
+    state_path: Optional[str],
+    fill_config_path: Optional[str],
+    trades: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Combine the three sources into one answer plus its provenance.
+
+    Precedence when the sources AGREE (or are silent): the exchange state (the
+    engine's own serialisation, if it ever grows one) beats the orchestrator's
+    fill-config log, which beats the operator's ``--realistic-fills`` word.
+
+    When two sources DISAGREE the gate refuses. That is the point of having a
+    machine-written record next to a typed assertion: the typed one no longer
+    overrides it, so ``--realistic-fills true`` on a run the orchestrator
+    recorded as false is a refusal, not a PASS.
+    """
+    fill_config = resolve_fill_config(fill_config_path, trades)
+    sources: Dict[str, Optional[bool]] = {
+        "exchange_state": _state_realistic_fills(state_path),
+        "fill_config_log": fill_config["value"],
+        "operator_assertion": operator_assertion,
+    }
+    known = {name: v for name, v in sources.items() if v is not None}
+    contradiction = None
+    if len(set(known.values())) > 1:
+        contradiction = (
+            "the sources of the realistic-fills flag CONTRADICT each other ("
+            + ", ".join(f"{n}={v}" for n, v in sorted(known.items()))
+            + "); the gate will not choose between them -- reconcile the record and "
+            "the assertion before scoring it"
+        )
+        value: Optional[bool] = None
+        source: Optional[str] = None
+    else:
+        source = next(
+            (n for n in ("exchange_state", "fill_config_log", "operator_assertion") if n in known),
+            None,
+        )
+        value = known.get(source) if source else None
+    return {
+        "value": value,
+        "source": source,
+        "sources": sources,
+        "contradiction": contradiction,
+        "fill_config": fill_config,
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 def run_gate(
     *,
     journal_path: str,
@@ -2065,6 +2447,7 @@ def run_gate(
     promoted_override: Optional[str] = None,
     allow_unverified_registration: bool = False,
     realistic_fills: Optional[bool] = None,
+    fill_config_path: Optional[str] = None,
     commit_time_lookup: Optional[Callable[[str], Tuple[Optional[str], str]]] = None,
 ) -> Dict[str, Any]:
     registration = load_registration(registration_path)
@@ -2102,8 +2485,16 @@ def run_gate(
         )
     spec_path = promoted_override or registration.get("promoted_spec_path")
     observed_hash, hash_source = resolve_spec_hash(spec_path)
-    if realistic_fills is None:
-        realistic_fills = _state_realistic_fills(state_path)
+    # FR-5.2: the fill-configuration flag is resolved AFTER the fills are
+    # collected, because the fill-config log is joined to them by entry_time --
+    # the evidence has to be about the run that made these trades.
+    rf_evidence = resolve_realistic_fills(
+        operator_assertion=realistic_fills,
+        state_path=state_path,
+        fill_config_path=fill_config_path,
+        trades=trades,
+    )
+    realistic_fills = rf_evidence["value"]
     lookup = commit_time_lookup or git_added_commit_utc
     commit_git = lookup(registration_path)
     verdict = evaluate(
@@ -2113,6 +2504,7 @@ def run_gate(
         spec_hash_source=hash_source,
         allow_unverified_registration=allow_unverified_registration,
         realistic_fills=realistic_fills,
+        realistic_fills_evidence=rf_evidence,
         counts=counts,
         registration_commit_git=commit_git,
     )
@@ -2137,6 +2529,11 @@ def run_gate(
         "state_sha256": sha256_file(state_path) if state_path else None,
         "promoted_spec_path": spec_path,
         "realistic_fills": realistic_fills,
+        "realistic_fills_source": rf_evidence["source"],
+        "fill_config_log": fill_config_path,
+        # The verdict is bound to an EXACT log file, so a later reader can
+        # re-hash the record the PASS was scored against.
+        "fill_config_log_sha256": rf_evidence["fill_config"]["sha256"],
     }
     verdict["counts"] = counts
     if out_path:
@@ -2166,7 +2563,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--realistic-fills",
         choices=("true", "false", "unknown"),
         default="unknown",
-        help="whether the sandbox ran with realistic_fills (the state file does not record it)",
+        help=(
+            "the operator's explicit assertion about the run's fill model, used only "
+            "when neither the exchange state nor the fill-config log answers. An "
+            "assertion that CONTRADICTS either of them refuses"
+        ),
+    )
+    ap.add_argument(
+        "--fill-config",
+        default=FILL_CONFIG_LOG_DEFAULT,
+        help=(
+            "the orchestrator's append-only fill-configuration log (default "
+            f"{FILL_CONFIG_LOG_DEFAULT}). Each admitted fill must fall inside a "
+            "recorded run window for the log to evidence anything; pass an empty "
+            "string to leave it unread"
+        ),
     )
     ap.add_argument("--quiet", action="store_true", help="print only the verdict line")
     return ap
@@ -2185,6 +2596,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             promoted_override=args.promoted,
             allow_unverified_registration=args.allow_unverified_registration,
             realistic_fills=rf,
+            fill_config_path=args.fill_config or None,
         )
     except GateError as exc:
         print(f"gate: {exc}", file=sys.stderr)
