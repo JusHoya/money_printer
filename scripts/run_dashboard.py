@@ -68,18 +68,25 @@ import src.bots  # noqa: F401
 #      gate REFUSE rather than assume anything.
 #
 # HOW STRONG IS THIS? It is a machine-written, time-structured, hash-pinned
-# record -- NOT a tamper-proof one. The file is plain JSONL on the same disk as
-# everything else; an operator with write access can hand-craft lines. What it
-# buys over ``--realistic-fills true`` typed at the gate is that (a) the claim
-# is made by the process that owned the exchange, at the time it owned it,
-# (b) it has to be internally consistent with the fills it is supposed to cover
-# (run ids, windows, heartbeat cadence, the state file it names), (c) the gate
-# records the log's sha256 in the verdict, so a published verdict is bound to an
-# exact file that can be re-hashed later, and (d) an operator assertion that
-# CONTRADICTS the log refuses instead of overriding it. It raises forgery from
-# "type one word" to "fabricate a consistent run history and keep it consistent
-# with a hash already published in a committed verdict". It is evidence, not
-# proof, and the gate reports it as evidence.
+# record -- NOT a tamper-proof one, and it cannot be: this file is plain JSONL
+# written by the same host that writes the journal, so anyone who can write the
+# journal can write it. What it buys over ``--realistic-fills true`` typed at
+# the gate is that (a) the claim is made by the process that owned the exchange,
+# at the time it owned it, (b) the gate pins EVERY EDGE of a run window to an
+# instant the run actually stamped -- the close to a ``stop`` record or the last
+# stamp plus the capped heartbeat grace, the open to the claimed
+# ``run_started_utc`` clamped to the first stamp minus that same cap, with
+# future-dated records dropped and a run evidencing nothing until it carries a
+# start AND a strictly later record -- so NO SINGLE LINE can cover a paper
+# record, (c) the gate records the log's sha256 in the verdict, so a published
+# verdict is bound to an exact file that can be re-hashed later, and (d) an
+# operator assertion that CONTRADICTS the log refuses instead of overriding it.
+# It raises forgery from "type one word" to "fabricate a coherent run history --
+# a start, a strictly later stamp, times that had already happened, a window
+# bracketing every scored fill -- and keep it consistent with a hash already
+# published in a committed verdict". Two coherent past-dated lines still look
+# exactly like a genuine short run and the gate cannot tell them apart. It is
+# evidence, not proof, and the gate reports it as evidence.
 FILL_CONFIG_RECORD = "fill_config"
 FILL_CONFIG_SCHEMA_VERSION = 1
 FILL_CONFIG_LOG_DEFAULT = os.path.join("data", "fill_config.jsonl")

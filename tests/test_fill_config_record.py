@@ -235,14 +235,15 @@ def test_loader_on_a_missing_file_is_empty_not_an_error():
 
 def test_run_window_closes_exactly_on_a_clean_stop():
     stop = T0 + timedelta(hours=2)
-    runs, malformed = gate.fill_config_runs(
+    runs, problems = gate.fill_config_runs(
         [
             _record(event="start", observed_utc=_iso(T0)),
             _record(event="heartbeat", observed_utc=_iso(T0 + timedelta(hours=1))),
             _record(event="stop", observed_utc=_iso(stop)),
         ]
     )
-    assert malformed == 0 and len(runs) == 1
+    assert problems == {"malformed_records": 0, "future_dated_records": 0}
+    assert len(runs) == 1 and runs[0]["evidencing"] is True
     assert runs[0]["window_start"] == T0
     assert runs[0]["window_end"] == stop, "a clean stop bounds the window exactly"
 
@@ -258,15 +259,118 @@ def test_a_crashed_run_stops_evidencing_after_its_declared_grace():
 
 
 def test_a_record_cannot_claim_an_unbounded_grace_for_itself():
-    """Otherwise one ancient line would evidence every trade ever made."""
+    """The FORWARD edge. One of three bounds, not the whole defence.
+
+    Capping the grace stops a record buying itself an arbitrary future; it never
+    bounded the window's OTHER edges, which is how a single forged line covered
+    a whole paper record (see ``test_a_claimed_run_start_cannot_reach_back_past
+    _the_capped_grace``, ``test_a_run_needs_a_start_and_a_strictly_later_record
+    _to_evidence_anything`` and ``test_a_future_dated_record_is_not_a_stamp``).
+    """
     runs, _ = gate.fill_config_runs([_record(heartbeat_sec=10**9)])
     assert runs[0]["grace_sec"] == gate.FILL_CONFIG_MAX_GRACE_S
     runs, _ = gate.fill_config_runs([_record(heartbeat_sec="banana")])
     assert runs[0]["grace_sec"] == gate.FILL_CONFIG_DEFAULT_GRACE_S
 
 
+def test_a_claimed_run_start_cannot_reach_back_past_the_capped_grace():
+    """The backward edge, which the F4 review found unbounded.
+
+    ``run_started_utc`` is attacker-supplied text like every other field, and it
+    was taken verbatim. A real start record stamps ``observed_utc`` within
+    milliseconds of the instant it declares, so clamping the claim to the run's
+    own first stamp minus its capped grace is invisible to a genuine run and
+    stops a fabricated one from reaching backwards over trades it never made.
+    """
+    runs, _ = gate.fill_config_runs(
+        [
+            _record(event="start", run_started_utc=_iso(datetime(1970, 1, 1, tzinfo=timezone.utc)),
+                    observed_utc=_iso(T0)),
+            _record(event="stop", observed_utc=_iso(T0 + timedelta(hours=1))),
+        ]
+    )
+    assert runs[0]["start_clamped"] is True
+    assert runs[0]["window_start"] == T0 - timedelta(seconds=300.0)
+    # a genuine run declares a start it actually stamped: nothing moves
+    runs, _ = gate.fill_config_runs(
+        [
+            _record(event="start", observed_utc=_iso(T0)),
+            _record(event="stop", observed_utc=_iso(T0 + timedelta(hours=1))),
+        ]
+    )
+    assert runs[0]["start_clamped"] is False and runs[0]["window_start"] == T0
+
+
+def test_a_run_needs_a_start_and_a_strictly_later_record_to_evidence_anything():
+    """One line describes an INSTANT. It must never be able to cover a record."""
+    lone, _ = gate.fill_config_runs([_record(event="start", observed_utc=_iso(T0))])
+    assert lone[0]["evidencing"] is False
+    assert "strictly later record" in lone[0]["not_evidencing"]
+    # two lines stamped at the same instant are still one instant
+    same, _ = gate.fill_config_runs(
+        [_record(event="start", observed_utc=_iso(T0)),
+         _record(event="stop", observed_utc=_iso(T0))]
+    )
+    assert same[0]["evidencing"] is False
+    # a later record with no start anchors nothing
+    headless, _ = gate.fill_config_runs(
+        [_record(event="heartbeat", observed_utc=_iso(T0)),
+         _record(event="stop", observed_utc=_iso(T0 + timedelta(hours=1)))]
+    )
+    assert headless[0]["evidencing"] is False
+    assert "no start record" in headless[0]["not_evidencing"]
+    # and a non-evidencing run covers nothing, however wide its window
+    ok, _ = gate.fill_config_runs(
+        [_record(event="start", observed_utc=_iso(T0)),
+         _record(event="stop", observed_utc=_iso(T0 + timedelta(hours=1)))]
+    )
+    assert ok[0]["evidencing"] is True
+
+
+def test_a_non_evidencing_run_covers_no_fill(tmp_path):
+    path = _log(tmp_path, _record(event="start", observed_utc=_iso(T0),
+                                  run_started_utc=_iso(T0 - timedelta(days=400))))
+    detail = gate.resolve_fill_config(path, [_trade(T0)])
+    assert detail["value"] is None
+    assert detail["runs_evidencing"] == 0 and len(detail["runs"]) == 1
+    assert detail["fills_uncovered"] == 1
+    assert "no evidencing run" in detail["note"]
+
+
+def test_a_future_dated_record_is_not_a_stamp(tmp_path):
+    """A record asserts a LIVE process wrote it, so it cannot post-date now."""
+    now = T0
+    ahead = now + timedelta(seconds=gate.FILL_CONFIG_FUTURE_TOLERANCE_S + 60)
+    runs, problems = gate.fill_config_runs(
+        [_record(event="start", observed_utc=_iso(now - timedelta(hours=1))),
+         _record(event="stop", observed_utc=_iso(ahead))],
+        now=now,
+    )
+    assert problems["future_dated_records"] == 1
+    assert problems["malformed_records"] == 1  # dropped, never merged into a window
+    assert runs[0]["records"] == 1 and runs[0]["evidencing"] is False
+    # inside the clock-skew tolerance a slightly-ahead stamp is still honoured
+    runs, problems = gate.fill_config_runs(
+        [_record(event="start", observed_utc=_iso(now - timedelta(hours=1))),
+         _record(event="stop", observed_utc=_iso(now + timedelta(seconds=60)))],
+        now=now,
+    )
+    assert problems["future_dated_records"] == 0 and runs[0]["evidencing"] is True
+
+
+def test_the_verdict_reports_future_dated_drops_to_the_operator(tmp_path):
+    path = _log(
+        tmp_path,
+        _record(event="start", observed_utc=_iso(T0)),
+        _record(event="stop", observed_utc=_iso(datetime(2099, 1, 1, tzinfo=timezone.utc))),
+    )
+    detail = gate.resolve_fill_config(path, [_trade(T0 + timedelta(hours=1))], now=T0)
+    assert detail["value"] is None and detail["future_dated_records"] == 1
+    assert "future-dated" in detail["note"]
+
+
 def test_records_that_cannot_place_or_interpret_themselves_are_malformed():
-    runs, malformed = gate.fill_config_runs(
+    runs, problems = gate.fill_config_runs(
         [
             _record(run_id=None),
             _record(observed_utc="not a time"),
@@ -274,7 +378,7 @@ def test_records_that_cannot_place_or_interpret_themselves_are_malformed():
             _record(realistic_fills=1),
         ]
     )
-    assert runs == [] and malformed == 4
+    assert runs == [] and problems["malformed_records"] == 4
 
 
 def test_no_log_answers_unknown_never_yes(tmp_path):

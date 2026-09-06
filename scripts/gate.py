@@ -285,14 +285,24 @@ The gate resolves the flag from three sources and reports which one answered:
                     the gate picks it up for free if the engine ever serialises
                     it (``matching_engine.py`` is protected; today this is None).
     fill-config log ``--fill-config`` (default ``data/fill_config.jsonl``). Runs
-                    are grouped by ``run_id`` into time windows -- opening at the
-                    run's first stamp and closing at its ``stop`` record, or at
-                    its last stamp plus its declared heartbeat grace when it
-                    crashed. A fill is evidenced only when its own ``entry_time``
-                    falls inside such a window, so the record describes THE RUN
-                    THAT PRODUCED THE TRADES rather than the moment the gate ran.
-                    An absent, stale, truncated or non-covering log answers
-                    "unknown", never "yes".
+                    are grouped by ``run_id`` into time windows. EVERY EDGE OF A
+                    WINDOW IS PINNED TO AN INSTANT THE RUN ACTUALLY STAMPED,
+                    because every field is attacker-supplied text and only the
+                    stamps are cross-checkable: it closes at the run's ``stop``
+                    record, or at its last stamp plus its declared heartbeat
+                    grace (capped at ``FILL_CONFIG_MAX_GRACE_S``) when it
+                    crashed; it opens at the claimed ``run_started_utc`` CLAMPED
+                    to no earlier than the run's first stamp minus that same
+                    capped grace; a record whose ``observed_utc`` is in the
+                    future is dropped, since it claims a live process stamped it
+                    at a time nobody has reached; and a run evidences nothing at
+                    all until it carries a ``start`` record AND a strictly later
+                    one, so one line can never cover a record. A fill is
+                    evidenced only when its own ``entry_time`` falls inside such
+                    a window, so the record describes THE RUN THAT PRODUCED THE
+                    TRADES rather than the moment the gate ran. An absent, stale,
+                    truncated, one-line or non-covering log answers "unknown",
+                    never "yes".
     operator        ``--realistic-fills true|false``, the operator's explicit,
                     recorded assertion. Lowest precedence.
 
@@ -301,12 +311,31 @@ written by the process that owned the exchange. The verdict carries the log's
 sha256 under ``inputs.fill_config_log_sha256``, so a published PASS is bound to
 an exact file that can be re-hashed later.
 
-HOW STRONG IS THIS? Evidence, not proof. The log is plain JSONL on the same disk
-as the journal; an operator with write access can hand-craft it, exactly as they
-can type ``--realistic-fills true``. What it costs a forger is consistency: run
-ids, windows that bracket every scored fill, a heartbeat cadence that is capped
-so no single ancient line can claim to cover a year, and a hash already printed
-in a committed verdict.
+HOW STRONG IS THIS? Evidence, NOT PROOF, and specifically NOT TAMPER-PROOF. The
+log is plain JSONL written by the same host that writes the journal, so anyone
+who can write the journal can write the log. Be precise about the line:
+
+WHAT IT DEFENDS AGAINST. A silently absent, stale, truncated or crashed-run log
+cannot drift into a PASS -- it answers "unknown" and the gate refuses. A run
+that recorded ``realistic_fills=false`` FAILS, and an operator typing
+``--realistic-fills true`` over it REFUSES instead of overriding it. And no
+SINGLE line can evidence a record: not by claiming a huge ``heartbeat_sec``
+(capped), not by claiming an ancient ``run_started_utc`` (clamped to its own
+first stamp minus that cap), not by stamping itself in the future (dropped), and
+not at all, because a run must stamp a start AND a strictly later record before
+it covers anything.
+
+WHAT IT DOES NOT DEFEND AGAINST. A forger who writes TWO coherent, past-dated
+lines -- a ``start`` and a later ``stop`` bracketing the record -- produces a
+file shaped exactly like the one a genuine short run writes, and the gate cannot
+tell them apart. Nothing here can: distinguishing them would need a
+signature or a witness the sandbox does not have. What the bounds buy is that a
+forgery must now be a COHERENT RUN HISTORY -- consistent run ids, a start, a
+strictly later stamp, times that had already happened, and a window that
+brackets every scored fill -- rather than one line, and that the file's sha256
+is printed in a committed verdict, so the exact bytes that were scored can be
+re-hashed later. That is a real raise in cost. It is not proof of anything, and
+this gate does not claim to be.
 
 SCOPE (honest note, not an excuse): the modelled effect -- a penny-floor resting
 order that may not fill -- is about RESTING orders, and family #1's promoted
@@ -2136,11 +2165,19 @@ FILL_CONFIG_SUPPORTED_SCHEMA = (1,)
 FILL_CONFIG_DEFAULT_GRACE_S = 300.0
 #: HARD CAP on the grace a record may claim for itself. A record declares its own
 #: heartbeat cadence, which the gate turns into how far past a run's last stamp
-#: that run keeps evidencing fills. Without a cap, one ancient line claiming
-#: ``heartbeat_sec: 1e9`` would evidence every trade ever made. 15 minutes is
-#: three times the orchestrator's 300 s cadence, so a genuinely slow disk still
-#: covers itself and nothing else does.
+#: that run keeps evidencing fills -- and, symmetrically, how far BEFORE its
+#: first stamp a claimed ``run_started_utc`` may reach back. Without a cap, one
+#: line claiming ``heartbeat_sec: 1e9`` would evidence every trade ever made.
+#: 15 minutes is three times the orchestrator's 300 s cadence, so a genuinely
+#: slow disk still covers itself and nothing else does.
 FILL_CONFIG_MAX_GRACE_S = 900.0
+#: A record asserts that a LIVE process stamped it, so its ``observed_utc``
+#: cannot be in the future. The tolerance absorbs clock skew between the host
+#: that wrote the log (the Pi sandbox) and the host running the gate; anything
+#: beyond it is not a stamp, it is a claim about a time that has not happened,
+#: and it is dropped. This is what stops a record from bounding its run's
+#: window at an instant nobody has reached yet.
+FILL_CONFIG_FUTURE_TOLERANCE_S = 900.0
 
 
 def load_fill_config_records(path: Optional[str]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -2178,32 +2215,58 @@ def load_fill_config_records(path: Optional[str]) -> Tuple[List[Dict[str, Any]],
     return records, problems
 
 
-def fill_config_runs(records: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
-    """Group fill-config records into runs with a covered time window.
+def fill_config_runs(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """Group fill-config records into runs with a BOUNDED covered window.
 
-    A run is one orchestrator process (``run_id``). Its window opens at the
-    earliest instant the run stamped (its ``run_started_utc``, or its first
-    record) and closes at
+    A run is one orchestrator process (``run_id``). Every edge of its window is
+    pinned to an instant the run actually STAMPED, because every one of them is
+    attacker-supplied text and only the stamps are cross-checkable:
 
-    * its ``stop`` record, when the process shut down cleanly -- an exact bound;
-    * otherwise its LAST record plus its own declared ``heartbeat_sec`` (capped
-      at ``FILL_CONFIG_MAX_GRACE_S``). A run that died stops stamping, so its
-      window stops advancing and it stops evidencing anything.
+    * the window CLOSES at its ``stop`` record when the process shut down
+      cleanly -- an exact bound -- and otherwise at its LAST record plus its own
+      declared ``heartbeat_sec`` (capped at ``FILL_CONFIG_MAX_GRACE_S``). A run
+      that died stops stamping, so its window stops advancing;
+    * the window OPENS at its claimed ``run_started_utc``, CLAMPED to no earlier
+      than its first ``observed_utc`` minus that same capped grace. A real start
+      record is stamped within milliseconds of the instant it declares, so this
+      clamp is invisible to a genuine run and stops a claimed start from
+      reaching backwards over trades the run was not alive for;
+    * a record whose ``observed_utc`` is in the FUTURE (beyond
+      ``FILL_CONFIG_FUTURE_TOLERANCE_S`` of ``now``) is dropped. It claims a
+      live process stamped it at a time nobody has reached yet, which is not a
+      stamp;
+    * and a run only becomes EVIDENCING once it carries a ``start`` record AND
+      at least one strictly later record. One line describes an instant, not an
+      interval, and must never be able to cover a paper record.
 
-    Returns ``(runs, malformed)``. A record without a ``run_id``, without a
-    readable ``observed_utc``, or without a genuine boolean ``realistic_fills``
-    cannot place or interpret itself and is counted as malformed, not guessed at.
+    Returns ``(runs, problems)``. Non-evidencing runs are still returned -- the
+    verdict names them and says why -- but ``resolve_fill_config`` gives them no
+    coverage. A record without a ``run_id``, without a readable ``observed_utc``,
+    or without a genuine boolean ``realistic_fills`` cannot place or interpret
+    itself and is counted as malformed, not guessed at.
     """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    horizon = now + timedelta(seconds=FILL_CONFIG_FUTURE_TOLERANCE_S)
+    problems = {"malformed_records": 0, "future_dated_records": 0}
     runs: Dict[str, Dict[str, Any]] = {}
-    malformed = 0
     for row in records:
         run_id = row.get("run_id")
         observed = _as_utc(row.get("observed_utc"))
         flag = row.get("realistic_fills")
         if not isinstance(run_id, str) or not run_id or observed is None or not isinstance(flag, bool):
-            malformed += 1
+            problems["malformed_records"] += 1
             continue
-        started = _as_utc(row.get("run_started_utc")) or observed
+        if observed > horizon:
+            # Not a stamp: a claim about an instant that has not happened.
+            problems["future_dated_records"] += 1
+            problems["malformed_records"] += 1
+            continue
+        claimed_start = _as_utc(row.get("run_started_utc"))
         raw_grace = row.get("heartbeat_sec")
         try:
             grace = float(raw_grace)
@@ -2216,8 +2279,10 @@ def fill_config_runs(records: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[st
         if run is None:
             run = runs[run_id] = {
                 "run_id": run_id,
-                "started": started,
+                "claimed_start": None,
+                "first_seen": observed,
                 "last_seen": observed,
+                "started_at": None,
                 "stopped": None,
                 "grace_sec": grace,
                 "records": 0,
@@ -2227,9 +2292,18 @@ def fill_config_runs(records: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[st
             }
         run["records"] += 1
         run["flags"].add(flag)
-        run["started"] = min(run["started"], started, observed)
+        run["first_seen"] = min(run["first_seen"], observed)
         run["last_seen"] = max(run["last_seen"], observed)
         run["grace_sec"] = max(run["grace_sec"], grace)
+        if claimed_start is not None:
+            run["claimed_start"] = (
+                claimed_start if run["claimed_start"] is None
+                else min(run["claimed_start"], claimed_start)
+            )
+        if row.get("event") == "start":
+            run["started_at"] = (
+                observed if run["started_at"] is None else min(run["started_at"], observed)
+            )
         if row.get("event") == "stop":
             run["stopped"] = observed if run["stopped"] is None else max(run["stopped"], observed)
         if row.get("host"):
@@ -2238,15 +2312,41 @@ def fill_config_runs(records: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[st
             run["state_files"].add(str(row["exchange_state_file"]))
     out: List[Dict[str, Any]] = []
     for run in runs.values():
+        grace = timedelta(seconds=run["grace_sec"])
         if run["stopped"] is not None:
             window_end = max(run["stopped"], run["last_seen"])
         else:
-            window_end = run["last_seen"] + timedelta(seconds=run["grace_sec"])
-        run["window_start"] = run["started"]
+            window_end = run["last_seen"] + grace
+        # An ancient claimed start cannot stretch the window backwards past the
+        # capped grace on the run's own first stamp.
+        floor = run["first_seen"] - grace
+        claimed = run["claimed_start"]
+        if claimed is None:
+            window_start = run["first_seen"]
+        else:
+            window_start = max(min(claimed, run["first_seen"]), floor)
+        run["window_start"] = window_start
         run["window_end"] = window_end
+        run["start_clamped"] = bool(claimed is not None and claimed < window_start)
+        if run["started_at"] is None:
+            run["evidencing"] = False
+            run["not_evidencing"] = (
+                "no start record: nothing says when this run began, so its window "
+                "is not anchored to a stamp"
+            )
+        elif run["last_seen"] <= run["started_at"]:
+            run["evidencing"] = False
+            run["not_evidencing"] = (
+                f"{run['records']} record(s), none later than the start stamp at "
+                f"{run['started_at'].isoformat()}: a run must stamp a start AND a "
+                "strictly later record before it evidences anything"
+            )
+        else:
+            run["evidencing"] = True
+            run["not_evidencing"] = None
         out.append(run)
     out.sort(key=lambda r: r["window_start"])
-    return out, malformed
+    return out, problems
 
 
 def _run_public(run: Mapping[str, Any]) -> Dict[str, Any]:
@@ -2261,13 +2361,22 @@ def _run_public(run: Mapping[str, Any]) -> Dict[str, Any]:
         "closed_cleanly": run["stopped"] is not None,
         "grace_sec": run["grace_sec"],
         "records": run["records"],
+        "evidencing": run["evidencing"],
+        "not_evidencing": run["not_evidencing"],
+        "start_clamped": run["start_clamped"],
+        "claimed_run_started_utc": (
+            run["claimed_start"].isoformat() if run["claimed_start"] is not None else None
+        ),
         "hosts": sorted(run["hosts"]),
         "exchange_state_files": sorted(run["state_files"]),
     }
 
 
 def resolve_fill_config(
-    path: Optional[str], trades: Sequence[Mapping[str, Any]]
+    path: Optional[str],
+    trades: Sequence[Mapping[str, Any]],
+    *,
+    now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Attribute every admitted settled fill to a recorded run configuration.
 
@@ -2295,6 +2404,8 @@ def resolve_fill_config(
         "records": 0,
         "malformed_records": 0,
         "runs": [],
+        "runs_evidencing": 0,
+        "future_dated_records": 0,
         "fills_total": len(trades),
         "fills_covered": 0,
         "fills_uncovered": 0,
@@ -2317,16 +2428,33 @@ def resolve_fill_config(
     records, problems = load_fill_config_records(path)
     detail["records"] = len(records)
     detail.update(problems)
-    runs, malformed = fill_config_runs(records)
-    detail["malformed_records"] = malformed
+    runs, run_problems = fill_config_runs(records, now=now)
+    detail["malformed_records"] = run_problems["malformed_records"]
+    detail["future_dated_records"] = run_problems["future_dated_records"]
     detail["runs"] = [_run_public(r) for r in runs]
+    # Only a run that stamped a start AND a strictly later record may cover a
+    # fill. One line describes an instant, not an interval.
+    runs = [r for r in runs if r["evidencing"]]
+    detail["runs_evidencing"] = len(runs)
     if not trades:
         detail["note"] = "no admitted settled fills to attribute to a run"
         return detail
     if not runs:
+        reasons = [
+            f"{r['run_id']}: {r['not_evidencing']}"
+            for r in detail["runs"] if r["not_evidencing"]
+        ]
+        rejected = "; ".join(reasons[:5]) + (
+            f"; and {len(reasons) - 5} more" if len(reasons) > 5 else ""
+        )
         detail["note"] = (
-            f"{len(records)} line(s) in {path!r} but no usable run: nothing evidences "
+            f"{len(records)} line(s) in {path!r} but no evidencing run: nothing evidences "
             "the fill configuration of the run that produced these trades"
+            + (f" ({rejected})" if rejected else "")
+            + (
+                f"; {detail['future_dated_records']} record(s) dropped as future-dated"
+                if detail["future_dated_records"] else ""
+            )
         )
         detail["fills_uncovered"] = len(trades)
         return detail
@@ -2371,9 +2499,13 @@ def resolve_fill_config(
         detail["value"] = None
         detail["note"] = (
             f"{detail['fills_uncovered']} of {detail['fills_total']} admitted fill(s) fall "
-            f"outside every recorded run window and {detail['fills_conflicting']} fall "
+            f"outside every evidencing run window and {detail['fills_conflicting']} fall "
             "inside runs that disagree; the log does not cover the record it is being "
             "asked to evidence"
+            + (
+                f"; {detail['future_dated_records']} record(s) dropped as future-dated"
+                if detail["future_dated_records"] else ""
+            )
         )
     else:
         detail["value"] = True

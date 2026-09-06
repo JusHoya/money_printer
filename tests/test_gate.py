@@ -912,34 +912,97 @@ def test_an_operator_assertion_cannot_overrule_the_recorded_run(tmp_path):
     assert v["conditions"]["realistic_fills_enabled"]["source"] is None
 
 
-def test_a_forged_grace_cannot_stretch_one_ancient_line_over_the_record(tmp_path):
-    """The gate caps the grace a record may claim for itself."""
+def _forged_log(tmp_path, **over):
+    """One hand-written line, shaped like the orchestrator's but fabricated."""
+    row = {
+        "record": "fill_config",
+        "schema_version": 1,
+        "run_id": "FORGED",
+        "event": "stop",
+        "run_started_utc": "1970-01-01T00:00:00+00:00",
+        "observed_utc": "2030-01-01T00:00:00+00:00",
+        "heartbeat_sec": 300.0,
+        "realistic_fills": True,
+    }
+    row.update(over)
+    path = tmp_path / "forged.jsonl"
+    path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_one_forged_line_cannot_evidence_the_whole_record(tmp_path):
+    """The edge the F4 review actually broke: the WINDOW, not the grace.
+
+    ``FILL_CONFIG_MAX_GRACE_S`` bounded only the FORWARD extension past a run's
+    last stamp. ``window_start`` was taken verbatim from the record's own
+    ``run_started_utc`` and, for an ``event="stop"`` record, ``window_end`` was
+    taken verbatim from its ``observed_utc`` -- both attacker-supplied, both
+    unbounded. So THIS SINGLE LINE, with no operator assertion, produced a
+    1970 -> 2030 window, "all 60 admitted fill(s) fall inside a run window that
+    recorded realistic_fills=true", and verdict PASS.
+
+    Three independent bounds now stop it; each is asserted alone below.
+    """
     layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
     journal, state, registration = _write_record(tmp_path, layout)
-    path = tmp_path / "fill_config.jsonl"
+    v = _run(tmp_path, journal, state, registration, realistic_fills=None,
+             fill_config_path=_forged_log(tmp_path))
+    fc = v["conditions"]["realistic_fills_enabled"]["fill_config"]
+    assert fc["value"] is None and fc["fills_covered"] == 0
+    assert fc["runs"] == [] and fc["future_dated_records"] == 1
+    assert v["conditions"]["realistic_fills_enabled"]["ok"] is False
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+
+
+def test_each_forged_edge_is_bounded_on_its_own(tmp_path):
+    """Peel the defences apart so none of them is load-bearing by accident."""
+    layout = _layout(both_win=8, split=1, both_lose=1, single_wins=23)
+    journal, state, registration = _write_record(tmp_path, layout)
+
+    def _fc(**over):
+        v = _run(tmp_path, journal, state, registration, realistic_fills=None,
+                 fill_config_path=_forged_log(tmp_path, **over))
+        assert v["refused"] is True and v["verdict"] == "FAIL"
+        return v["conditions"]["realistic_fills_enabled"]["fill_config"]
+
+    # 1. a future ``observed_utc`` is not a stamp -- the heartbeat variant of the
+    #    same forgery is dropped exactly like the stop variant.
+    assert _fc(event="heartbeat")["future_dated_records"] == 1
+
+    # 2. one line, however honest its timestamps, describes an INSTANT: a run
+    #    must stamp a start AND a strictly later record before it covers a fill.
+    fc = _fc(event="start", observed_utc="2026-07-25T00:00:00+00:00")
+    assert fc["runs_evidencing"] == 0 and len(fc["runs"]) == 1
+    assert fc["runs"][0]["evidencing"] is False
+    assert "strictly later record" in fc["runs"][0]["not_evidencing"]
+
+    # 3. and an ancient CLAIMED start cannot reach back over the record: it is
+    #    clamped to the run's own first stamp minus the capped grace.
+    path = tmp_path / "clamped.jsonl"
+    row = {"record": "fill_config", "schema_version": 1, "run_id": "FORGED",
+           "run_started_utc": "1970-01-01T00:00:00+00:00", "heartbeat_sec": 300.0,
+           "realistic_fills": True}
     path.write_text(
-        json.dumps(
-            {
-                "record": "fill_config",
-                "schema_version": 1,
-                "run_id": "ancient",
-                "event": "start",
-                "run_started_utc": "2020-01-01T00:00:00+00:00",
-                "observed_utc": "2020-01-01T00:00:00+00:00",
-                "heartbeat_sec": 10**9,  # "this one line covers everything"
-                "realistic_fills": True,
-            },
-            sort_keys=True,
-        )
-        + "\n",
+        json.dumps({**row, "event": "start",
+                    "observed_utc": "2026-07-25T00:00:00+00:00"}, sort_keys=True) + "\n"
+        + json.dumps({**row, "event": "stop",
+                      "observed_utc": "2026-07-25T00:05:00+00:00"}, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     v = _run(tmp_path, journal, state, registration, realistic_fills=None,
              fill_config_path=str(path))
-    assert v["refused"] is True
-    assert v["conditions"]["realistic_fills_enabled"]["fill_config"]["runs"][0]["grace_sec"] == (
-        gate.FILL_CONFIG_MAX_GRACE_S
-    )
+    run = v["conditions"]["realistic_fills_enabled"]["fill_config"]["runs"][0]
+    assert run["evidencing"] is True and run["start_clamped"] is True
+    assert run["claimed_run_started_utc"] == "1970-01-01T00:00:00+00:00"
+    # first stamp minus this run's own capped grace (300 s), not 1970
+    assert run["window_start"] == "2026-07-24T23:55:00+00:00"
+    assert v["conditions"]["realistic_fills_enabled"]["fill_config"]["fills_covered"] == 0
+    assert v["refused"] is True and v["verdict"] == "FAIL"
+
+    # the grace a record may claim for ITSELF is still capped (the edge the
+    # superseded test guarded); it is now one bound of three, not the only one.
+    fc = _fc(event="start", observed_utc="2026-07-25T00:00:00+00:00", heartbeat_sec=10**9)
+    assert fc["runs"][0]["grace_sec"] == gate.FILL_CONFIG_MAX_GRACE_S
 
 
 def test_cli_reads_the_fill_config_log(tmp_path):
@@ -1590,6 +1653,14 @@ def test_template_is_valid_apart_from_placeholders():
                    "REFUSED", "entry_time", "evidence, not proof"):
         assert phrase in rf_doc, phrase
     assert "taker" in rf_doc and "NOT a reason to register false" in rf_doc
+    # ...and what the bounds are, and exactly where they stop. A reader must not
+    # be able to take "hash-pinned" for tamper-proof (F4 remediation, 2026-09-05).
+    for phrase in ("PINNED TO AN INSTANT THE RUN ACTUALLY STAMPED",
+                   "clamped", "dated in the future is dropped",
+                   "a start record AND a strictly later one",
+                   "NOT tamper-proof", "ANY SINGLE forged line",
+                   "two coherent past-dated lines"):
+        assert phrase in rf_doc, phrase
     assert gate.FILL_CONFIG_LOG_DEFAULT in tpl["_doc"]["_fill_config_log"]
 
 
