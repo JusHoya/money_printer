@@ -588,6 +588,24 @@ Still open for F4, completely:
    (default 2026-08-31), verified to fire on exactly the historical case. **The four
    already-captured files are still there — decide whether to drop them from the R3 root
    before it is scored.**
+9. **Two F4 preconditions found in the review but never registered here.** Both are
+   structural and would break a `.../v2` run exactly as they break this one:
+   - **The sandbox cannot authorize paper mode at all.** `weather_bot.py`'s
+     `_registry_status()` reads `reports/factory/registry.jsonl`, and its own comment says
+     that file is "tracked, shipped in the image". `.dockerignore:5` excludes `reports/`
+     from the build context and no bind restores it, so inside `mp-sandbox` the path does
+     not exist, the `except OSError: return None` branch always fires, and paper mode can
+     never be authorized. It fails CLOSED, so nothing is unsafe — but the gate is
+     decorative, and in F4 it will refuse for a reason that looks like a registry problem
+     and is not.
+   - **FR-5.2's realistic-fills condition is unsatisfiable by the runtime.** The gate
+     requires it; `RiskManager` constructs `SimulatedExchange` without it and
+     `_save_state` never serialises the flag, so it resolves to `None` and drops out of
+     the gating list into `not_applicable` while the verdict still reads PASS. The gate on
+     this branch now REFUSES rather than silently downgrading, which is the honest
+     behaviour — but it means a registration that requires realistic fills cannot pass
+     until the runtime can evidence them, and that fix is inside a protected file.
+
 8. **The holdout's outcome labels are public** (`manifest.json` `market_detail[].result`,
    888 markets; `RECONCILE.md`, 72 city-days; and the git object store defeats the lab
    container's tmpfs mask). Family #1's search is unaffected; any FUTURE search designed by

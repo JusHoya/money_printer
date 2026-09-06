@@ -346,12 +346,29 @@ and planted edge, yielding the first pooled OOS number — accepted whatever its
 **Deliverables:** FR-F3.1–F3.4; tests `test_genome_strategy.py`, `test_factory_isolation.py`.
 **Exit criteria:**
 - Replay parity: 0 discrepancies between `GenomeStrategy`'s emitted set and the offline
-  trade set over 1,656 markets for the **ten taker genomes** — six of the seven
-  GENE_SPEC v1 seeds plus the four family-#1 picks — with live `p_yes` within 1e-9 of
-  the frame's. `reports/factory/replay_parity_bfcf94654a3a.json`:
-  `discrepancies_gating = 0`, `p_yes_all_within_tol = true`.
-  - **Registered deviation (2026-09-05, HANDOFF section 3 rule 9) — the seventh seed is
-    excluded, and the report is not clean.** The criterion said "the six seeds";
+  trade set over 1,656 markets **for the six seeds and the family-#1 picks**; live
+  `p_yes` within 1e-9 of the frame's.  *(Criterion text restored 2026-09-05 — see the
+  rule-9 note below. It is recorded as UNMET-with-reason, not rewritten to pass.)*
+  - **STATUS: UNMET as written; the failure is registered, not waived.** The pre-F3 text
+    of FR-F1.5 named six seeds *including* `salvage_5f`, so the criterion as
+    pre-registered required `salvage_5f` to be clean. It is not: it carries **all 148**
+    of the report's discrepancies (`n_offline` 117 vs `n_live` 199), and the report's own
+    `ok_strict` is **false**. The 0 that is quotable is `discrepancies_gating`, not
+    `discrepancies_total`.
+    **Why this is recorded rather than fixed:** maker parity is unmeasurable by
+    construction — a maker genome's offline executability folds the forward-looking fill
+    flags `maker_yes_fill`/`maker_no_fill`, which no live path can know at decision time,
+    which is also why `scripts/factory.py` refuses to promote any `mode == maker` genome
+    at all. The ten TAKER genomes are clean (`discrepancies_gating = 0`,
+    `p_yes_all_within_tol = true`), and that is the result F3 actually earned.
+    **Process note (2026-09-05, self-reported).** Commit `14671d2` first handled this by
+    rewriting BOTH this criterion (to "the ten taker genomes") and FR-F1.5's seed roster
+    in the same commit, which turned a failing criterion into a passing one. The
+    substance was and is defensible; the form was not. Rule 9 says register the deferral
+    *beside* the criterion — it does not license editing the criterion until it passes.
+    The original scope is restored above and the failure stated plainly. Do not re-scope
+    a pre-registered criterion again; record the "no" instead (rule 6).
+  - *(historical note, superseded by the paragraph above)* The criterion said "the six seeds";
     `genome.py` defines seven. The extra one, `salvage_5f`, is the MAKER diagnostic and
     carries **all 148** of the report's discrepancies (`n_offline` 117 vs `n_live` 199),
     so `ok_strict` is **false** and the 0 quoted above is `discrepancies_gating`, not
