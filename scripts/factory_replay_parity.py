@@ -43,7 +43,12 @@ bot now builds ``WalkForwardCalibrationProvider`` for every spec whose
 ``calibration.kind`` is ``walk_forward`` (all six committed specs), the served
 provider refits the frame's per-target-date calibration live from the same two
 archives; the run aborts unless the provider's archive shas equal the frame
-provenance's pins and its embargo equals the frame's. The report is
+provenance's pins and its embargo equals the frame's. The spec handed to the
+builder is the COMMITTED ``configs/factory/promoted/<id>.json`` whenever one
+exists for the genome (the spec the sandbox would actually load; it must agree
+with the frame on kind, dir sha, archive pins, frame sha and genome_json or the
+run aborts), and a spec synthesised from the frame only for a genome that was
+never promoted; ``genomes[<name>].spec_used`` records which. The report is
 ``kind: "replay_parity"`` if and only if the served provider's kind equals the
 kind the frame was proven under (``ev_config.calibration_mode``), otherwise
 ``replay_parity_diagnostic``; the default filename suffix is ``_live``.
@@ -94,6 +99,7 @@ from src.factory import columns as C  # noqa: E402
 from src.factory import fitness  # noqa: E402
 from src.factory import genome as G  # noqa: E402
 from src.factory import promoted as P  # noqa: E402
+from src.data.forecast_vintage_provider import CITY_STATION as _CITY_STATION  # noqa: E402
 from src.factory.fees import load_regime, sha256_file  # noqa: E402
 
 FRAMES_ROOT = REPO_ROOT / "data" / "factory" / "frames"
@@ -160,16 +166,19 @@ def verify_truth_files(prov: Dict[str, Any]) -> Dict[str, str]:
     return out
 
 
-def _committed_spec_kind(genome_id: str) -> Optional[str]:
-    """``calibration.kind`` of the COMMITTED promoted spec for ``genome_id`` (None when none exists).
+def _committed_spec(genome_id: str) -> Tuple[Optional[Any], Optional[str]]:
+    """``(spec, repo-relative path)`` of the COMMITTED promoted spec for ``genome_id``, or ``(None, None)``.
 
-    Informational for ``--calibration live``: the replay builds its own spec from the
-    frame, so this records what the spec the sandbox would actually load says.
+    ``--calibration live`` replays the spec the sandbox would actually load when one
+    exists; a seed/pick that was never promoted has none, which is a normal state. A
+    spec that EXISTS but does not load (hash broken, schema) is an error, not "none".
     """
-    try:
-        return P.load_promoted(genome_id).calibration.kind
-    except Exception:  # noqa: BLE001 -- no committed spec is a normal state for seeds/picks
-        return None
+    path = P.resolve_path(genome_id, P.PROMOTED_DIR)
+    if not os.path.exists(path):
+        return None, None
+    spec = P.load_promoted(path)
+    rel = Path(path)
+    return spec, (rel.relative_to(REPO_ROOT).as_posix() if str(rel).startswith(str(REPO_ROOT)) else str(rel))
 
 
 def calibration_identity(prov: Dict[str, Any]) -> Tuple[str, str]:
@@ -734,9 +743,14 @@ def _run_parity(
                     f"live provider forecast archive sha {str(d.get('forecast_sha256'))[:12]} != frame "
                     f"provenance {str(want_f)[:12]}"
                 )
-            for city, sha in (d.get("truth_sha256") or {}).items():
-                if truth.get(city) is not None and sha != truth[city]:
-                    raise ParityAbort(f"live provider truth sha for {city} {sha[:12]} != frame provenance {truth[city][:12]}")
+            # the provider keys its truth shas by settlement station, the provenance by city
+            truth_by_station = {_CITY_STATION[c]: s for c, s in truth.items()}
+            for station, sha in (d.get("truth_sha256") or {}).items():
+                if truth_by_station.get(station) is not None and sha != truth_by_station[station]:
+                    raise ParityAbort(
+                        f"live provider truth sha for {station} {sha[:12]} != frame provenance "
+                        f"{truth_by_station[station][:12]}"
+                    )
             if d.get("embargo_days") is not None and int(d["embargo_days"]) != embargo:
                 raise ParityAbort(f"live provider embargo_days {d['embargo_days']} != frame provenance {embargo}")
         else:
@@ -768,16 +782,51 @@ def _run_parity(
         if F is None:
             raise ParityAbort(f"no {source} frame in {frames_dir}")
         lag_src = int(F.provenance.get("availability_lag_min", lag))
+        prov_src = F.provenance
+        pins_f = str((prov_src.get("forecast_csv") or {}).get("sha256") or "")
+        pins_t = {_CITY_STATION[c]: e["sha256"] for c, e in (prov_src.get("truth_files") or {}).items()}
         spec = P.build_spec(
             g, family=family or str(prov_search.get("family") or "weather/gfs_mex/taker/v1"),
             config_sha256=config_sha256 or "", frame_search_sha256=str(prov_search.get("frame_sha256")),
             calibration_dir=str(_abs(cal_dir)), calibration_sha256=cal_sha,
-            calibration_kind=spec_kind, fee_type=fee_type_frame,
+            calibration_kind=spec_kind, calibration_forecast_sha256=pins_f or None,
+            calibration_truth_sha256=pins_t or None, fee_type=fee_type_frame,
             fee_regime_sha256=fee_regime.sha256, adverse_fill=float(prov_search.get("adverse_fill", 0.01)),
             contracts_frame=int(prov_search.get("contracts", 20)), availability_lag_min=lag_src,
             sigma_cap=float(prov_search.get("sigma_cap") or 4.0), mode=mode, registry_status=registry_status,
             source=src_label,
         )
+        spec_used: Dict[str, Any] = {"which": "synthesised_from_frame", "path": None}
+        if calibration_kind == "live":
+            # `live` asks what the bot builds for the spec the sandbox would actually LOAD,
+            # so the COMMITTED spec is used when one exists for this genome. It must agree
+            # with the frame on the kind, the dir sha and the archive pins, or the run
+            # aborts loudly -- a committed spec saying `frozen` (or pinning other archives)
+            # must never produce a `replay_parity`-kind pass by way of a synthesised spec.
+            committed, committed_path = _committed_spec(spec.genome_id)
+            if committed is not None:
+                mism = []
+                if committed.calibration.kind != frame_kind:
+                    mism.append(f"kind {committed.calibration.kind!r} != frame {frame_kind!r}")
+                if committed.calibration.sha256 != cal_sha:
+                    mism.append(f"calibration dir sha {committed.calibration.sha256[:12]} != frame {cal_sha[:12]}")
+                if committed.frame_search_sha256 != str(prov_search.get("frame_sha256")):
+                    mism.append(f"frame_search_sha256 {committed.frame_search_sha256[:12]} != frame "
+                                f"{str(prov_search.get('frame_sha256'))[:12]}")
+                if pins_f and committed.calibration.forecast_sha256 != pins_f:
+                    mism.append(f"forecast pin {str(committed.calibration.forecast_sha256)[:12]} != frame {pins_f[:12]}")
+                if pins_t and dict(committed.calibration.truth_sha256 or {}) != pins_t:
+                    mism.append("truth pins != frame provenance truth_files")
+                if committed.genome_json != spec.genome_json:
+                    mism.append("genome_json differs from the seed/pick under test")
+                if mism:
+                    raise ParityAbort(
+                        f"committed spec {committed_path} disagrees with the frame for {name}: " + "; ".join(mism)
+                        + " -- a `live` run must replay the spec the sandbox loads, so this is refused rather "
+                          "than replaced by a synthesised spec"
+                    )
+                spec = committed
+                spec_used = {"which": "committed", "path": committed_path}
         vp, cal, info = _providers(source, spec)
         r = replay_genome(name, g, F=F, days=days, spec=spec, forecast_provider=vp, calibration_provider=cal,
                           fee_regime=fee_regime, prob_cache=prob_cache, log=log)
@@ -789,7 +838,14 @@ def _run_parity(
         r["calibration_payloads"] = len(cal.payload_hashes)
         r["calibration_failures"] = dict(sorted(cal.failures.items()))
         if calibration_kind == "live":
-            r["committed_spec_calibration_kind"] = _committed_spec_kind(spec.genome_id)
+            r["spec_used"] = spec_used
+            r["spec_hash"] = spec.spec_hash
+            r["committed_spec_calibration_kind"] = _committed_spec(spec.genome_id)[0].calibration.kind \
+                if spec_used["which"] == "committed" else None
+            r["spec_archive_pins"] = {
+                "forecast_sha256": spec.calibration.forecast_sha256,
+                "truth_sha256": dict(spec.calibration.truth_sha256 or {}),
+            }
         results[name] = r
     served_is_frames = all(r["calibration_kind_matches_frame"] for r in results.values())
 

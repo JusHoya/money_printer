@@ -15,7 +15,11 @@ Schema (all keys required; ``spec_hash`` covers everything else)::
     config_sha256         sha256 of the family YAML (registry line)
     frame_search_sha256   sha256 of the search frame the genome was scored on
     calibration           {"dir": repo-relative dir, "sha256": sha of the calibration payload
-                           files (frame provenance ``calibration_dir.files`` mapping)}
+                           files (frame provenance ``calibration_dir.files`` mapping),
+                           "kind": provider parity was proven under ("walk_forward"|"frozen"),
+                           "forecast_sha256" / "truth_sha256": the archives it was served
+                           from (frame provenance ``forecast_csv.sha256`` and
+                           ``truth_files`` re-keyed by settlement station; CRLF-normalised)}
     fee                   {"type": "taker"|"maker", "fee_type": API series fee_type at the
                            frame's ts range ("quadratic"), "regime_sha256": fee_regime.csv sha}
     forecast_source       genome.source ("gfs_mex" | "gefs")
@@ -179,6 +183,15 @@ class CalibrationRef:
     #: 0.336 of p_yes (``reports/factory/replay_parity_bfcf94654a3a_frozen.json``).
     #: ``None`` = promoted before the field existed, i.e. the provider is unproven.
     kind: Optional[str] = None
+    #: The ARCHIVE pins the frame provenance carries (``forecast_csv.sha256`` and
+    #: ``truth_files[city].sha256``, CRLF-normalised ``fees.sha256_file``), which are what
+    #: the walk-forward provider actually prices from: the calibration dir sha above
+    #: cannot see a redirected or edited archive (F4 red team, 2026-09-06: +15 F on 61 NY
+    #: truth rows built a genome with a clean guard). ``truth_sha256`` is keyed by
+    #: settlement STATION (``KNYC`` ...). Both live inside ``spec_hash``; ``None`` =
+    #: promoted before the fields existed, i.e. the archives are unpinned.
+    forecast_sha256: Optional[str] = None
+    truth_sha256: Optional[Mapping[str, str]] = None
 
 
 @dataclass(frozen=True)
@@ -230,6 +243,11 @@ class PromotedSpec:
                 "dir": self.calibration.dir,
                 "sha256": self.calibration.sha256,
                 "kind": self.calibration.kind,
+                "forecast_sha256": self.calibration.forecast_sha256,
+                "truth_sha256": (
+                    None if self.calibration.truth_sha256 is None
+                    else {str(k): str(v) for k, v in sorted(self.calibration.truth_sha256.items())}
+                ),
             },
             "fee": {
                 "type": self.fee.type,
@@ -289,6 +307,16 @@ def from_doc(doc: Mapping[str, Any], *, verify_hash: bool = True) -> PromotedSpe
     fee = doc["fee"]
     if fee.get("type") not in ("taker", "maker"):
         raise PromotedSpecError(f"fee.type {fee.get('type')!r} must be 'taker' or 'maker'")
+    truth_pins = cal.get("truth_sha256")
+    if truth_pins is not None:
+        if not isinstance(truth_pins, Mapping) or not all(
+            isinstance(k, str) and isinstance(v, str) and len(v) == 64 for k, v in truth_pins.items()
+        ):
+            raise PromotedSpecError("calibration.truth_sha256 must be a {station: sha256} mapping")
+        truth_pins = {str(k): str(v) for k, v in sorted(truth_pins.items())}
+    forecast_pin = cal.get("forecast_sha256")
+    if forecast_pin is not None and not (isinstance(forecast_pin, str) and len(forecast_pin) == 64):
+        raise PromotedSpecError("calibration.forecast_sha256 must be a sha256 hex string")
     return PromotedSpec(
         genome_id=str(doc["genome_id"]),
         genome_json=gj,
@@ -299,6 +327,8 @@ def from_doc(doc: Mapping[str, Any], *, verify_hash: bool = True) -> PromotedSpe
             dir=str(cal["dir"]),
             sha256=str(cal["sha256"]),
             kind=None if cal.get("kind") is None else str(cal["kind"]),
+            forecast_sha256=forecast_pin,
+            truth_sha256=truth_pins,
         ),
         fee=FeeRef(
             type=str(fee["type"]), fee_type=str(fee["fee_type"]), regime_sha256=str(fee["regime_sha256"])
@@ -325,6 +355,8 @@ def build_spec(
     calibration_dir: str,
     calibration_sha256: str,
     calibration_kind: Optional[str] = None,
+    calibration_forecast_sha256: Optional[str] = None,
+    calibration_truth_sha256: Optional[Mapping[str, str]] = None,
     fee_type: str,
     fee_regime_sha256: str,
     adverse_fill: float = 0.01,
@@ -354,6 +386,11 @@ def build_spec(
             "dir": _relpath(calibration_dir),
             "sha256": calibration_sha256,
             "kind": None if calibration_kind is None else str(calibration_kind),
+            "forecast_sha256": None if calibration_forecast_sha256 is None else str(calibration_forecast_sha256),
+            "truth_sha256": (
+                None if calibration_truth_sha256 is None
+                else {str(k): str(v) for k, v in sorted(calibration_truth_sha256.items())}
+            ),
         },
         "fee": {"type": mode_label, "fee_type": fee_type, "regime_sha256": fee_regime_sha256},
         "forecast_source": str(getattr(g, "source", "gfs_mex")),

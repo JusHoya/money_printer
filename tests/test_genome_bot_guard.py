@@ -232,6 +232,89 @@ def test_bot_keeps_frozen_and_the_warning_for_an_unproven_spec(monkeypatch, mp_c
     assert any("CALIBRATION PROVIDER MISMATCH" in r.getMessage() for r in mp_caplog.records)
 
 
+def _redirected_root_with_mutated_ny_truth(tmp_path, n_rows=61, delta=15):
+    """The red team's attack root: a copy of the archives with +15 F on 61 NY truth rows."""
+    import csv
+    import shutil
+
+    from src.factory.promoted import REPO_ROOT
+
+    root = tmp_path / "attack_root"
+    (root / "data" / "forecast_archive").mkdir(parents=True)
+    (root / "data" / "weather_truth").mkdir(parents=True)
+    shutil.copy(os.path.join(REPO_ROOT, "data", "forecast_archive", "forecast_series_gfs_mex.csv"),
+                root / "data" / "forecast_archive")
+    for st in ("KNYC", "KMDW", "KLAX", "KMIA"):
+        shutil.copy(os.path.join(REPO_ROOT, "data", "weather_truth", f"cli_daily_high_{st}.csv"),
+                    root / "data" / "weather_truth")
+    p = root / "data" / "weather_truth" / "cli_daily_high_KNYC.csv"
+    with open(p, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+        fields = list(rows[0].keys())
+    n = 0
+    for r in rows:
+        if r["high"] and n < n_rows:
+            r["high"] = str(int(r["high"]) + delta)
+            n += 1
+    assert n == n_rows
+    with open(p, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+    return str(root)
+
+
+def test_shadow_bot_on_a_redirected_mutated_archive_loads_but_logs_archive_pin_mismatch(monkeypatch, mp_caplog, tmp_path):
+    """F4 red team 2026-09-06: dir sha == spec, kind ok, and a different fit -- now visible."""
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    import src.strategies.genome_strategy as gs
+
+    monkeypatch.setattr(gs, "_REPO_ROOT", _redirected_root_with_mutated_ny_truth(tmp_path))
+    monkeypatch.setenv("GENOME_STRATEGY_ID", SEED_SPEC)
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "shadow")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    bot = WeatherBot()
+    strat = bot.strategies["genome"]  # shadow reaches no exchange: loads and continues
+    assert bot.genome_refused_reason is None
+    assert strat.calibration_provider.sha256 == bot.genome_spec.calibration.sha256  # the old guard's whole view
+    assert strat.calibration_kind_ok is True
+    assert strat.archive_pins_ok is False and "KNYC" in strat.archive_pins_detail
+    assert any("ARCHIVE PIN MISMATCH (shadow)" in r.getMessage() for r in mp_caplog.records)
+
+
+def test_paper_bot_on_a_redirected_mutated_archive_is_refused(monkeypatch, mp_caplog, tmp_path):
+    src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")
+    if not os.path.exists(src):
+        pytest.skip("promoted seed spec not present")
+    import src.strategies.genome_strategy as gs
+    from src.factory import promoted
+
+    doc = json.load(open(src, encoding="utf-8"))
+    doc["mode"], doc["registry_status"] = "paper", "PROPOSED"
+    doc["spec_hash"] = promoted.spec_hash_of(doc)
+    spec_path = tmp_path / f"{SEED_SPEC}.json"
+    spec_path.write_text(json.dumps(doc, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setattr(gs, "_REPO_ROOT", _redirected_root_with_mutated_ny_truth(tmp_path))
+    monkeypatch.setenv("GENOME_STRATEGY_ID", str(spec_path))
+    monkeypatch.setenv("GENOME_STRATEGY_MODE", "paper")
+    monkeypatch.setenv("MP_FORECAST_CACHE_DIR", str(tmp_path / "cache"))
+    from src.bots.weather_bot import WeatherBot
+
+    monkeypatch.setattr(WeatherBot, "_registry_status", staticmethod(lambda family: "PROPOSED"))
+    bot = WeatherBot()  # must not raise
+    assert "genome" not in bot.strategies and list(bot.strategies) == ["weather"]
+    assert "archives the spec did not pin" in bot.genome_refused_reason and "KNYC" in bot.genome_refused_reason
+    assert any("GenomeStrategy REFUSED" in r.getMessage() for r in mp_caplog.records)
+    # the same paper spec on the REAL archives constructs, pins agreeing
+    monkeypatch.setattr(gs, "_REPO_ROOT", promoted.REPO_ROOT)
+    bot = WeatherBot()
+    assert bot.genome_refused_reason is None and bot.strategies["genome"].archive_pins_ok is True
+
+
 def test_missing_walk_forward_archives_refuse_the_genome_and_name_the_deploy_step(monkeypatch, mp_caplog, tmp_path):
     """The maia failure mode: data/calibration is in the bind but the archives are not."""
     src = os.path.join(PROMOTED_DIR, f"{SEED_SPEC}.json")

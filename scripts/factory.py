@@ -751,6 +751,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
     from src.factory import promoted as P
     from src.factory import sizing as S
     from src.factory.registry import Registry
+    from src.data.forecast_vintage_provider import CITY_STATION as _CITY_STATION
     from src.factory.report import write_json
 
     rp = _parity_module()
@@ -886,6 +887,14 @@ def cmd_promote(args: argparse.Namespace) -> int:
         # the provider parity was ACTUALLY served under, so weather_bot's guard can refuse a
         # substitution the dir sha cannot see (F3 registered deviation / F4 blocker 1)
         calibration_kind=str(doc["calibration"]["replay_kind"]),
+        # the ARCHIVES parity was served from (frame provenance forecast_csv.sha256 /
+        # truth_files[city].sha256, re-keyed by settlement station), so weather_bot's
+        # guard can refuse a redirected or edited archive the dir sha cannot see
+        # (F4 red team, 2026-09-06)
+        calibration_forecast_sha256=str(res["inputs"]["forecast_csv"]["sha256"]),
+        calibration_truth_sha256={
+            _CITY_STATION[city]: sha for city, sha in (res["inputs"]["truth_sha256"] or {}).items()
+        },
         fee_type=doc["fee_type"], fee_regime_sha256=doc["fee_regime_sha256"],
         adverse_fill=float(res["inputs"]["adverse_fill"]), contracts_frame=int(res["inputs"]["contracts"]),
         availability_lag_min=int(res["inputs"]["availability_lag_min"]),

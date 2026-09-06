@@ -117,7 +117,6 @@ What the live poll cannot reproduce (documented, not fudged):
 from __future__ import annotations
 
 import datetime as _dt
-import hashlib
 import inspect
 import json
 import logging
@@ -323,12 +322,13 @@ WALK_FORWARD_MIN_PAIRED_DAYS = 60
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def _sha256_file(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+#: The archive identity everywhere it is hashed (provider ``describe()``, the bot's load
+#: log, the spec's pins, the frame provenance, the parity pin check): ``fees.sha256_file``,
+#: CRLF-normalised, so an LF checkout and a CRLF one agree on byte-identical content.
+#: Hashing raw bytes here made an LF checkout + CRLF provider root abort parity with
+#: ``forecast archive sha db0911f30c45 != frame provenance 2c8367037cbf`` (red team,
+#: 2026-09-06).
+_sha256_file = fees_mod.sha256_file
 
 
 class WalkForwardCalibrationProvider:
@@ -435,7 +435,8 @@ class WalkForwardCalibrationProvider:
         for city in self.cities:
             station = self._station[city]
             truth = fcal.load_truth(station, self.truth_dir)
-            self.truth_sha256[city] = _sha256_file(fcal.truth_csv_path(station, self.truth_dir))
+            # keyed by settlement STATION, the key the spec's calibration.truth_sha256 pins use
+            self.truth_sha256[station] = _sha256_file(fcal.truth_csv_path(station, self.truth_dir))
             city_rows = [r for r in rows if r["city"] == city]
             paired, drops = fcal.pair_city(city_rows, station, truth)
             self._paired[city] = paired
@@ -676,6 +677,57 @@ class GenomeStrategy(Strategy):
                 "the run continues, but the emitted set is NOT the frame's trade set.",
                 self._name, spec.mode, detail,
             )
+        # The ARCHIVE pins (F4 red team, 2026-09-06). The dir sha and the kind together
+        # still cannot see a walk-forward provider pointed at a different or edited
+        # forecast/truth archive: +15 F on 61 NY truth rows built a genome with
+        # calibration_kind_ok=True and priced a different fit. The spec now carries the
+        # frame provenance's archive shas (inside spec_hash) and the provider reports the
+        # shas of what it actually loaded (describe(); CRLF-normalised, like the pins).
+        # Same policy as the kind: paper REFUSES a mismatch or a walk-forward spec with no
+        # pins; shadow logs and continues. A frozen provider reads no archive -> N/A.
+        self.archive_pins_spec: Dict[str, Any] = {
+            "forecast_sha256": spec.calibration.forecast_sha256,
+            "truth_sha256": dict(spec.calibration.truth_sha256 or {}) or None,
+        }
+        self.archive_pins_live: Optional[Dict[str, Any]] = None
+        self.archive_pins_ok: Optional[bool] = None
+        self.archive_pins_detail: Optional[str] = None
+        describe = getattr(self.calibration_provider, "describe", None)
+        if callable(describe) and self.calibration_kind == "walk_forward":
+            d = describe() or {}
+            live_f = d.get("forecast_sha256")
+            live_t = dict(d.get("truth_sha256") or {})
+            self.archive_pins_live = {"forecast_sha256": live_f, "truth_sha256": live_t}
+            want_f = spec.calibration.forecast_sha256
+            want_t = dict(spec.calibration.truth_sha256 or {})
+            problems: List[str] = []
+            if want_f is None or not want_t:
+                problems.append("the spec pins no archives (promoted before calibration.forecast_sha256 / "
+                                "truth_sha256 existed)")
+            else:
+                if live_f != want_f:
+                    problems.append(f"forecast archive sha {str(live_f)[:12]} != spec {want_f[:12]}")
+                for station, sha in sorted(want_t.items()):
+                    got = live_t.get(station)
+                    if got != sha:
+                        problems.append(f"truth {station} sha {str(got)[:12]} != spec {sha[:12]}")
+            self.archive_pins_ok = not problems
+            if problems:
+                self.archive_pins_detail = "; ".join(problems)
+                detail = (
+                    f"walk-forward provider prices from archives the spec did not pin -- "
+                    f"{self.archive_pins_detail}"
+                )
+                if spec.mode == "paper":
+                    raise GenomeSpecMismatch(
+                        f"{detail}; refusing paper mode -- a different archive is a different fit and "
+                        f"a different p_yes from the frame the genome was selected on"
+                    )
+                logger.error(
+                    "[%s] ARCHIVE PIN MISMATCH (%s): %s. Shadow mode reaches no exchange, so the run "
+                    "continues, but the emitted set is NOT the frame's trade set.",
+                    self._name, spec.mode, detail,
+                )
         lag = getattr(self.forecast_provider, "lag_min", None)
         if lag is not None and int(lag) != int(spec.availability_lag_min):
             raise GenomeSpecMismatch(

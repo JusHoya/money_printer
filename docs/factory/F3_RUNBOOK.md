@@ -441,6 +441,25 @@ or a bug:
   warning, exactly as before.
 * The bot logs one `GenomeStrategy calibration provider for <id>: {...}` line at load with
   the kind, the archive shas and each city's `archive_last_target_date`.
+* **The spec pins the archives (red team, 2026-09-06).** The dir sha and the kind together
+  still could not see a walk-forward provider pointed at a *different* archive: +15 F on 61
+  NY truth rows under a redirected root built the genome with `calibration_kind_ok: true`
+  and priced a different fit. `promoted.CalibrationRef` now carries
+  `calibration.forecast_sha256` and a per-station `calibration.truth_sha256`
+  (`KNYC/KMDW/KLAX/KMIA`), inside `spec_hash`; `factory.py promote` stamps them from the
+  parity run that authorised the spec (== the frame provenance's `forecast_csv.sha256` /
+  `truth_files[city].sha256`); the six committed specs were backfilled from their own
+  per-genome reports and the backfill verified by re-promoting `09fca4bc5ac55470` through
+  the real path: **byte-identical**, `spec_hash 2612fdfb1416 -> c542c0475aaa`. The guard
+  compares the provider's `describe()` shas to the pins: `mode: paper` **refuses** a
+  mismatch (or a walk-forward spec that pins nothing), `mode: shadow` logs
+  `ARCHIVE PIN MISMATCH` and continues, and `/api/genome` shows `archive_pins_ok` /
+  `archive_pins_detail` / `archive_forecast_sha12_{spec,live}` next to the kind fields. A
+  frozen-kind spec is unaffected (`archive_pins_ok: null`). Every archive sha in this
+  chain -- provider, load-log line, spec pins, frame provenance, parity pin check, the table
+  below -- is the **CRLF-normalised** `fees.sha256_file`, so an LF and a CRLF checkout of
+  the same content agree (raw-byte hashing had made an LF checkout + CRLF root abort parity
+  with `forecast archive sha db0911f30c45 != frame provenance 2c8367037cbf`).
 
 Measure it -- the gating evidence, the diagnostic, and its control, same command:
 
@@ -458,11 +477,15 @@ PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibr
 For `0c4b20502f2daf65`: **live = 0 discrepancies / p_yes_max_abs_diff 0.0 / 130 = 130
 trades / 54,159 rows compared / `column_mismatches: {}` / `kind: "replay_parity"`**
 (`reports/factory/replay_parity_bfcf94654a3a_0c4b20502f2daf65_live.json`, whose
-`calibration.builder` names the bot's function and whose `inputs.calibration_provider`
-carries the archive shas). The frozen diagnostic still reads **60 / 0.3357** (`_frozen.json`,
-`kind: "replay_parity_diagnostic"`). A `--calibration live` run aborts if the provider's
-archive shas or embargo differ from the frame provenance, and is `replay_parity` only when
-the served kind equals the kind the frame was proven under.
+`calibration.builder` names the bot's function, whose `inputs.calibration_provider`
+carries the archive shas, and whose `genomes.fr31a_taker.spec_used` says the COMMITTED
+`configs/factory/promoted/0c4b20502f2daf65.json` -- `spec_hash a48957d13a13` -- was the spec
+handed to the bot's builder, not one synthesised from the frame). The frozen diagnostic
+still reads **60 / 0.3357** (`_frozen.json`, `kind: "replay_parity_diagnostic"`). A
+`--calibration live` run aborts if the provider's archive shas or embargo differ from the
+frame provenance, or if the committed spec disagrees with the frame on kind / dir sha /
+pins / frame sha, and is `replay_parity` only when the served kind equals the kind the frame
+was proven under.
 
 The spec records which provider proved it (`calibration.kind`, inside `spec_hash`) and
 `GenomeStrategy`'s construction guard reads it:
@@ -481,7 +504,7 @@ The walk-forward provider reads two archives that are tracked in git but, like
 prints their sha256; without them the genome is **REFUSED at load** with a message naming
 that step (V2 keeps running -- the sandbox never crash-loops on it):
 
-| file (repo path, copied to `/srv/money_printer/data/...`) | sha256 the frame is pinned to |
+| file (repo path, copied to `/srv/money_printer/data/...`) | sha256 the frame AND the spec pin (CRLF-normalised `fees.sha256_file`; equals plain `sha256sum` on an LF checkout) |
 |---|---|
 | `data/forecast_archive/forecast_series_gfs_mex.csv` | `2c8367037cbf...` |
 | `data/weather_truth/cli_daily_high_KNYC.csv` | `e54c7a3db1bf...` |
@@ -502,14 +525,20 @@ Expected: one `GenomeStrategy calibration provider for 0c4b20502f2daf65: {... "k
 two. `/api/status`'s genome block reports the same as `calibration_kind_live` /
 `calibration_kind_ok: true`.
 
-Two facts about the live payloads, so nobody is surprised by them: (1) a payload for a
-target date past the archive's end is the fit as of the archive's last paired day
-(`archive_last_target_date`, 2026-09-01 today) -- still walk-forward, nothing dated after
-T-1 can be in it, just not growing until the archives are re-synced; (2) syncing NEWER
-archives changes the payloads for dates the new rows touch (the frame's own rule -- the
-F0 backfill did exactly this to July 2026), so a re-sync is a data-provenance event: record
-the new shas against the `GenomeStrategy calibration provider` line, and re-run
-`--calibration live` before any paper promotion on the new files.
+**The archive on maia is a static copy.** The forecast series and CLI truth the
+walk-forward provider prices from are copied into the `/srv` data bind by
+`deploy_f3_shadow.sh` step 2b and never updated afterwards -- there is no re-sync job. Their
+`archive_last_target_date` is **2026-09-01**, so a payload for any later target date is the
+fit as of 2026-09-01: walk-forward-valid (nothing dated after T-1 can be in it) but stale,
+and it stays stale until an operator re-syncs the archives on purpose. The provider's
+`describe()` -- printed once at load as the `GenomeStrategy calibration provider for <id>`
+line, with `archive_last_target_date` per city and the archive shas -- is where an operator
+sees it. A re-sync is a data-provenance event, not housekeeping: newer archives change the
+payloads for the dates the new rows touch (the frame's own rule -- the F0 backfill did
+exactly this to July 2026), and the spec's `calibration.forecast_sha256` /
+`truth_sha256` pins will then REFUSE paper and log `ARCHIVE PIN MISMATCH` in shadow until
+the genome is re-promoted (or a new frame frozen) on the new files and parity re-run with
+`--calibration live`.
 
 ### 4.6 Collecting a fill-realism tape that means something
 
