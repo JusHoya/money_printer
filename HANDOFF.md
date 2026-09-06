@@ -675,9 +675,20 @@ Still open for F4, completely:
    subdirectory of either (`data/ladders_holdout/KXHIGHNY` → *"lies inside the sealed
    root"*), while `data/ladders` stays searchable. The marker mechanism also travels — a
    `SEALED` file is honoured on the root **or any ancestor**, so a sealed root that is
-   copied or moved stays refused. Which mattered here: the item-7 quarantine had moved four
-   holdout-B city-days out from under the R3 root's seal, leaving them protected by
-   nothing; a marker was added and verified (alcyone `4de0ee1`).
+   copied or moved stays refused. The item-7 quarantine had moved four holdout-B city-days
+   out from under the R3 root's seal, so a `SEALED` marker was added there and verified
+   (alcyone `4de0ee1`).
+   That marker is defence in depth, **not** the thing that was standing between those rows
+   and a search frame — an earlier draft of this entry said they were "protected by
+   nothing", which is wrong. There is a second, independent **content** gate:
+   `assert_frame_not_sealed` refuses any frame carrying `target_date > 2026-07-25`
+   regardless of where the rows came from or whether pandas kept the loader's `attrs`.
+   Checked against the quarantined bytes directly — a bare `read_csv` drops `attrs` to `{}`
+   and the gate still refuses, *"226 row(s) carry target_date > 2026-07-25"*. So the marker
+   buys an earlier and clearer refusal at the loader, and covers a hypothetical reader that
+   never builds a frame; the date gate was already covering the frame path, and
+   `test_frame_gate_catches_a_copied_holdout_csv_without_marker` has pinned exactly that
+   since F0.
    **So the residual risk is not a code path, it is a pair of eyes.** No guard stops a human
    or an agent from opening those CSVs while designing a search. The honest disposition is
    the second half of the original sentence — **record the exposure beside any score** — and
