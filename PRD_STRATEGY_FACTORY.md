@@ -393,6 +393,40 @@ and planted edge, yielding the first pooled OOS number — accepted whatever its
     for both providers. Before any F4 promotion to paper, either serve walk-forward
     payloads live or re-establish parity under the frozen provider, and record the
     provider kind in the spec so the guard can refuse a mismatch.
+  - **Update 2026-09-06 — the detection half is CLOSED; the gap itself is still OPEN.**
+    Of the three things the paragraph above asks for, the third is done and the first two
+    are not. What changed:
+    1. **The number is now a committed, machine-produced artifact rather than an
+       assertion.** `factory_replay_parity.py` grew `--calibration {walk_forward,frozen}`,
+       which swaps that one input — and only that input — for the
+       `FrozenCalibrationProvider` `weather_bot.py` builds live. Re-measured on
+       `0c4b20502f2daf65`: **60 discrepancies** (`n_live` 144 vs `n_offline` 130),
+       `p_yes_max_abs_diff` **0.3357**, against **0 / 0.0** on the walk-forward control of
+       the same genome, same frame, same ladders, same command
+       (`reports/factory/replay_parity_bfcf94654a3a_frozen.json` and
+       `..._frozen_control.json`). The diagnostic writes itself as
+       `kind: "replay_parity_diagnostic"` under a `_frozen` filename, so it cannot be
+       mistaken for or overwrite the FR-F3.4 artifact.
+    2. **The spec now names the provider parity was proven under.**
+       `promoted.CalibrationRef` carries `kind`, inside `spec_hash`; `factory.py promote`
+       stamps it from the parity run that authorised the spec; the six committed specs
+       are backfilled to `walk_forward`, each agreeing with its own per-genome report.
+       The backfill was verified by re-promoting `09fca4bc5ac55470` through the real path
+       and diffing: **byte-identical**, `spec_hash` `2612fdfb1416`.
+    3. **The guard refuses, proportionately.** `GenomeStrategy`'s construction guard
+       compares `spec.calibration.kind` to the injected provider's `kind`. Under
+       `mode: paper` a mismatch — or a spec that names no kind at all, since silence is
+       not proof — raises `GenomeSpecMismatch` and the bot runs V2 only. Under
+       `mode: shadow`, which reaches no exchange and whose whole value is the live cadence
+       evidence, it is a `CALIBRATION PROVIDER MISMATCH` line on the runtime logger and the
+       run continues. The currently deployed shadow genome logs exactly that line, which is
+       the honest description of what it has been doing since 2026-09-05T03:49Z.
+    **What is NOT fixed:** the 0.336 itself. Serving walk-forward payloads live and
+    re-establishing parity under the frozen provider are both still owed, and both are
+    still F4 work. The change here converts a silent, undetectable substitution into a
+    loud one that fails CLOSED at the paper boundary — it does not make the deployed
+    genome price the frame's `p_yes`. **F4 must not read this as the blocker being
+    lifted.**
 - `grep -nE 'datetime\.now|time\.time'` over `genome_strategy.py`, `features.py`,
   `genome.py` returns nothing.
 - Every emitted signal has a tz-aware `expiration_time` at settlement-day close; a 24-h

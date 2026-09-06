@@ -557,10 +557,21 @@ here, because the existing frames, the promoted specs' `frame_search_sha256` and
 `n_discrepancies: 0` all depend on them.
 
 Still open for F4, completely:
-1. **Calibration-provider transfer gap (blocker).** Parity proven under walk-forward, bot
-   runs frozen; 60 discrepancies and `p_yes` off by up to 0.336 when the real provider is
-   substituted. The promoted spec's calibration block is `{dir, sha256}` with no `kind`,
-   and the construction guard hashes only the directory, so the swap is undetectable.
+1. **Calibration-provider transfer gap (blocker — still open, but no longer invisible).**
+   Parity proven under walk-forward, bot runs frozen; 60 discrepancies and `p_yes` off by
+   up to 0.336 when the real provider is substituted.
+   **2026-09-06:** the swap is now *detectable and refused*, and the number is evidenced.
+   `factory_replay_parity.py --calibration frozen` reproduces it as a committed artifact
+   (`reports/factory/replay_parity_bfcf94654a3a_frozen.json`, 60 disc / 0.3357) against a
+   same-command walk-forward control (`..._frozen_control.json`, 0 / 0.0). The spec's
+   calibration block gained `kind` (hash-covered; the six committed specs backfilled to
+   `walk_forward`, verified byte-identical against a real re-promote), `factory.py promote`
+   stamps it from the run that authorised the spec, and `GenomeStrategy`'s guard **refuses
+   paper mode** on a mismatch or on a spec that names no kind, while shadow logs
+   `CALIBRATION PROVIDER MISMATCH` and continues.
+   **The 0.336 itself is untouched.** Serving walk-forward payloads live, or re-establishing
+   parity under the frozen provider, is still owed and is still what unblocks paper. Do not
+   read the guard as the blocker being lifted: it is the tripwire, not the fix.
 2. **Fill realism measures the wrong hours.** Both runs cover 02Z/03Z; the genome's 130
    offline trades contain none there (15Z 34.6 %, 04Z 27.7 %, 16Z 16.2 %). The declared
    20-s primary window has n=0 in both runs — maia's per-market cadence is p50 35 s — so

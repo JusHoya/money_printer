@@ -393,6 +393,38 @@ curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=
   | grep -E 'strategy=Genome' | grep -E 'EMIT|EXECUTED|REJECT'
 ```
 
+## 4.5 Calibration-provider check (before any paper promotion)
+
+Replay parity is served the frame's **walk-forward** payloads; `weather_bot.py` builds the
+**frozen** ones. Both read the same directory and report the same `sha256`, so the
+directory hash cannot see the substitution -- but it is not cosmetic. Measure it:
+
+```bash
+# the diagnostic (the provider the bot actually builds) and its control, same command
+PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibration frozen
+PYTHONPATH=. python scripts/factory_replay_parity.py --only fr31a_taker --calibration walk_forward     --out reports/factory/replay_parity_bfcf94654a3a_frozen_control.json
+```
+
+For `0c4b20502f2daf65` this is **60 discrepancies / p_yes off by 0.3357** against **0 / 0.0**
+on the control. The diagnostic writes `kind: "replay_parity_diagnostic"` under a `_frozen`
+filename; it is never FR-F3.4 evidence and never overwrites the gating report.
+
+The spec records which provider proved it (`calibration.kind`, inside `spec_hash`) and
+`GenomeStrategy`'s construction guard reads it:
+
+* `mode: paper` + mismatch, **or a spec naming no kind at all** -> `GenomeSpecMismatch`,
+  the bot logs `GenomeStrategy REFUSED` and runs V2 only. Silence is not proof.
+* `mode: shadow` -> `CALIBRATION PROVIDER MISMATCH` on the runtime logger, run continues.
+  **The deployed shadow genome logs this line today** -- it is expected, and it is the
+  accurate description of the run, not a new fault.
+
+So a paper promotion cannot proceed until the gap is actually closed (serve walk-forward
+payloads live, or re-establish parity under the frozen provider). Grep for it on maia:
+
+```bash
+curl -s 'http://maia.local:8050/api/logs/tail?pattern=money_printer_*.log&lines=500'   | python -c "import json,sys; print(json.load(sys.stdin)['content'])"   | grep -E 'CALIBRATION PROVIDER MISMATCH|GenomeStrategy REFUSED'
+```
+
 ## 5. Weekly reconcile and gate cadence (GATE-owned scripts)
 
 | When | What | Script (GATE workstream) |
