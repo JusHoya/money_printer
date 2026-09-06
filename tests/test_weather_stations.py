@@ -315,6 +315,17 @@ def _bot_with_fake_kalshi(ladder):
     bot.ticker_cache = {}
     bot._last_depth_snapshot = 1e18  # never due: no depth calls in this test
     bot.CITIES = (CITY_CONFIG["NY"],)
+    # These tests bypass __init__ (it loads models and opens providers) and wire the
+    # bot by hand, so anything tick() reads has to be mirrored here. FR-F3.3 added the
+    # `strategies` waterfall to __init__ and made tick() iterate it; the fixture was
+    # not updated, and these five bracket-propagation tests have been red since.
+    # Empty is the faithful state for them: they assert on the FUSED observation,
+    # which tick() builds before the waterfall runs, so no strategy is needed and
+    # none should be invented.
+    bot.strategies = {}
+    bot.genome_shadow = False
+    bot.genome_spec = None
+    bot.genome_refused_reason = None
 
     obs = MarketData(
         symbol="KNYC",
