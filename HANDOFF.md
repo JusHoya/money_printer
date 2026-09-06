@@ -556,6 +556,47 @@ The frame schema and `executable`/`sandbox_admissible` semantics stay exactly as
 here, because the existing frames, the promoted specs' `frame_search_sha256` and FR-F3.4's
 `n_discrepancies: 0` all depend on them.
 
+**The test suite baseline, characterised 2026-09-06.** `python -m pytest tests/ -q` on a
+correctly provisioned box should be **green except for nothing**. On this dev box it is
+**17 failed / 3179 passed / 16 skipped / 0 errors**, and *all seventeen* are
+`ModuleNotFoundError` — 9 × `xgboost`, 8 × `websocket` — both of which are declared in
+`requirements.txt` (`xgboost>=3.2`, `websocket-client>=1.9`). They are an under-provisioned
+machine, not a code gap, and are deliberately **not** papered over with `skipif`: in a
+correct environment those tests must run. `pip install xgboost websocket-client` clears all
+17.
+
+It was **27 failed + 5 errors** that morning, and the difference is worth knowing because
+none of the ten was a product defect — but they were hiding real things:
+- **A frozen-artifact-vs-fresh-rebuild pattern, three times** (`test_forecast_calibration`,
+  `test_gefs_backfill`, `test_probability_engine`). The artifacts are *supposed* to be
+  frozen — every promoted spec pins the calibration via `calibration_dir_sha256` — while
+  the forecast and truth archives grow daily, so these could never go green again. All
+  three now compare input fingerprints first: same inputs → bytes must match exactly (the
+  defect they exist to catch, unchanged); inputs moved → report the drift and skip. The
+  drift they now name is itself F4-relevant: **`gfs_mex` is frozen at ..2026-07-24 (3135
+  paired) while the archives reach ..2026-09-01 (3748), and `NX_WINDOW_REGIME`'s
+  `p_outside` has moved 0.1818 → 0.1560 for CHI.** A v2 family search rebuilding
+  calibration from current archives therefore gets a *different* calibration than family
+  #1 for reasons unrelated to v2's design — that has to be a decision, not a side effect,
+  and it compounds the frozen-vs-walk-forward blocker in item 1.
+  Also visible in the same numbers: **the `gefs` archive stopped growing on 2026-07-27**
+  while `gfs_mex` ran on to 09-01. Anything comparing the two sources across that span is
+  comparing different amounts of data.
+- **`TestBracketFieldPropagation` had been dead, not failing.** Its fixture builds the bot
+  with `WeatherBot.__new__` and never learned about FR-F3.3's `strategies` waterfall, so
+  `tick()` raised `AttributeError` *before any assertion ran* — five tests that looked red
+  were actually not executing, leaving bracket-field propagation untested at HEAD, in the
+  FR-1.1 area where 372 of 472 inverted historical rows came from bracket direction.
+- **The duplicate-log-handler check was a harness artifact its own comment predicted.**
+  Before touching it: in a clean process `mp_logger` holds exactly **one** FileHandler
+  after two `configure_root_logging()` calls, so the runtime does **not** double-write —
+  which matters, because that log is where the genome's EMIT lines and the new
+  calibration-mismatch warning land.
+- **Five `test_phase0_state_hygiene` errors** wanted `review_2026_07_24/`, which CLAUDE.md
+  records as gitignored and gone. They skip with that reason now.
+A check that can never pass is a check people stop reading — that is how the
+direction-inference guard came to be carrying two false positives on F2 code.
+
 **The F2 search is exactly reproducible — verified 2026-09-06, and never recorded before.**
 An untracked `reports/factory/f2local/` turned out to be a full local re-run of the
 canonical family run `run_2026-09-03b`: 60 generations, 96,000 evaluations, on a
