@@ -654,3 +654,32 @@ Still open for F4, completely:
    container's tmpfs mask). Family #1's search is unaffected; any FUTURE search designed by
    someone who has read those files is not cleanly out-of-sample on holdout-B. Strip or
    re-seal before the v2 search, and record the exposure beside any score.
+   **Examined 2026-09-06. "Strip" is not available, and the entry understates where the
+   labels are — but the seal itself is real and enforced.** Three corrections:
+   - **The labels are in the CSVs, not just the metadata.** Every
+     `data/ladders_holdout/<series>/<date>.csv` carries `result`, `expiration_value`,
+     `cli_high`, `recomputed_yes_expval`, `recomputed_yes_cli`, `payoff_matches_kalshi`
+     and `truth_agrees` **on every row**. That is correct for a scoring set — you cannot
+     score without truth — but it means the exposure is the whole root, and stripping the
+     two metadata files would not make the root blind.
+   - **Stripping HEAD would be cosmetic.** `manifest.json` is tracked and was committed at
+     `9a8ed2e`, so `git show 9a8ed2e:data/ladders_holdout/manifest.json` still yields all
+     888 (740 `no` / 148 `yes`). Removing them now would require a history rewrite of a
+     sealed data root, which costs more than it buys.
+   - **`RECONCILE.md`'s worst line is not a list of labels, it is one sentence:** *"exactly
+     one YES market per city-day"*. That single structural fact — 1 of 6 markets settles
+     YES — is a stronger prior than any individual outcome, and no strip of a `result`
+     column removes it.
+   **What actually protects the root is `src/backtest/sealed_roots.py`, and it works.**
+   Verified: `data/ladders_holdout` and `data/ladders_2026-09` are both refused, as is any
+   subdirectory of either (`data/ladders_holdout/KXHIGHNY` → *"lies inside the sealed
+   root"*), while `data/ladders` stays searchable. The marker mechanism also travels — a
+   `SEALED` file is honoured on the root **or any ancestor**, so a sealed root that is
+   copied or moved stays refused. Which mattered here: the item-7 quarantine had moved four
+   holdout-B city-days out from under the R3 root's seal, leaving them protected by
+   nothing; a marker was added and verified (alcyone `4de0ee1`).
+   **So the residual risk is not a code path, it is a pair of eyes.** No guard stops a human
+   or an agent from opening those CSVs while designing a search. The honest disposition is
+   the second half of the original sentence — **record the exposure beside any score** — and
+   F4 should treat "was this search designed by someone who had read the holdout?" as a
+   question to answer in writing, not one the seal answers for it.
