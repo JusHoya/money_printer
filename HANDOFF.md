@@ -491,14 +491,55 @@ Holm `p_adj` **0.2895**, `beats_every_control: false`), the prior on this genome
 poor trade at any speed.
 
 **Time to the gate at the measured rate: 287 days** (point estimate; 95 % band
-**208–367 days**), from 12 sizable units over the frame's 69 days. That is mid-2027, and it
-runs past the holdout-B deadline below.
+**208–367 days**), from 12 sizable units over the frame's 69 days. That is mid-2027.
 
-**The holdout-B deadline is the one decision here with a hard external clock.**
-`data/ladders_holdout/` (2026-07-26..08-31) expires around **2026-10-03** and is the only
-virgin root this project will ever have. Whether to spend an unseal on a CLOSED family's
-seed genome is an owner call — it is recorded here, rather than left implicit in the F4
-list, because waiting out the 287 days outlives the data.
+**Correction (2026-09-05, later the same day): there is no holdout-B deadline, and the
+seal does not protect what everyone assumed it protects.** This paragraph originally read
+"the holdout-B deadline is the one decision here with a hard external clock". Both halves
+of that were wrong, and the second one matters more.
+
+*There is no clock.* The ~2026-10-03 date governs **pulling** the ladders out of Kalshi
+(~60-day API retention), not using ones already on disk — `FACTORY_ARCHITECTURE.md:193`
+states it correctly as "must be **backfilled** before ~2026-10-03 retention expiry". The
+backfill completed **2026-09-02** (`git log -1 -- data/ladders_holdout` → 9a8ed2e;
+`manifest.json` `generated_at_utc 2026-09-02T21:31:14Z`, 1040 requests, 0 http failures),
+and `sha256sum -c SHA256SUMS` returns **151 OK / 0 failed** today. What lapses in October
+is only the option to **re-pull or repair** the root if it is ever found defective — an
+insurance question, not a decision deadline. `kalshi_history.py:128` calls the retention
+floor "Advisory only"; treat it as "sometime in October".
+
+*The seal leaks its outcome labels.* The price seal is real — `load_ladders` and
+`ev.load_search_ladders` both raise `SealedDataError` on the root, and
+`tests/test_sealed_roots.py` is 20/20 green. But the **settlement labels are public**, in
+two files the seal protocol itself lists as readable metadata:
+
+- `data/ladders_holdout/manifest.json` carries `days[148] -> market_detail[6]`, each entry
+  `{market_ticker, strike_type, floor_strike, cap_strike, result}` — **888 outcome labels
+  with their bracket bounds**, i.e. every market in the root, from which each city-day's
+  settled high is directly reconstructable. (Verified by reading KEY NAMES and counts only.)
+- `data/ladders_holdout/RECONCILE.md` holds an 18-row dated table of settled
+  CLI-high / Kalshi-`expiration_value` pairs across all four cities — **72 of 148 city-days**.
+
+And the container mask is defeated by git: `deploy/spark/docker-compose.lab.yml:114` mounts
+`../..:/app:ro` — the whole checkout including `.git` — then masks the sealed path with
+tmpfs, but the 152 holdout CSVs are **tracked**, so `git show HEAD:data/ladders_holdout/...`
+returns the sealed rows from the object store regardless. The compose comment "SEALED ROOTS
+MUST NOT BE VISIBLE" is not true as written for the `factory` service.
+
+**What this does and does not invalidate.** Family #1's F2 search is **not** retroactively
+contaminated: the frame gate demonstrably kept those rows out of the search frame, and the
+F2 run predates any of this. The exposure is **forward-looking** — any `.../v2` search
+designed by a human or agent who has read those two files is no longer cleanly
+out-of-sample on holdout-B, and "unsealed once, under a recorded unseal" protects roughly
+half the information it appears to. If the root is ever scored, this leak must be recorded
+alongside the result. Before the next search: decide whether to strip `result` from
+`manifest.json` and the settled columns from `RECONCILE.md` (keeping them in a
+separately-sealed sidecar), and whether the lab container should mount a `.git`-less export.
+
+*How the wrong claim got here:* it was authored in `3b33b719` on **2026-09-05**, three days
+after the backfill was already committed (`git merge-base --is-ancestor 9a8ed2e 3b33b71` →
+yes), so it was a live authorial position rather than stale pre-F0 text. It is corrected
+here rather than silently edited.
 
 **The identified fix is a v2 family, and it is a separate phase.** Fold the runtime's
 sizing law — the closed-form, state-free predicate `0.6*0.50 + 0.4*p_win > price_paid +
@@ -534,5 +575,21 @@ Still open for F4, completely:
 6. **The v2 re-search above.** The cold-start ceiling itself is no longer an open decision:
    editing `risk_manager.py` is rejected, and the fix is the `.../v2` family that folds the
    sizing law into `sandbox_admissible`. What is open is whether to spend that phase on a
-   family whose prior is "no edge" — and, separately and on a hard clock, whether to spend
-   a holdout-B unseal (~2026-10-03) on a CLOSED family's seed genome.
+   family whose prior is "no edge" — and, separately and with **no** clock on it (see the
+   correction above), whether to spend a holdout-B unseal on a CLOSED family's seed genome.
+7. **The R3 reserve overlaps sealed holdout-B by one date, and it already happened.**
+   `deploy/spark/ladder_capture.sh` had a kill-date ceiling and **no floor**, so with the
+   default `LOOKBACK=2` the first run on 2026-09-01 targeted 2026-08-30..08-31 and pulled
+   **2026-08-31 into the R3 root**. Confirmed on alcyone:
+   `data/ladders_2026-09/<series>/2026-08-31.csv` exists for all four cities, i.e. **4 of
+   the reserve's 20 city-days are duplicates of the holdout's last date**. F4 wants
+   Holm-adjusted significance on holdout-B **and** on Sept–Oct; a date in both roots is not
+   two independent draws. A floor guard now refuses any start date <= `MP_HOLDOUT_LAST_DATE`
+   (default 2026-08-31), verified to fire on exactly the historical case. **The four
+   already-captured files are still there — decide whether to drop them from the R3 root
+   before it is scored.**
+8. **The holdout's outcome labels are public** (`manifest.json` `market_detail[].result`,
+   888 markets; `RECONCILE.md`, 72 city-days; and the git object store defeats the lab
+   container's tmpfs mask). Family #1's search is unaffected; any FUTURE search designed by
+   someone who has read those files is not cleanly out-of-sample on holdout-B. Strip or
+   re-seal before the v2 search, and record the exposure beside any score.

@@ -53,6 +53,22 @@ if [[ "$end_date" > "$KILL_DATE" ]]; then
       "MP_CAPTURE_KILL_DATE deliberately to extend the capture."
 fi
 
+# --- floor guard: never re-capture a sealed holdout-B date -------------------
+# There was a ceiling and no floor (F3 review, 2026-09-05). holdout-B is
+# 2026-07-26..2026-08-31, so with the default LOOKBACK=2 the first run on
+# 2026-09-01 targeted 08-30..08-31 and pulled 08-31 into the R3 reserve --
+# confirmed on alcyone: data/ladders_2026-09/<series>/2026-08-31.csv exists for
+# all four cities. F4 wants Holm-adjusted significance on holdout-B AND on
+# Sept-Oct; a date present in both is not two independent draws, so the floor is
+# a correctness guard on that criterion, not tidiness.
+HOLDOUT_LAST_DATE="${MP_HOLDOUT_LAST_DATE:-2026-08-31}"
+if [[ ! "$start_date" > "$HOLDOUT_LAST_DATE" ]]; then
+  die "start date $start_date is inside sealed holdout-B (..$HOLDOUT_LAST_DATE)." \
+      "The R3 reserve must stay disjoint from the holdout root. Raise" \
+      "MP_CAPTURE_TARGET_DATE, lower MP_CAPTURE_LOOKBACK, or set" \
+      "MP_HOLDOUT_LAST_DATE deliberately if the holdout range itself changed."
+fi
+
 # --- preflight --------------------------------------------------------------
 cd "$REPO_DIR"
 [[ -f "$COMPOSE_FILE" ]] || die "compose file missing: $COMPOSE_FILE"

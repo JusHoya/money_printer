@@ -185,22 +185,42 @@ class TestCorrectedNumbers(unittest.TestCase):
 
 
 class TestHoldoutDeadlineIsStatedPlainly(unittest.TestCase):
-    """Rule 4 -- the one decision with a hard external clock."""
+    """The 2026-10-03 date is a SATISFIED backfill horizon, not a decision deadline.
 
-    def test_handoff_names_the_deadline_and_whose_call_it_is(self):
+    These tests originally pinned the opposite -- "the one decision with a hard external
+    clock". That claim was disproved the same day: ~2026-10-03 governs PULLING the ladders
+    out of Kalshi (~60-day API retention), the pull completed 2026-09-02 (9a8ed2e), and
+    `sha256sum -c` over the root is 151 OK / 0 failed. What lapses is only the option to
+    re-pull or repair. The tests now pin the correction, so the wrong claim cannot return
+    without a failing test.
+    """
+
+    def test_handoff_corrects_the_deadline_rather_than_asserting_it(self):
         text = norm(read(HANDOFF))
-        self.assertIn("2026-10-03", text)
-        self.assertIn("only\nvirgin root".replace("\n", " "), text)
-        self.assertIn("owner call", text)
+        self.assertIn("there is no holdout-b deadline", text.lower())
+        self.assertIn("2026-09-02", text)          # the backfill actually completed
+        # The old claim may still appear -- a correction has to name what it corrects --
+        # but only inside the retraction, never standing on its own.
+        if "hard external clock" in text:
+            self.assertIn("Both halves of that were wrong", text)
 
     def test_prd_registers_it_as_an_owner_decision_with_no_default(self):
         text = norm(read(PRD))
-        self.assertIn("hard external clock", text)
         self.assertIn("No default is encoded", text)
+        self.assertIn("no date forcing it", text)
 
-    def test_roadmap_calls_the_anchor_a_decision(self):
+    def test_roadmap_calls_the_anchor_a_satisfied_backfill_horizon(self):
         text = norm(read(ROADMAP))
-        self.assertIn("anchor is a decision, not just a date", text)
+        self.assertIn("satisfied BACKFILL horizon", text)
+        self.assertNotIn("anchor is a decision, not just a date", text)
+
+    def test_the_seal_leak_is_recorded(self):
+        """The outcome labels are readable; a future search must know before it is designed."""
+        h = norm(read(HANDOFF))
+        for needle in ("888", "market_detail", "RECONCILE.md"):
+            self.assertIn(needle, h)
+        self.assertIn("888", norm(read(PRD)))
+        self.assertIn("outcome labels", norm(read(ROADMAP)))
 
 
 class TestV2RouteIsRecordedWithItsCost(unittest.TestCase):

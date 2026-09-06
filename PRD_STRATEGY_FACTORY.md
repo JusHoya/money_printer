@@ -531,15 +531,32 @@ is set by dates of tape, not by compute.
    maia's tape back until RATIFIED).
 8. Unchanged from HANDOFF: prod KXBTCY fee receipt, Weather Company vs IEM reconcile
    policy, $3000→$350 sizing.
-9. **Whether to spend a holdout-B unseal on a CLOSED family's seed genome — the one
-   decision here with a hard external clock.** `data/ladders_holdout/` (2026-07-26..08-31)
-   expires ~**2026-10-03** and is the only virgin root the factory will ever have; the seal
-   allows ≤3 unseals/quarter and ≤3 finalists/family (`src/factory/holdout.py`,
-   `--unseal RATIFIED-<date>`). Against it: family #1 is CLOSED with pooled OOS +0.0308,
-   boot [−0.0900, +0.1417], `p_RC` 0.886, Holm `p_adj` 0.2895 — the prior is "no edge" —
-   and the paper route that would otherwise produce evidence needs 287 days (95 % band
-   208–367), which outlives the data. **No default is encoded; this needs an explicit call
-   before ~2026-10-03.**
+9. **Whether to spend a holdout-B unseal on a CLOSED family's seed genome.**
+   *Amended 2026-09-05 (same day): this was first recorded as "the one decision with a hard
+   external clock, before ~2026-10-03". There is no such clock, and the seal is weaker than
+   the entry assumed. See the HANDOFF correction for the evidence; the substance:*
+   - **No deadline.** ~2026-10-03 is a **backfill** horizon (`FACTORY_ARCHITECTURE.md:193`),
+     and the backfill completed 2026-09-02 (`9a8ed2e`); `sha256sum -c` is 151 OK / 0 failed.
+     What lapses is only the option to **re-pull or repair** the root, which is insurance,
+     not a decision deadline.
+   - **Not spendable today regardless.** `src/factory/holdout.py` does not exist;
+     `scripts/factory.py:63` lists `holdout`/`score` in `NOT_IMPLEMENTED` (both return 2);
+     `reports/factory/unseal_log.jsonl` does not exist; `--unseal RATIFIED-<date>` needs a
+     ratification `docs/REVIVAL_2026_09.md:6` says has not happened; and `registry.py:35`
+     makes `CLOSED` terminal, so family #1 can hold neither the `PROPOSED` precondition nor
+     a `HALT` verdict. A rerun is a NEW family (`.../v2`), by design.
+   - **The seal leaks its outcome labels** — `manifest.json` `days[].market_detail[].result`
+     (888 markets) and `RECONCILE.md` (72 city-days) are readable under the protocol's own
+     metadata allowance, and the 152 holdout CSVs are git-tracked so the lab container's
+     tmpfs mask is bypassable via `git show`. Family #1's search is unaffected (the frame
+     gate held); the exposure is forward-looking, and must be recorded beside any future
+     score. Strip or re-seal before the next search.
+   - Against spending it at all: family #1 is CLOSED with pooled OOS +0.0308, boot
+     [−0.0900, +0.1417], `p_RC` 0.886, Holm `p_adj` 0.2895 — the prior is "no edge" — and
+     the holdout's minimum detectable effect at 37 dates (~+0.088/contract) is ~2.9x that
+     point estimate. **No default is encoded, and there is no date forcing it.** The
+     recommendation on the record is to hold the unseal for a v2 finalist and to close
+     family #1 under section 3 rule 6 instead.
 10. **Taken 2026-09-05 — do not reopen without new evidence:** options that edit
     `src/core/risk_manager.py` to relieve the cold-start sizing ceiling are REJECTED
     (see Phase F4 above and `reports/factory/sizing_cold_start_2026-09-05.md`).

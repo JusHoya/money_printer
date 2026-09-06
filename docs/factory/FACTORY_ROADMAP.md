@@ -5,12 +5,20 @@ criterion is a check a red team can run from the repo, the run directory, or the
 without the author. Calendar anchors: ladder retention for 07-26..08-31 expires
 ~2026-10-03; M0 capture kill date 2026-09-15; M1 (Sept–Oct verdict) ~2026-11-07.
 
-**The ~2026-10-03 anchor is a decision, not just a date.** `data/ladders_holdout/` is the
-only virgin root the factory will ever have, and whether to spend an unseal on family #1's
-seed genome — a CLOSED family whose paper route needs 287 days (95 % band 208–367) to reach
-the FR-5.2 gate — is an owner call that has to be made before the data expires. It is
-registered as owner decision 9 in `PRD_STRATEGY_FACTORY.md` section 9 with no encoded
-default.
+**Corrected 2026-09-05: ~2026-10-03 is a satisfied BACKFILL horizon, not a decision
+deadline.** It governs pulling the ladders out of Kalshi, and that pull completed
+2026-09-02 (`9a8ed2e`; 151/151 sha OK). What lapses is only the option to re-pull or repair
+the root. Whether to spend an unseal on family #1's seed genome — a CLOSED family whose
+paper route needs 287 days (95 % band 208–367) to reach the FR-5.2 gate — remains owner
+decision 9 in `PRD_STRATEGY_FACTORY.md` section 9, with no encoded default and **no date
+forcing it**. Note also that the unseal is not executable today (`src/factory/holdout.py`
+does not exist; `factory.py holdout|score` are NOT_IMPLEMENTED), and that the root's
+outcome labels are readable in `manifest.json` and `RECONCILE.md` — see the HANDOFF
+correction before designing any search against it.
+
+The one calendar anchor that IS live is the **M0 capture kill date, 2026-09-15**
+(`deploy/spark/ladder_capture.sh:31`). Extending it after seeing a result would break
+pre-registration; extending it now, on stated grounds, does not.
 
 Dependency graph: F0 and F1 run in parallel from day 1. F1 → F2 (evolution). F0 + F2 → F3
 (sandbox strategy). F3 + ratification + data → F4. F5 is data-gated and independent.
