@@ -250,19 +250,25 @@ class Registry:
         status: str,
         genome_id: Optional[str] = None,
         evidence: Optional[Dict[str, Any]] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Append a status transition. ``extra`` adds TOP-LEVEL keys (e.g. ``reasserted: true``, F4) --
+        it may not shadow the line's own keys."""
         if status not in TRANSITIONS:
             raise RegistryError(f"unknown transition {status!r}; want one of {TRANSITIONS}")
         self.assert_registered(family)
         current = self.status(family)
         if current in TERMINAL:
             raise RegistryError(f"family {family!r} is {current}; no further transitions")
-        return self._append(
-            {
-                "event": "transition",
-                "family": family,
-                "status": status,
-                "genome_id": genome_id,
-                "evidence": dict(evidence or {}),
-            }
-        )
+        line = {
+            "event": "transition",
+            "family": family,
+            "status": status,
+            "genome_id": genome_id,
+            "evidence": dict(evidence or {}),
+        }
+        for k, v in (extra or {}).items():
+            if k in line or k in ("ts", "git_rev"):
+                raise RegistryError(f"extra key {k!r} would shadow a registry line field")
+            line[k] = v
+        return self._append(line)
