@@ -1,0 +1,27 @@
+{
+  "description": "Invented fixture; not a Kalshi market, forecast, or profit observation.",
+  "as_of": "2026-09-06T18:00:00+00:00",
+  "brier": {
+    "probabilities": ["0.65", "0.35"],
+    "bids": ["0.49", "0.49"],
+    "asks": ["0.51", "0.51"],
+    "scale_contracts": "10",
+    "filled": ["1", "-1"],
+    "pending": ["0.5", "-0.5"]
+  },
+  "certificate": {
+    "event_id": "SYNTHETIC-EVENT",
+    "market_ids": ["SYNTHETIC-A", "SYNTHETIC-B", "SYNTHETIC-C"],
+    "rules_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mutually_exclusive": true,
+    "exhaustive": true,
+    "ordinary_binary": true,
+    "rules_reviewed": true
+  },
+  "books": [
+    {"market_id": "SYNTHETIC-A", "observed_at": "2026-09-06T18:00:00+00:00", "yes_bids": [["0.28", "5"]], "no_bids": [["0.70", "5"]], "taker_multiplier": "1"},
+    {"market_id": "SYNTHETIC-B", "observed_at": "2026-09-06T18:00:00+00:00", "yes_bids": [["0.28", "5"]], "no_bids": [["0.70", "5"]], "taker_multiplier": "1"},
+    {"market_id": "SYNTHETIC-C", "observed_at": "2026-09-06T18:00:00+00:00", "yes_bids": [["0.28", "5"]], "no_bids": [["0.70", "5"]], "taker_multiplier": "1"}
+  ],
+  "screen": {"cash_available": "300", "max_contracts": 5}
+}

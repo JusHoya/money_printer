@@ -2,6 +2,8 @@
 
 > "Because why earn money when you can print it? (Legally, via algorithmic prediction markets, obviously. Put the counterfeiting press away, monkey.)"
 
+> **Active development on `astra_seeded`:** start with [PRD_ASTRA_SEEDED.md](PRD_ASTRA_SEEDED.md) and [implementation status](docs/ASTRA_SEEDED_STATUS.md). The older architecture and strategy descriptions below are historical; the new track currently provides tested offline methods, with no strategy cleared for live capital.
+
 ## Overview
 **Money Printer** is a high-precision algorithmic trading tool designed for the **Kalshi** prediction market.
 
