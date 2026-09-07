@@ -32,6 +32,8 @@ Protected source diff against `230ffe4` is empty. No full-suite certification is
 
 **Fable handoff — September 7, 2026**
 
+**Live-check update:** see [Pleiades host-health findings](../reports/review/pleiades_health_2026-09-07.md). Both hosts, inference and fresh market feeds work. Maia's state is actually on microSD, with no attached SSD, and Docker memory controls are unsupported. Prefer Alcyone's existing NVMe for the initial write-heavy Astra service or resolve Maia's storage/controller setup first. The documented-topology assumptions below are superseded by that report where they differ.
+
 The owner requested this branch be committed and pushed for continuation. Read this status and the active PRD first; the earlier review is reference material. Source files are `src/astra_seeded/methods.py`, `scripts/astra_seeded.py`, and `tests/test_astra_seeded.py`. Preserve old data and protected code. Do not treat the synthetic CLI as an already working paper trader.
 
 The documented Pleiades topology (`deploy/README.md` and the sibling `pleiades/README.md`) has Alcyone (DGX Spark) for inference/research, Maia (Pi 4) for the Docker sandbox/dashboard, and Electra (Pi 5) reserved. Reuse Maia with SSD-backed state for an initially modest market universe; Alcyone can supply forecasts through the cluster's permitted interface. A local forecaster is a separately evaluated adaptation, not the paper's Gemini result. Do not expose an Alcyone model server on the LAN contrary to the existing trust boundary; use the approved bridge or have Alcyone publish forecast records.
