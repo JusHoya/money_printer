@@ -8,8 +8,9 @@
 #     data/factory/frames/*_<frame_search_sha256[:12]> (for 0c4b20502f2daf65 that is
 #     the bfcf94654a3a frame, which lives on the dev box, NOT the 0fdf39ea506b frame
 #     alcyone has); the wrapper exits 5 FRAME_MISSING otherwise, no fallback;
-#   * the host must resolve maia's name (getent/avahi); the wrapper passes the IP into
-#     the container with --add-host because mDNS does not resolve inside it.
+#   * the host must resolve maia's name (getent/avahi); the wrapper addresses the sandbox
+#     by IP inside the container (mDNS does not resolve there, and `compose run` cannot
+#     inject a hosts entry -- --add-host is a `docker run` flag; Compose v5 rejects it).
 # Idempotent: re-copies the units, reloads systemd, (re)enables the timer.
 # Mirrors install_ladder_capture.sh; the Hermes watch is a separate, optional step (below).
 set -euo pipefail
@@ -39,7 +40,7 @@ done
 SANDBOX_HOST=$(printf '%s' "${MONEY_PRINTER_URL:-http://maia.local:8050}" | sed -E 's#^[a-z]+://##; s#[:/].*$##')
 if ! getent hosts "$SANDBOX_HOST" >/dev/null 2>&1 && ! avahi-resolve -4 -n "$SANDBOX_HOST" >/dev/null 2>&1; then
   echo "WARN: the HOST cannot resolve $SANDBOX_HOST (getent/avahi); the wrapper resolves it here and"
-  echo "      injects the IP into the container (--add-host), so until this resolves the job exits 4"
+  echo "      addresses the sandbox by IP inside the container, so until this resolves the job exits 4"
   echo "      HOST_UNRESOLVED. Set MP_SANDBOX_IP=<ip> in the unit's Environment= as a workaround."
 fi
 if ! curl -fsS --max-time 10 "${MONEY_PRINTER_URL:-http://maia.local:8050}/healthz" >/dev/null 2>&1; then

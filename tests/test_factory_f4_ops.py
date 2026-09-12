@@ -15,7 +15,7 @@ Pins, one section each (red-team fixes of 2026-09-06 marked BROKEN-A/B, 3, 4, 5,
    settled in-process and that reconcile_weather.py is not evidenced over HTTP (5).
 4. GATE VERDICT FILE -- default ``--out`` and the four top-level aliases.
 5. WEB ROUTE -- ``GET /api/closed_trades`` is side-effect free, token-free, capped.
-6. WEEKLY RECONCILE CRON -- host-side name resolution + ``--add-host``, loud exit codes,
+6. WEEKLY RECONCILE CRON -- host-side name resolution, sandbox addressed by IP URL (compose run has no --add-host), loud exit codes,
    ``FRAME_MISSING`` with no fallback, same-day Hermes failure line (3).
 7. RUNBOOK + HANDOFF DRAFT -- the real ``holdout`` / ``score`` invocations (6).
 """
@@ -924,12 +924,18 @@ class TestWeeklyReconcileCron:
 
     def test_wrapper_resolves_the_host_on_the_host_and_refuses_loudly(self):
         """Item 3: maia.local does not resolve inside the lab container; the wrapper must resolve on the
-        host, pass --add-host, exit 4 HOST_UNRESOLVED / 5 FRAME_MISSING, and never fall back to another frame."""
+        host, hand the container the IP in the URL, exit 4 HOST_UNRESOLVED / 5 FRAME_MISSING, and never fall
+        back to another frame. 2026-09-12: `docker compose run` has no --add-host flag (Compose v5.0.2 on
+        alcyone: `unknown flag: --add-host`) -- the first weekly fire died on it and was labelled a
+        "discrepancy"; the flag must never come back, and an exit 1 with no report is an invocation failure."""
         w = self.WRAP.read_text(encoding="utf-8")
         assert w.startswith("#!/usr/bin/env bash") and "\r\n" not in w
         assert "scripts/factory_paper_reconcile.py" in w and "--url" in w and "maia.local:8050" in w
         assert "--from" in w and "--to" in w and "--frames" in w and "--promoted" in w
-        assert "getent hosts" in w and "avahi-resolve" in w and '--add-host "$HOSTNAME_PART:$SANDBOX_IP"' in w
+        assert "getent hosts" in w and "avahi-resolve" in w
+        assert "--add-host" not in w.replace("no `--add-host` flag", "").replace("unknown flag: --add-host", "")
+        assert 'RUN_URL="${URL//$HOSTNAME_PART/$SANDBOX_IP}"' in w and '--url "$RUN_URL"' in w
+        assert 'REASON="invocation_failed"; rc=$EXIT_DOCKER_FAILED' in w  # exit 1 without a report is not a finding
         assert "EXIT_HOST_UNRESOLVED=4" in w and "HOST_UNRESOLVED" in w
         assert "EXIT_FRAME_MISSING=5" in w and "FRAME_MISSING $SHA12" in w
         assert "frame_search_sha256" in w
@@ -974,7 +980,7 @@ class TestWeeklyReconcileCron:
     def test_install_snippet_and_hermes_watch(self):
         inst = self.INSTALL.read_text(encoding="utf-8")
         assert "mp-factory-reconcile.timer" in inst and "sudo" in inst and "enable --now" in inst
-        assert "NEEDS ROOT" in inst and "STARTS THE TIMER" in inst and "FRAME_MISSING" in inst and "--add-host" in inst
+        assert "NEEDS ROOT" in inst and "STARTS THE TIMER" in inst and "FRAME_MISSING" in inst and "by IP" in inst
         h = self.HERMES.read_text(encoding="utf-8")
         assert h.startswith("#!/usr/bin/env bash") and "paper_reconcile_" in h and "exit 0" in h
         assert "last_run.json" in h and "HOST_UNRESOLVED" in h and "FRAME_MISSING" in h and "SAME DAY" in h
@@ -1029,7 +1035,7 @@ class TestRunbookAndHandoffDraft:
             "check_settlement_latency.py",
             "mp-factory-reconcile.timer",
             "FRAME_MISSING",
-            "--add-host",
+            "by IP",
             "HOST_UNRESOLVED",
             "needs root",
             "family pooled OOS",

@@ -12,8 +12,12 @@
 #   3. Resolves the sandbox host ON THE HOST (getent / avahi-resolve): `maia.local` is
 #      an mDNS name and does NOT resolve inside the lab container (docker's 127.0.0.11
 #      stub does not forward mDNS -- `getent hosts maia.local` is rc=2 in-container
-#      while the host answers). The IP is handed to `docker compose run` as
-#      `--add-host maia.local:<ip>`. No resolution -> exit 4 HOST_UNRESOLVED.
+#      while the host answers). The container is handed the IP in the URL itself
+#      (`--url http://<ip>:8050`): `docker compose run` has no `--add-host` flag in
+#      any Compose version (it is a `docker run` flag), and the first fire on
+#      2026-09-07 died on exactly that -- `unknown flag: --add-host`, Compose v5.0.2 --
+#      while the wrapper reported it as a "discrepancy". No resolution -> exit 4
+#      HOST_UNRESOLVED.
 #   4. Resolves the FROZEN SEARCH FRAME the spec was scored on:
 #      data/factory/frames/*_<frame_search_sha256[:12]>. That directory is gitignored
 #      and lives only in the lab -- which is why this job is on alcyone, not maia.
@@ -143,21 +147,28 @@ if [ "${MP_RECONCILE_DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
-# --- 5. run inside the lab image (network ON; the name is injected via --add-host) --
+# --- 5. run inside the lab image (network ON; the sandbox is addressed by IP, because
+#        the name does not resolve in-container and `compose run` cannot inject one) --
 export LAB_UID="$(id -u)" LAB_GID="$(id -g)"
-docker compose -f "$COMPOSE" run --rm -T --add-host "$HOSTNAME_PART:$SANDBOX_IP" lab \
+RUN_URL="${URL//$HOSTNAME_PART/$SANDBOX_IP}"
+docker compose -f "$COMPOSE" run --rm -T lab \
   python scripts/factory_paper_reconcile.py \
-    --promoted "$SPEC" --url "$URL" --from "$FROM" --to "$TO" --frames "$FRAMES"
+    --promoted "$SPEC" --url "$RUN_URL" --from "$FROM" --to "$TO" --frames "$FRAMES"
 rc=$?
+# The reconcile script's own exit 1 means "discrepancy" and ALWAYS writes the report;
+# `docker compose` also exits 1 when it never ran the script at all (bad flag, missing
+# image, compose file error). Tell them apart by whether the report exists, so an
+# invocation failure is never posted as a trading finding.
+REPORT="reports/factory/$STEM.json"
 case "$rc" in
   0) REASON="ok" ;;
-  1) REASON="discrepancy" ;;
+  1) if [ -f "$REPORT" ]; then REASON="discrepancy"; else REASON="invocation_failed"; rc=$EXIT_DOCKER_FAILED; fi ;;
   2) REASON="usage" ;;
   3) REASON="refused" ;;
   125|126|127) REASON="docker_failed"; rc=$EXIT_DOCKER_FAILED ;;
   *) REASON="reconcile_exit_$rc" ;;
 esac
-echo "factory_reconcile: reconcile exit $rc ($REASON) -> reports/factory/$STEM.{json,md}"
+echo "factory_reconcile: reconcile exit $rc ($REASON) -> reports/factory/$STEM.{json,md}  (sandbox $URL as $RUN_URL)"
 
 # --- 6. commit exactly what was produced --------------------------------------
 if [ "${MP_RECONCILE_NO_COMMIT:-0}" != "1" ] && [ -f "reports/factory/$STEM.json" ]; then

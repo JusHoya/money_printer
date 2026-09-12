@@ -112,10 +112,95 @@ def _api_get_json(path):
 # ── Tool implementations ─────────────────────────────────────────
 
 
+FEED_STALE_AFTER_S = 15 * 60  # the mp-status cron's own threshold
+
+
+def _feed_freshness(snapshot):
+    """Newest MARKET_DATA timestamp in the snapshot's data_log and its age in seconds.
+
+    Timestamps are the dashboard's naive-ISO UTC stamps. Returns (None, None)
+    when the log is empty or unparseable so the caller reports "unknown", never
+    a number it did not measure.
+    """
+    from datetime import datetime, timezone
+
+    newest = None
+    for row in snapshot.get("data_log") or []:
+        ts = (row or {}).get("Timestamp") or (row or {}).get("timestamp")
+        if not ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if newest is None or dt > newest:
+            newest = dt
+    if newest is None:
+        return None, None
+    age = (datetime.now(timezone.utc) - newest).total_seconds()
+    return newest.isoformat(), round(age, 1)
+
+
 def get_status(params):
-    """Full dashboard snapshot: portfolio, positions, market data, alerts,
-    strategy stats, cycle history, training diagnostics."""
-    return _api_get("/api/status")
+    """Compact status summary (~1 KB), NOT the raw snapshot.
+
+    2026-09-12: the raw ``/api/status`` is ~166 KB. Returned whole, it blew past the
+    agent's context on every mp-status run, Hermes spilled it to a host path the
+    sandboxed agent could not read, and the cron thrashed for 124K-714K tokens per
+    5-line report until the 9B model drifted into Chinese. This returns only what a
+    status ping needs, with feed freshness computed here rather than left to the model.
+    Details live behind the other tools (mp_journal, mp_data_log, mp_bots, mp_win_rates,
+    mp_log_tail, mp_factory_status); the raw snapshot is for humans at /api/status.
+    """
+    snap = _api_get_json("/api/status")
+    if not isinstance(snap, dict):
+        return json.dumps({"ok": False, "api_reachable": False, "error": "no snapshot from /api/status"})
+    p = snap.get("portfolio") or {}
+    g = snap.get("genome") or {}
+    gs = g.get("stats") or {}
+    cycles = snap.get("cycle_history") or []
+    last_cycle = cycles[-1] if cycles else {}
+    alerts = snap.get("alerts") or []
+    newest_ts, age_s = _feed_freshness(snap)
+    positions = snap.get("positions") or []
+    body = {
+        "ok": True,
+        "api_reachable": True,
+        "mode": (snap.get("modes") or {}).get("label") or snap.get("mode"),
+        "uptime": snap.get("uptime"),
+        "portfolio": {
+            k: p.get(k)
+            for k in (
+                "equity", "cash", "exposure", "exposure_pct", "unrealized_pnl",
+                "realized_pnl", "cumulative_net_pnl", "cumulative_realized_pnl",
+                "cumulative_fees", "closed_trades",
+            )
+        },
+        "open_positions": len(positions) if isinstance(positions, (list, dict)) else None,
+        "feed": {
+            "newest_market_data_utc": newest_ts,
+            "age_s": age_s,
+            "stale": (age_s > FEED_STALE_AFTER_S) if age_s is not None else None,
+            "stale_after_s": FEED_STALE_AFTER_S,
+        },
+        "genome": dict(
+            {
+                k: g.get(k)
+                for k in (
+                    "present", "genome_id", "execution_mode", "registry_status", "refused",
+                    "refused_reason", "calibration_kind_ok", "archive_pins_ok",
+                )
+            },
+            **{k: gs.get(k) for k in ("hours_evaluated", "missed_hours", "signals", "rejects")},
+        ),
+        "last_cycle": {
+            k: last_cycle.get(k) for k in ("cycle", "timestamp", "trades", "pnl", "bot_status")
+        },
+        "alerts": {"count": len(alerts), "last": [str(a)[:160] for a in alerts[-3:]]},
+    }
+    return json.dumps(body)
 
 
 def get_bots(params):
@@ -785,7 +870,7 @@ TOOLS = {
     "mp_status": {
         "schema": {
             "name": "mp_status",
-            "description": "Get full Money Printer trading system snapshot: portfolio equity, positions, market data, strategy stats, cycle history, training diagnostics.",
+            "description": "Compact Money Printer sandbox status (~1 KB): reachable, uptime, portfolio equity/cash/exposure/PnL, open-position count, FEED FRESHNESS (newest market_data timestamp, its age in seconds, and stale=true/false against a 15-minute threshold -- already computed, do not recompute), genome shadow state, last cycle, alert count. This is the whole status; do not ask for more of it. For details use mp_journal, mp_data_log, mp_bots, mp_win_rates, mp_log_tail, mp_factory_status.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         "handler": get_status,

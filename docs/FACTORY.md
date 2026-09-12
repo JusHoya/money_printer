@@ -217,8 +217,12 @@ now carries. Verify: `python scripts/check_maia_emit_cadence.py`, and
   lab container (docker's `127.0.0.11` stub does not forward mDNS; `getent
   hosts maia.local` is rc=2 in-container while the host answers). The wrapper
   resolves the name on the host (`getent` / `avahi-resolve`, or
-  `MP_SANDBOX_IP`), passes it in with `--add-host maia.local:<ip>`, and exits
-  4 `HOST_UNRESOLVED` when the host cannot resolve it. Every exit writes
+  `MP_SANDBOX_IP`), addresses the sandbox **by IP** inside the container
+  (`--url http://<ip>:8050` -- `docker compose run` has no `--add-host` flag in any
+  Compose version; the first fire on 2026-09-07 died on `unknown flag: --add-host`
+  under Compose v5.0.2 and was mislabelled a "discrepancy"), and exits
+  4 `HOST_UNRESOLVED` when the host cannot resolve it. An exit 1 with no report
+  file is reported as `invocation_failed` (exit 6), never as a trading finding. Every exit writes
   `~/.local/state/money_printer/factory_reconcile/last_run.json`, which the
   Hermes watch reads so a failed Monday run is reported that day.
 
